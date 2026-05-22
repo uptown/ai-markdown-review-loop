@@ -4,7 +4,6 @@ import { ReviewThread } from './types';
 const inlineAnchorPattern = /^<!-- ai-review-anchors?:.*?-->\r?\n?/gm;
 const inlineAnchorCapturePattern = /^<!-- ai-review-anchor:(.*?)-->/gm;
 const inlineAnchorsCapturePattern = /^<!-- ai-review-anchors:(.*?)-->/gm;
-const inlineAnchorLinePattern = /^<!-- ai-review-anchors?:.*?-->\s*$/;
 
 export interface InlineAnchorMarker {
   id: string;
@@ -51,31 +50,16 @@ export async function insertInlineAnchorMarker(
   thread: ReviewThread,
   sidecarUri: vscode.Uri
 ): Promise<boolean> {
-  const existingText = document.getText();
-
-  if (existingText.includes(`"id":"${thread.id}"`) || existingText.includes(`"id": "${thread.id}"`)) {
-    return true;
-  }
-
   const markerPayload = createInlineAnchorPayload(thread, sidecarUri);
-  const insertLine = resolveMarkerInsertLine(document, thread);
-  const markerBlock = findAdjacentMarkerBlock(document, insertLine);
-  const payloads = markerBlock
-    ? [...readInlineAnchorMarkers(markerBlock.text), markerPayload]
-    : [markerPayload];
+  const markerBlocks = findInlineAnchorBlocks(document);
+  const payloads = [
+    ...markerBlocks.flatMap(block => readInlineAnchorMarkers(block.text)),
+    markerPayload
+  ];
   const marker = createInlineAnchorMarker(dedupeMarkers(payloads));
   const edit = new vscode.WorkspaceEdit();
 
-  if (markerBlock) {
-    edit.replace(document.uri, markerBlock.range, `${marker}\n`);
-  } else if (insertLine >= document.lineCount) {
-    const lastLine = document.lineAt(document.lineCount - 1);
-    const prefix = lastLine.text.length > 0 ? '\n' : '';
-    edit.insert(document.uri, lastLine.range.end, `${prefix}${marker}\n`);
-  } else {
-    edit.insert(document.uri, new vscode.Position(insertLine, 0), `${marker}\n`);
-  }
-
+  replaceInlineAnchorBlocks(edit, document, markerBlocks, marker);
   return vscode.workspace.applyEdit(edit);
 }
 
@@ -96,34 +80,23 @@ export async function removeInlineAnchorMarkers(
     return true;
   }
 
-  const text = document.getText();
-  const edit = new vscode.WorkspaceEdit();
-  let changed = false;
-  let match: RegExpExecArray | null;
+  const markerBlocks = findInlineAnchorBlocks(document);
+  const markers = markerBlocks.flatMap(block => readInlineAnchorMarkers(block.text));
 
-  inlineAnchorPattern.lastIndex = 0;
-
-  while ((match = inlineAnchorPattern.exec(text)) !== null) {
-    const markers = readInlineAnchorMarkers(match[0]);
-
-    if (!markers.some(marker => ids.has(marker.id))) {
-      continue;
-    }
-
-    const remainingMarkers = markers.filter(marker => !ids.has(marker.id));
-    const replacement = remainingMarkers.length === 0
-      ? ''
-      : `${createInlineAnchorMarker(remainingMarkers)}${getTrailingNewline(match[0])}`;
-    const range = new vscode.Range(
-      document.positionAt(match.index),
-      document.positionAt(match.index + match[0].length)
-    );
-
-    edit.replace(document.uri, range, replacement);
-    changed = true;
+  if (!markers.some(marker => ids.has(marker.id))) {
+    return true;
   }
 
-  return changed ? vscode.workspace.applyEdit(edit) : true;
+  const remainingMarkers = dedupeMarkers(markers.filter(marker => !ids.has(marker.id)));
+  const edit = new vscode.WorkspaceEdit();
+
+  replaceInlineAnchorBlocks(
+    edit,
+    document,
+    markerBlocks,
+    remainingMarkers.length === 0 ? undefined : createInlineAnchorMarker(remainingMarkers)
+  );
+  return vscode.workspace.applyEdit(edit);
 }
 
 export async function appendClosedReviewLog(
@@ -166,10 +139,6 @@ function createInlineAnchorPayload(
 }
 
 function createInlineAnchorMarker(payloads: InlineAnchorMarker[]): string {
-  if (payloads.length === 1) {
-    return `<!-- ai-review-anchor:${JSON.stringify(compactMarker(payloads[0]))} -->`;
-  }
-
   const sidecar = payloads[0]?.sidecar;
 
   if (sidecar && payloads.every(payload => payload.sidecar === sidecar)) {
@@ -182,90 +151,60 @@ function createInlineAnchorMarker(payloads: InlineAnchorMarker[]): string {
   return `<!-- ai-review-anchors:${JSON.stringify(payloads.map(compactMarker))} -->`;
 }
 
-function resolveMarkerInsertLine(document: vscode.TextDocument, thread: ReviewThread): number {
-  const lineEnd = thread.anchor.lineEnd;
+function findInlineAnchorBlocks(
+  document: vscode.TextDocument,
+): { range: vscode.Range; text: string }[] {
+  const text = document.getText();
+  const blocks: { range: vscode.Range; text: string }[] = [];
+  let match: RegExpExecArray | null;
 
-  if (!lineEnd) {
-    return Math.min(1, document.lineCount);
+  inlineAnchorPattern.lastIndex = 0;
+
+  while ((match = inlineAnchorPattern.exec(text)) !== null) {
+    blocks.push({
+      range: new vscode.Range(
+        document.positionAt(match.index),
+        document.positionAt(match.index + match[0].length)
+      ),
+      text: match[0]
+    });
   }
 
-  const zeroBasedEndLine = Math.max(0, Math.min(lineEnd - 1, document.lineCount - 1));
-
-  if (isLineInsideFence(document, zeroBasedEndLine)) {
-    const closingFenceLine = findClosingFenceLine(document, zeroBasedEndLine);
-    return closingFenceLine === undefined ? zeroBasedEndLine + 1 : closingFenceLine + 1;
-  }
-
-  return zeroBasedEndLine + 1;
+  return blocks;
 }
 
-function isLineInsideFence(document: vscode.TextDocument, targetLine: number): boolean {
-  let insideFence = false;
-  let fenceMarker = '';
+function appendDocumentAnchorMarker(
+  edit: vscode.WorkspaceEdit,
+  document: vscode.TextDocument,
+  marker: string
+): void {
+  const lastLine = document.lineAt(document.lineCount - 1);
+  const prefix = lastLine.text.length > 0 ? '\n' : '';
 
-  for (let line = 0; line <= targetLine; line += 1) {
-    const text = document.lineAt(line).text.trim();
-    const match = text.match(/^(```+|~~~+)/);
+  edit.insert(document.uri, lastLine.range.end, `${prefix}${marker}\n`);
+}
 
-    if (!match) {
+function replaceInlineAnchorBlocks(
+  edit: vscode.WorkspaceEdit,
+  document: vscode.TextDocument,
+  markerBlocks: { range: vscode.Range; text: string }[],
+  marker: string | undefined
+): void {
+  const appendPosition = document.lineAt(document.lineCount - 1).range.end;
+  const markerAtAppendPosition = markerBlocks.find(block => block.range.contains(appendPosition));
+
+  for (const block of markerBlocks) {
+    if (marker && block === markerAtAppendPosition) {
+      edit.replace(document.uri, block.range, `${marker}\n`);
       continue;
     }
 
-    if (!insideFence) {
-      insideFence = true;
-      fenceMarker = match[1][0];
-    } else if (match[1][0] === fenceMarker) {
-      insideFence = false;
-      fenceMarker = '';
-    }
+    edit.replace(document.uri, block.range, '');
   }
 
-  return insideFence;
-}
-
-function findClosingFenceLine(document: vscode.TextDocument, startLine: number): number | undefined {
-  for (let line = startLine + 1; line < document.lineCount; line += 1) {
-    if (/^(```+|~~~+)/.test(document.lineAt(line).text.trim())) {
-      return line;
-    }
+  if (marker && !markerAtAppendPosition) {
+    appendDocumentAnchorMarker(edit, document, marker);
   }
-
-  return undefined;
-}
-
-function findAdjacentMarkerBlock(
-  document: vscode.TextDocument,
-  insertLine: number
-): { range: vscode.Range; text: string } | undefined {
-  if (document.lineCount === 0 || insertLine >= document.lineCount) {
-    return undefined;
-  }
-
-  let startLine = insertLine;
-  let endLine = insertLine;
-
-  if (!isInlineAnchorLine(document.lineAt(startLine).text)) {
-    return undefined;
-  }
-
-  while (endLine + 1 < document.lineCount && isInlineAnchorLine(document.lineAt(endLine + 1).text)) {
-    endLine += 1;
-  }
-
-  const start = new vscode.Position(startLine, 0);
-  const end = endLine + 1 < document.lineCount
-    ? new vscode.Position(endLine + 1, 0)
-    : document.lineAt(endLine).rangeIncludingLineBreak.end;
-  const range = new vscode.Range(start, end);
-
-  return {
-    range,
-    text: document.getText(range)
-  };
-}
-
-function isInlineAnchorLine(text: string): boolean {
-  return inlineAnchorLinePattern.test(text);
 }
 
 function parseInlineAnchorPayload(payload: string): InlineAnchorMarker[] {
@@ -308,18 +247,6 @@ function dedupeMarkers(markers: InlineAnchorMarker[]): InlineAnchorMarker[] {
   }
 
   return deduped;
-}
-
-function getTrailingNewline(value: string): string {
-  if (value.endsWith('\r\n')) {
-    return '\r\n';
-  }
-
-  if (value.endsWith('\n')) {
-    return '\n';
-  }
-
-  return '';
 }
 
 function isInlineAnchorMarker(value: unknown): value is InlineAnchorMarker {

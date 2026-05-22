@@ -6,7 +6,6 @@ import {
   appendClosedReviewLog,
   findStaleInlineAnchorMarkers,
   insertInlineAnchorMarker,
-  readInlineAnchorMarkers,
   removeInlineAnchorMarker,
   removeInlineAnchorMarkers,
   stripInlineAnchorMarkers
@@ -295,7 +294,7 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider {
     const documentText = document.getText();
     const renderedMarkdown = this.markdown.render(stripInlineAnchorMarkers(documentText));
     const storageWarning = this.renderStorageWarning(documentText, reviewDocument);
-    const markerLineHints = this.getMarkerLineHints(documentText);
+    const markerLineHints = this.getMarkerLineHints(reviewDocument);
     const mermaidScriptUri = webview.asWebviewUri(
       vscode.Uri.joinPath(this.context.extensionUri, 'out', 'vendor', 'mermaid.min.js')
     );
@@ -1586,24 +1585,19 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider {
   </section>`;
   }
 
-  private getMarkerLineHints(documentText: string): Record<string, number> {
+  private getMarkerLineHints(reviewDocument: ReviewDocument): Record<string, number> {
     const hints: Record<string, number> = {};
-    let renderedLine = 1;
 
-    for (const line of documentText.split(/\r?\n/)) {
-      const markers = readInlineAnchorMarkers(line);
-
-      if (markers.length > 0) {
-        const targetLine = Math.max(1, renderedLine - 1);
-
-        for (const marker of markers) {
-          hints[marker.id] = targetLine;
-        }
-
+    for (const thread of reviewDocument.threads) {
+      if (thread.status !== 'open') {
         continue;
       }
 
-      renderedLine += 1;
+      const lineHint = thread.anchor.lineEnd ?? thread.anchor.lineStart;
+
+      if (lineHint !== undefined) {
+        hints[thread.id] = Math.max(1, lineHint);
+      }
     }
 
     return hints;

@@ -92,23 +92,19 @@ MVP review data is stored under:
     <document-hash>.json
 ```
 
-Compact anchors are also inserted into the Markdown source:
-
-```md
-<!-- ai-review-anchor:{"id":"rv_...","sidecar":".ai-markdown-review/documents/...json"} -->
-```
-
-The custom preview hides these anchors, but AI agents that read the Markdown can use them to connect document locations with sidecar review data.
-
-If the commented text changes and the original text snippet no longer matches, the preview falls back to the inline anchor position so the review thread still appears near the edited block.
-
-If the sidecar JSON is deleted or no longer contains matching thread data, the review preview and feedback export warn that inline anchors are stale. The original comment text cannot be rebuilt from the inline anchors alone; restore the sidecar JSON from backup/source control or use `Clean stale anchors` in the preview warning if the comments are no longer needed.
-
-When several review threads point to the same insertion point, the extension stores them in one grouped `ai-review-anchors` metadata comment instead of adding one metadata line per thread:
+One compact document-level anchor index is also inserted into the Markdown source:
 
 ```md
 <!-- ai-review-anchors:{"sidecar":".ai-markdown-review/documents/...json","ids":["rv_...","rv_..."]} -->
 ```
+
+The custom preview hides these anchors, but AI agents that read the Markdown can use them to connect document locations with sidecar review data.
+
+If the commented text changes and the original text snippet no longer matches, the preview falls back to the sidecar line hint so the review thread still appears near the edited block.
+
+If the sidecar JSON is deleted or no longer contains matching thread data, the review preview and feedback export warn that inline anchors are stale. The original comment text cannot be rebuilt from the inline anchors alone; restore the sidecar JSON from backup/source control or use `Clean stale anchors` in the preview warning if the comments are no longer needed.
+
+When several review threads exist in one document, the extension rewrites them into that single grouped `ai-review-anchors` metadata comment instead of adding one metadata line per thread.
 
 Resolved or rejected review threads move from `documents/` to `resolved/`. Their inline Markdown anchor metadata is removed so closed feedback does not leave stale `status:"open"` comments in the source, and a compact `ai-review-log` entry is appended at the end of the Markdown file as an audit pointer.
 
