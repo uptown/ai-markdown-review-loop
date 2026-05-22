@@ -3,6 +3,7 @@ import MarkdownIt from 'markdown-it';
 import { randomUUID } from 'crypto';
 import { createAnchor } from './anchors';
 import {
+  appendClosedReviewLog,
   findMissingInlineAnchorMarkers,
   insertInlineAnchorMarker,
   removeInlineAnchorMarker,
@@ -139,10 +140,22 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider {
           );
 
           if (status !== 'open') {
+            const resolvedSidecarUri = await this.store.getResolvedReviewFileUri(document.uri);
             const markerRemoved = await removeInlineAnchorMarker(document, String(message.threadId));
 
             if (!markerRemoved) {
               vscode.window.showWarningMessage('Review status was updated, but the Markdown anchor marker could not be removed.');
+            }
+
+            const logInserted = await appendClosedReviewLog(
+              document,
+              String(message.threadId),
+              status,
+              resolvedSidecarUri
+            );
+
+            if (!logInserted) {
+              vscode.window.showWarningMessage('Review status was updated, but the Markdown review log could not be inserted.');
             }
           }
 

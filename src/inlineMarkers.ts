@@ -109,6 +109,34 @@ export async function removeInlineAnchorMarker(
   return changed ? vscode.workspace.applyEdit(edit) : true;
 }
 
+export async function appendClosedReviewLog(
+  document: vscode.TextDocument,
+  threadId: string,
+  status: string,
+  resolvedSidecarUri: vscode.Uri
+): Promise<boolean> {
+  const existingText = document.getText();
+
+  if (existingText.includes(`ai-review-log:{"id":"${threadId}"`)
+    || existingText.includes(`ai-review-log:{"id": "${threadId}"`)) {
+    return true;
+  }
+
+  const sidecar = vscode.workspace.asRelativePath(resolvedSidecarUri, false);
+  const marker = `<!-- ai-review-log:${JSON.stringify({
+    id: threadId,
+    status,
+    sidecar,
+    updatedAt: new Date().toISOString()
+  })} -->`;
+  const edit = new vscode.WorkspaceEdit();
+  const lastLine = document.lineAt(document.lineCount - 1);
+  const prefix = lastLine.text.length > 0 ? '\n' : '';
+
+  edit.insert(document.uri, lastLine.range.end, `${prefix}${marker}\n`);
+  return vscode.workspace.applyEdit(edit);
+}
+
 function createInlineAnchorPayload(
   document: vscode.TextDocument,
   thread: ReviewThread,
