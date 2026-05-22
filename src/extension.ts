@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import { renderFeedbackExport } from './exportFeedback';
 import { createLocalReviewThreads } from './localReview';
+import { MarkdownCodeLensProvider } from './markdownCodeLensProvider';
 import { ReviewEditorProvider, reviewEditorViewType } from './reviewEditorProvider';
 import { ReviewStore } from './reviewStore';
 
@@ -9,13 +10,17 @@ export function activate(context: vscode.ExtensionContext): void {
   const provider = new ReviewEditorProvider(context, store);
 
   context.subscriptions.push(
+    vscode.languages.registerCodeLensProvider(
+      { language: 'markdown', scheme: 'file' },
+      new MarkdownCodeLensProvider()
+    ),
     vscode.window.registerCustomEditorProvider(reviewEditorViewType, provider, {
       webviewOptions: {
         retainContextWhenHidden: true
       }
     }),
-    vscode.commands.registerCommand('aiMarkdownReviewLoop.openReviewPreview', async () => {
-      const document = await resolveMarkdownDocument(provider);
+    vscode.commands.registerCommand('aiMarkdownReviewLoop.openReviewPreview', async (targetUri?: vscode.Uri) => {
+      const document = await resolveMarkdownDocument(provider, targetUri);
 
       if (!document) {
         vscode.window.showWarningMessage('Open a Markdown document before launching the review preview.');
@@ -24,8 +29,8 @@ export function activate(context: vscode.ExtensionContext): void {
 
       await vscode.commands.executeCommand('vscode.openWith', document.uri, reviewEditorViewType);
     }),
-    vscode.commands.registerCommand('aiMarkdownReviewLoop.reviewDocument', async () => {
-      const document = await resolveMarkdownDocument(provider);
+    vscode.commands.registerCommand('aiMarkdownReviewLoop.reviewDocument', async (targetUri?: vscode.Uri) => {
+      const document = await resolveMarkdownDocument(provider, targetUri);
 
       if (!document) {
         vscode.window.showWarningMessage('Open a Markdown document before reviewing it.');
@@ -43,8 +48,8 @@ export function activate(context: vscode.ExtensionContext): void {
       vscode.window.showInformationMessage(`Added ${threads.length} local review feedback item(s).`);
       await vscode.commands.executeCommand('vscode.openWith', document.uri, reviewEditorViewType);
     }),
-    vscode.commands.registerCommand('aiMarkdownReviewLoop.exportFeedback', async () => {
-      const document = await resolveMarkdownDocument(provider);
+    vscode.commands.registerCommand('aiMarkdownReviewLoop.exportFeedback', async (targetUri?: vscode.Uri) => {
+      const document = await resolveMarkdownDocument(provider, targetUri);
 
       if (!document) {
         vscode.window.showWarningMessage('Open a Markdown document before exporting feedback.');
@@ -68,8 +73,16 @@ export function deactivate(): void {
 }
 
 async function resolveMarkdownDocument(
-  provider: ReviewEditorProvider
+  provider: ReviewEditorProvider,
+  targetUri?: vscode.Uri
 ): Promise<vscode.TextDocument | undefined> {
+  if (targetUri) {
+    const document = await vscode.workspace.openTextDocument(targetUri);
+    if (isMarkdown(document)) {
+      return document;
+    }
+  }
+
   const activeDocument = vscode.window.activeTextEditor?.document;
 
   if (activeDocument && isMarkdown(activeDocument)) {

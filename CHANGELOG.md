@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.0.3
+
+- Adds top-of-file CodeLens shortcuts for Markdown files.
+- Broadens Markdown menu visibility using file extension and language context.
+
 ## 0.0.2
 
 - Opens the inline comment composer immediately after a rendered Markdown text selection.

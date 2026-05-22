@@ -2,7 +2,7 @@
   "name": "ai-markdown-review-loop",
   "displayName": "AI Markdown Review Loop",
   "description": "Review Markdown with inline feedback, AI-ready threads, and agent handoff exports.",
-  "version": "0.0.2",
+  "version": "0.0.3",
   "publisher": "uptown",
   "license": "MIT",
   "repository": {
@@ -25,6 +25,7 @@
   ],
   "activationEvents": [
     "onCustomEditor:aiMarkdownReviewLoop.reviewEditor",
+    "onLanguage:markdown",
     "onCommand:aiMarkdownReviewLoop.openReviewPreview",
     "onCommand:aiMarkdownReviewLoop.reviewDocument",
     "onCommand:aiMarkdownReviewLoop.exportFeedback"
@@ -50,24 +51,48 @@
       "editor/title": [
         {
           "command": "aiMarkdownReviewLoop.openReviewPreview",
-          "when": "resourceLangId == markdown",
-          "group": "navigation@1"
+          "when": "resourceExtname == .md || resourceLangId == markdown",
+          "group": "navigation@0"
         },
         {
           "command": "aiMarkdownReviewLoop.reviewDocument",
-          "when": "resourceLangId == markdown",
+          "when": "resourceExtname == .md || resourceLangId == markdown",
           "group": "navigation@2"
+        }
+      ],
+      "editor/title/context": [
+        {
+          "command": "aiMarkdownReviewLoop.openReviewPreview",
+          "when": "resourceExtname == .md || resourceLangId == markdown",
+          "group": "navigation@0"
+        },
+        {
+          "command": "aiMarkdownReviewLoop.exportFeedback",
+          "when": "resourceExtname == .md || resourceLangId == markdown",
+          "group": "navigation@1"
         }
       ],
       "editor/context": [
         {
           "command": "aiMarkdownReviewLoop.openReviewPreview",
-          "when": "resourceLangId == markdown",
+          "when": "resourceExtname == .md || resourceLangId == markdown",
           "group": "navigation@1"
         },
         {
           "command": "aiMarkdownReviewLoop.exportFeedback",
-          "when": "resourceLangId == markdown",
+          "when": "resourceExtname == .md || resourceLangId == markdown",
+          "group": "navigation@2"
+        }
+      ],
+      "explorer/context": [
+        {
+          "command": "aiMarkdownReviewLoop.openReviewPreview",
+          "when": "resourceExtname == .md",
+          "group": "navigation@1"
+        },
+        {
+          "command": "aiMarkdownReviewLoop.exportFeedback",
+          "when": "resourceExtname == .md",
           "group": "navigation@2"
         }
       ]
