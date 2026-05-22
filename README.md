@@ -11,9 +11,11 @@ The first MVP focuses on a local workflow:
 - Use the green AI Review icon in the VS Code editor title toolbar.
 - Drag-select rendered text and attach feedback from an inline comment popover.
 - See saved comments as highlights and small badges in the rendered document.
-- Click a highlighted region or badge to inspect, resolve, or reject saved comments.
+- Click a highlighted region or badge to inspect, accept, resolve, or reject saved comments.
 - Reply under review comments with clear `You`/`AI` attribution for future AI handoff.
 - Distinguish user comments from AI-generated review comments with separate labels, badges, and highlight colors.
+- Apply suggested replacement patches from review threads when the patch still matches a reliable anchor.
+- Use `Accept` for agreement, `Resolve` for handled issues, and `Reject` for declined recommendations. These close the review thread but do not automatically patch the Markdown.
 - Click a thread in `Review Threads` to jump back to its highlighted content.
 - Persist compact `ai-review-anchor` metadata in the Markdown file while storing full thread data in sidecar JSON.
 - Attach feedback directly to a Mermaid diagram source block.
@@ -66,9 +68,12 @@ Mermaid diagrams render directly inside the review preview:
 ```mermaid
 flowchart TD
   A[Draft PRD] --> B[AI review]
-  B --> C{User decision}
-  C -->|Accept| D[Patch document]
-  C -->|Reject| E[Close thread]
+  B --> C{Next action}
+  C -->|Apply edit| D[Patch document]
+  D --> B
+  C -->|Accept| E[Close as agreed]
+  C -->|Resolve| F[Close as handled]
+  C -->|Reject| G[Close as declined]
   C -->|Reply| B
 ```
 ````
@@ -107,7 +112,13 @@ If the sidecar JSON is deleted or no longer contains matching thread data, the r
 
 When several review threads exist in one document, the extension rewrites them into that single grouped `ai-review-anchors` metadata comment instead of adding one metadata line per thread.
 
-Resolved or rejected review threads move from `documents/` to `resolved/`. Their inline Markdown anchor metadata is removed so closed feedback does not leave stale `status:"open"` comments in the source, and a compact `ai-review-log` entry is appended at the end of the Markdown file as an audit pointer.
+Accepted, resolved, or rejected review threads move from `documents/` to `resolved/`. Their inline Markdown anchor metadata is removed so closed feedback does not leave stale `status:"open"` comments in the source, and a compact `ai-review-log` entry is appended at the end of the Markdown file as an audit pointer.
+
+## Agent Handoff
+
+Feedback exports include open thread IDs, source labels, discussion history, anchor confidence, and editing guidelines for AI agents. Agents are instructed to preserve review metadata, make localized edits, report each handled `rv_*` ID with an outcome, and avoid closing review threads unless the user explicitly asks for an `accepted`, `resolved`, or `rejected` decision.
+
+Suggested replacement patches are treated as document edits, not just review decisions. `Apply Edit` replaces the matching Markdown text and then closes the thread as `accepted`; if the original text is missing, duplicated ambiguously, or attached to a low-confidence anchor, the extension leaves the thread open.
 
 ## Packaging
 

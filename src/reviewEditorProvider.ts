@@ -16,6 +16,14 @@ import { AnchorConfidence, ReviewDocument, ReviewStatus, ReviewThread } from './
 
 const viewType = 'aiMarkdownReviewLoop.reviewEditor';
 
+type ApplyPatchResult =
+  | 'applied'
+  | 'ambiguous'
+  | 'failed'
+  | 'lowConfidenceAnchor'
+  | 'missingPatch'
+  | 'originalNotFound';
+
 export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vscode.Disposable {
   private readonly markdown = new MarkdownIt({
     html: false,
@@ -151,32 +159,7 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
           }
 
           await this.anchorMaintenance.flush(document);
-          await this.store.updateThread(
-            document.uri,
-            String(message.threadId),
-            { status }
-          );
-
-          if (status !== 'open') {
-            const resolvedSidecarUri = await this.store.getResolvedReviewFileUri(document.uri);
-            const markerRemoved = await removeInlineAnchorMarker(document, String(message.threadId));
-
-            if (!markerRemoved) {
-              vscode.window.showWarningMessage('Review status was updated, but the Markdown anchor marker could not be removed.');
-            }
-
-            const logInserted = await appendClosedReviewLog(
-              document,
-              String(message.threadId),
-              status,
-              resolvedSidecarUri
-            );
-
-            if (!logInserted) {
-              vscode.window.showWarningMessage('Review status was updated, but the Markdown review log could not be inserted.');
-            }
-          }
-
+          await this.updateThreadStatus(document, String(message.threadId), status);
           await render();
         }
 
@@ -230,6 +213,30 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
             String(message.threadId),
             replyText
           );
+          await render();
+        }
+
+        if (message?.type === 'applySuggestedPatch') {
+          await this.anchorMaintenance.flush(document);
+
+          const threadId = String(message.threadId ?? '');
+          const reviewDocument = await this.store.load(document.uri);
+          const thread = reviewDocument.threads.find(candidate => candidate.id === threadId);
+
+          if (!thread) {
+            vscode.window.showWarningMessage('Review thread was not found.');
+            return;
+          }
+
+          const result = await this.applySuggestedPatch(document, thread);
+
+          if (result !== 'applied') {
+            vscode.window.showWarningMessage(formatApplyPatchResult(result));
+            return;
+          }
+
+          await this.updateThreadStatus(document, thread.id, 'accepted');
+          vscode.window.showInformationMessage('Applied suggested edit and marked the review thread accepted.');
           await render();
         }
 
@@ -316,6 +323,82 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
     if (!markerInserted) {
       vscode.window.showWarningMessage('Feedback was saved, but the Markdown anchor marker could not be inserted.');
     }
+  }
+
+  private async updateThreadStatus(
+    document: vscode.TextDocument,
+    threadId: string,
+    status: ReviewStatus
+  ): Promise<void> {
+    await this.store.updateThread(
+      document.uri,
+      threadId,
+      { status }
+    );
+
+    if (status === 'open') {
+      return;
+    }
+
+    const resolvedSidecarUri = await this.store.getResolvedReviewFileUri(document.uri);
+    const markerRemoved = await removeInlineAnchorMarker(document, threadId);
+
+    if (!markerRemoved) {
+      vscode.window.showWarningMessage('Review status was updated, but the Markdown anchor marker could not be removed.');
+    }
+
+    const logInserted = await appendClosedReviewLog(
+      document,
+      threadId,
+      status,
+      resolvedSidecarUri
+    );
+
+    if (!logInserted) {
+      vscode.window.showWarningMessage('Review status was updated, but the Markdown review log could not be inserted.');
+    }
+  }
+
+  private async applySuggestedPatch(
+    document: vscode.TextDocument,
+    thread: ReviewThread
+  ): Promise<ApplyPatchResult> {
+    const patch = thread.suggestedPatch;
+
+    if (!patch || patch.mode !== 'replace' || patch.original.length === 0) {
+      return 'missingPatch';
+    }
+
+    if (thread.anchor.confidence === 'approximate'
+      || thread.anchor.confidence === 'missing'
+      || thread.anchor.confidence === 'ambiguous') {
+      return 'lowConfidenceAnchor';
+    }
+
+    const text = document.getText();
+    const matches = findAllPatchMatches(text, patch.original);
+
+    if (matches.length === 0) {
+      return 'originalNotFound';
+    }
+
+    const match = selectPatchMatch(document, thread, matches);
+
+    if (!match) {
+      return 'ambiguous';
+    }
+
+    const edit = new vscode.WorkspaceEdit();
+    edit.replace(
+      document.uri,
+      new vscode.Range(
+        document.positionAt(match.index),
+        document.positionAt(match.index + patch.original.length)
+      ),
+      patch.replacement
+    );
+
+    return await vscode.workspace.applyEdit(edit) ? 'applied' : 'failed';
   }
 
   private renderHtml(
@@ -528,6 +611,28 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
       padding-left: 10px;
       border-left: 3px solid var(--border);
       color: var(--muted);
+    }
+    .suggested-patch {
+      margin-top: 10px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 8px;
+      background: var(--vscode-editor-background);
+    }
+    .suggested-patch summary {
+      cursor: pointer;
+      color: var(--muted);
+      font-size: 12px;
+    }
+    .suggested-patch pre {
+      margin: 8px 0;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+    .suggested-patch-actions {
+      display: flex;
+      justify-content: flex-end;
+      margin-top: 8px;
     }
     .thread-actions {
       display: flex;
@@ -941,6 +1046,18 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
         return;
       }
 
+      const applyPatchButton = target.closest('[data-apply-suggested-patch]');
+
+      if (applyPatchButton) {
+        event.preventDefault();
+        event.stopPropagation();
+        vscode.postMessage({
+          type: 'applySuggestedPatch',
+          threadId: applyPatchButton.getAttribute('data-thread-id')
+        });
+        return;
+      }
+
       const cleanupButton = target.closest('[data-cleanup-stale-anchors]');
 
       if (cleanupButton) {
@@ -1030,11 +1147,13 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
           '<header><span class="thread-meta">' + renderSourceChip(thread) + renderMetaChip('Type', thread.type) + '<span class="anchor-state-chip" data-anchor-state>Locating</span></span>' + renderMetaChip('Severity', thread.severity) + '</header>',
           '<blockquote>' + escapeHtml(thread.anchor.text || 'Document') + '</blockquote>',
           '<p>' + escapeHtml(thread.comment) + '</p>',
+          renderSuggestedPatch(thread),
           renderReplies(thread),
           renderReplyForm(thread),
           '<div class="thread-actions">',
-          '<button class="secondary" data-status="resolved">Resolve</button>',
-          '<button class="secondary" data-status="rejected">Reject</button>',
+          '<button class="secondary" title="Agree with this feedback and close the thread." data-status="accepted">Accept</button>',
+          '<button class="secondary" title="Close because the underlying issue has been handled." data-status="resolved">Resolve</button>',
+          '<button class="secondary" title="Decline this recommendation and close the thread." data-status="rejected">Reject</button>',
           '</div>'
         ].join('');
 
@@ -1681,13 +1800,33 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
         renderMetaChip('Status', thread.status || 'open'),
         '</div>',
         '<p class="comment-overlay-comment">' + escapeHtml(thread.comment || '') + '</p>',
+        renderSuggestedPatch(thread),
         renderReplies(thread),
         renderReplyForm(thread),
         '<div class="comment-overlay-actions">',
-        '<button class="secondary compact" data-thread-id="' + escapeHtml(thread.id) + '" data-overlay-status="resolved">Resolve</button>',
-        '<button class="secondary compact" data-thread-id="' + escapeHtml(thread.id) + '" data-overlay-status="rejected">Reject</button>',
+        '<button class="secondary compact" title="Agree with this feedback and close the thread." data-thread-id="' + escapeHtml(thread.id) + '" data-overlay-status="accepted">Accept</button>',
+        '<button class="secondary compact" title="Close because the underlying issue has been handled." data-thread-id="' + escapeHtml(thread.id) + '" data-overlay-status="resolved">Resolve</button>',
+        '<button class="secondary compact" title="Decline this recommendation and close the thread." data-thread-id="' + escapeHtml(thread.id) + '" data-overlay-status="rejected">Reject</button>',
         '</div>',
         '</section>'
+      ].join('');
+    }
+
+    function renderSuggestedPatch(thread) {
+      const patch = thread.suggestedPatch;
+
+      if (!patch || patch.mode !== 'replace') {
+        return '';
+      }
+
+      return [
+        '<details class="suggested-patch">',
+        '<summary>Suggested edit</summary>',
+        '<pre><code>- ' + escapeHtml(patch.original || '') + '\\n+ ' + escapeHtml(patch.replacement || '') + '</code></pre>',
+        '<div class="suggested-patch-actions">',
+        '<button type="button" class="compact" title="Apply this replacement and close the thread as accepted." data-thread-id="' + escapeHtml(thread.id) + '" data-apply-suggested-patch>Apply Edit</button>',
+        '</div>',
+        '</details>'
       ].join('');
     }
 
@@ -2174,6 +2313,61 @@ function parseReviewStatus(value: unknown): ReviewStatus | undefined {
   }
 
   return undefined;
+}
+
+function findAllPatchMatches(text: string, original: string): Array<{ index: number }> {
+  const matches: Array<{ index: number }> = [];
+  let index = text.indexOf(original);
+
+  while (index >= 0) {
+    matches.push({ index });
+    index = text.indexOf(original, index + Math.max(1, original.length));
+  }
+
+  return matches;
+}
+
+function selectPatchMatch(
+  document: vscode.TextDocument,
+  thread: ReviewThread,
+  matches: Array<{ index: number }>
+): { index: number } | undefined {
+  if (matches.length === 1) {
+    return matches[0];
+  }
+
+  const lineHint = thread.anchor.lastLocatedLine ?? thread.anchor.lineStart;
+
+  if (!lineHint) {
+    return undefined;
+  }
+
+  const lineStart = Math.max(1, lineHint);
+  const lineEnd = Math.max(lineStart, thread.anchor.lineEnd ?? lineStart);
+  const matchingLineMatches = matches.filter(match => {
+    const startLine = document.positionAt(match.index).line + 1;
+    const endLine = document.positionAt(match.index + (thread.suggestedPatch?.original.length ?? 0)).line + 1;
+    return startLine <= lineEnd && endLine >= lineStart;
+  });
+
+  return matchingLineMatches.length === 1 ? matchingLineMatches[0] : undefined;
+}
+
+function formatApplyPatchResult(result: ApplyPatchResult): string {
+  switch (result) {
+    case 'ambiguous':
+      return 'Suggested edit matched multiple locations. Reply or re-anchor before applying it.';
+    case 'failed':
+      return 'Suggested edit could not be applied.';
+    case 'lowConfidenceAnchor':
+      return 'This thread needs a more reliable anchor before applying its suggested edit.';
+    case 'missingPatch':
+      return 'This review thread does not include an applicable suggested edit.';
+    case 'originalNotFound':
+      return 'Suggested edit could not find its original text in the current Markdown.';
+    case 'applied':
+      return 'Suggested edit applied.';
+  }
 }
 
 function formatError(error: unknown): string {

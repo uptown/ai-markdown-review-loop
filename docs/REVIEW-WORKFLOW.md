@@ -1,0 +1,67 @@
+# Review Workflow
+
+This extension is built around repeated document-review loops between human authors, human reviewers, and AI agents. A review thread is a durable discussion item attached to Markdown content. Editing the document and deciding the thread status are separate actions.
+
+## User Stories
+
+- As an author, I want to drag-select rendered Markdown and leave feedback so the comment stays attached to the document content.
+- As a reviewer, I want human and AI comments to be visually distinct so I can judge the source of each concern.
+- As an author, I want to reply before closing a thread so objections, clarification, and decisions are preserved for later AI handoff.
+- As an author, I want `Accept`, `Resolve`, and `Reject` to mean different things so I can close feedback without implying the document was automatically edited.
+- As an AI-agent user, I want open feedback exported with thread IDs, source labels, discussion history, anchor confidence, and suggested patches so an agent can work from the review queue.
+- As a collaborator, I want comments to remain visible after nearby edits so feedback does not silently disappear when wording changes.
+
+## Action Vocabulary
+
+- `Reply`: add context, clarification, or objection without changing status.
+- `Apply edit`: change the Markdown manually or through an agent patch. This does not close a thread by itself.
+- `Apply Edit`: extension action for a suggested replacement patch. It mutates the Markdown and closes the thread as `accepted` only when the original text has one reliable target.
+- `Accept`: agree with the feedback or recommendation and close the thread as an accepted decision.
+- `Resolve`: close because the underlying issue has been handled, superseded, or no longer applies.
+- `Reject`: close because the recommendation is intentionally declined.
+- `Re-anchor`: attach a drifted comment to a new document location.
+- `Clean stale anchors`: remove broken metadata only; this is not a review decision.
+- `Export for Agent`: package open threads for AI work without mutating review state.
+
+## Scenarios
+
+### Draft, Review, Handoff
+
+1. An author writes a Markdown PRD.
+2. The extension seeds obvious local review items.
+3. The author replies to one thread with extra context, rejects another recommendation, accepts one direction, and keeps a risky item open.
+4. The agent export includes only open feedback plus discussion history and editing guidelines.
+
+### AI Suggestion, Manual Fix
+
+1. AI feedback says an acceptance criterion is not testable.
+2. The author edits the Markdown manually instead of applying the exact suggested patch.
+3. The anchor is recovered near the changed paragraph.
+4. The author marks the thread `Resolve` because the issue was fixed, not `Accept` because an AI patch was applied.
+
+### AI Suggestion, Patch Accepted
+
+1. AI feedback includes a suggested replacement patch.
+2. The author opens the thread and reviews the diff.
+3. The extension checks that the original text still exists at a reliable anchor.
+4. The author clicks `Apply Edit`.
+5. The extension replaces the Markdown text, removes the open anchor, archives the thread as `accepted`, and leaves an audit log pointer.
+6. If the text is missing, duplicated ambiguously, or attached to a low-confidence anchor, the thread remains open for reply, re-anchor, or manual editing.
+
+### Objection Before Decision
+
+1. AI recommends removing a section.
+2. The author replies that the section is contractual context and should remain.
+3. The thread stays open while the discussion continues.
+4. The final user decision is `Reject`, preserving that the recommendation was deliberately declined.
+
+### Comment Survives Iterative Editing
+
+1. A user comments on a paragraph asking who owns rollback.
+2. An AI agent rewrites the surrounding section.
+3. Exact text no longer exists, but context snippets and line hints locate the closest surviving block.
+4. The UI shows the anchor confidence so the user can re-anchor, resolve, or keep discussing.
+
+## Agent Behavior
+
+Agents should treat review sidecar data and inline review metadata as part of the document state. They should preserve review anchors and logs, prefer localized edits, keep nearby context stable where possible, and report every handled `rv_*` ID with an outcome. Agents should not close threads as `accepted`, `resolved`, or `rejected` unless the user explicitly asks them to make that review decision.

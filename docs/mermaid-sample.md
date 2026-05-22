@@ -5,9 +5,12 @@ This file is a quick manual smoke test for the review preview.
 ```mermaid
 flowchart TD
   A[Draft PRD] --> B[AI review]
-  B --> C{User decision}
-  C -->|Accept| D[Patch document]
-  C -->|Reject| E[Close thread]
+  B --> C{Next action}
+  C -->|Apply edit| D[Patch document]
+  D --> B
+  C -->|Accept| E[Close as agreed]
+  C -->|Resolve| F[Close as handled]
+  C -->|Reject| G[Close as declined]
   C -->|Reply| B
 ```
 

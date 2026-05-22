@@ -18,6 +18,9 @@
 - Shows reply authors with the same `You` and `AI` labels used by top-level review comments.
 - Debounces review anchor maintenance and only auto-saves high-confidence anchor relocations to the sidecar.
 - Labels review metadata chips as type, severity, and status instead of showing bare values.
+- Adds Accept actions to close agreed review feedback separately from resolve/reject.
+- Shows suggested replacement patches with an Apply Edit action that updates Markdown only when the target is reliable.
+- Adds agent editing guidelines and workflow documentation for iterative human/AI review handoff.
 
 ## 0.0.8
 
