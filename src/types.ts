@@ -1,0 +1,44 @@
+export type ReviewStatus = 'open' | 'accepted' | 'rejected' | 'resolved';
+export type ReviewSource = 'human' | 'ai' | 'local';
+export type ReviewType = 'fix' | 'question' | 'note' | 'risk' | 'suggestion';
+export type ReviewSeverity = 'low' | 'medium' | 'high';
+
+export interface ReviewAnchor {
+  text: string;
+  lineStart?: number;
+  lineEnd?: number;
+  hash?: string;
+}
+
+export interface SuggestedPatch {
+  mode: 'replace';
+  original: string;
+  replacement: string;
+}
+
+export interface ReviewReply {
+  role: 'user' | 'assistant';
+  text: string;
+  createdAt: string;
+}
+
+export interface ReviewThread {
+  id: string;
+  documentUri: string;
+  anchor: ReviewAnchor;
+  type: ReviewType;
+  source: ReviewSource;
+  status: ReviewStatus;
+  severity: ReviewSeverity;
+  comment: string;
+  suggestedPatch?: SuggestedPatch;
+  thread: ReviewReply[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ReviewDocument {
+  documentUri: string;
+  threads: ReviewThread[];
+  updatedAt: string;
+}

@@ -1,0 +1,91 @@
+{
+  "name": "ai-markdown-review-loop",
+  "displayName": "AI Markdown Review Loop",
+  "description": "Review Markdown with inline feedback, AI-ready threads, and agent handoff exports.",
+  "version": "0.0.1",
+  "publisher": "uptown",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/uptown/ai-markdown-review-loop.git"
+  },
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "keywords": [
+    "markdown",
+    "review",
+    "comments",
+    "ai",
+    "agent",
+    "mcp"
+  ],
+  "activationEvents": [
+    "onCustomEditor:aiMarkdownReviewLoop.reviewEditor",
+    "onCommand:aiMarkdownReviewLoop.openReviewPreview",
+    "onCommand:aiMarkdownReviewLoop.reviewDocument",
+    "onCommand:aiMarkdownReviewLoop.exportFeedback"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "aiMarkdownReviewLoop.openReviewPreview",
+        "title": "AI Markdown Review: Open Review Preview"
+      },
+      {
+        "command": "aiMarkdownReviewLoop.reviewDocument",
+        "title": "AI Markdown Review: Review Document"
+      },
+      {
+        "command": "aiMarkdownReviewLoop.exportFeedback",
+        "title": "AI Markdown Review: Export Feedback for Agent"
+      }
+    ],
+    "customEditors": [
+      {
+        "viewType": "aiMarkdownReviewLoop.reviewEditor",
+        "displayName": "AI Markdown Review",
+        "selector": [
+          {
+            "filenamePattern": "*.md"
+          }
+        ],
+        "priority": "option"
+      }
+    ],
+    "configuration": {
+      "title": "AI Markdown Review Loop",
+      "properties": {
+        "aiMarkdownReviewLoop.storageMode": {
+          "type": "string",
+          "enum": [
+            "sidecar"
+          ],
+          "default": "sidecar",
+          "description": "Where review thread data is stored. MVP supports workspace-local sidecar storage."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "check": "tsc -p ./ --noEmit",
+    "vscode:prepublish": "npm run compile",
+    "package": "vsce package"
+  },
+  "dependencies": {
+    "markdown-it": "^14.1.0"
+  },
+  "devDependencies": {
+    "@types/markdown-it": "^14.1.2",
+    "@types/node": "^20.19.25",
+    "@types/vscode": "^1.85.0",
+    "@vscode/vsce": "^3.9.1",
+    "typescript": "^5.9.3"
+  }
+}
