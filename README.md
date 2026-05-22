@@ -5,12 +5,14 @@ AI Markdown Review Loop is a VS Code extension for reviewing Markdown documents 
 The first MVP focuses on a local workflow:
 
 - Open a rendered Markdown review preview.
+- Open the review preview beside the Markdown source in a split editor.
 - Render Mermaid diagrams from fenced `mermaid` code blocks.
 - Open the review preview from a Markdown editor title shortcut.
 - Use the green AI Review icon in the VS Code editor title toolbar.
 - Use top-of-file CodeLens shortcuts: `Open AI Review`, `Review Document`, and `Export Feedback`.
 - Drag-select rendered text and attach feedback from an inline comment popover.
 - See saved comments as highlights and small badges in the rendered document.
+- Persist compact `ai-review-anchor` metadata in the Markdown file while storing full thread data in sidecar JSON.
 - Attach feedback directly to a Mermaid diagram source block.
 - Store review threads in a workspace-local sidecar file.
 - Export unresolved feedback as Markdown for an AI coding agent.
@@ -34,7 +36,7 @@ To run inside VS Code:
 Installed usage:
 
 1. Open a Markdown file.
-2. Click the green AI Review icon in the editor title toolbar, click `Open AI Review` above the first line, right-click the editor and choose `AI Markdown Review: Open Review Preview`, or press `Cmd+Alt+R`.
+2. Click the split-review icon in the editor title toolbar, click `Open AI Review Beside` above the first line, right-click the editor and choose `AI Markdown Review: Open Review Beside`, or press `Cmd+Alt+Shift+R`.
 3. Drag-select rendered text in the review preview.
 4. Save feedback inline and the selected text will be highlighted with a comment badge.
 
@@ -47,9 +49,11 @@ Installed usage:
 ## Shortcuts
 
 - Green editor title toolbar icon: open review preview.
+- Split-review editor title toolbar icon: open Markdown source and review preview side by side.
 - Top-of-file CodeLens shortcuts on Markdown files: open review, review document, export feedback.
 - Editor context menu on Markdown files: open review preview or export feedback.
 - Keyboard shortcut: `Cmd+Alt+R` on macOS, `Ctrl+Alt+R` elsewhere.
+- Split keyboard shortcut: `Cmd+Alt+Shift+R` on macOS, `Ctrl+Alt+Shift+R` elsewhere.
 
 ## Mermaid
 
@@ -83,6 +87,14 @@ MVP review data is stored under:
   documents/
     <document-hash>.json
 ```
+
+Compact anchors are also inserted into the Markdown source:
+
+```md
+<!-- ai-review-anchor:{"id":"rv_...","status":"open","hash":"sha256:...","sidecar":".ai-markdown-review/documents/...json"} -->
+```
+
+The custom preview hides these anchors, but AI agents that read the Markdown can use them to connect document locations with sidecar review data.
 
 ## Packaging
 

@@ -10,6 +10,11 @@ export class MarkdownCodeLensProvider implements vscode.CodeLensProvider {
 
     return [
       new vscode.CodeLens(range, {
+        title: 'Open AI Review Beside',
+        command: 'aiMarkdownReviewLoop.openReviewBeside',
+        arguments: [document.uri]
+      }),
+      new vscode.CodeLens(range, {
         title: 'Open AI Review',
         command: 'aiMarkdownReviewLoop.openReviewPreview',
         arguments: [document.uri]

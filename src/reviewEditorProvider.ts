@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import MarkdownIt from 'markdown-it';
 import { randomUUID } from 'crypto';
 import { createAnchor } from './anchors';
+import { insertInlineAnchorMarker, stripInlineAnchorMarkers } from './inlineMarkers';
 import { ReviewStore } from './reviewStore';
 import { ReviewDocument, ReviewThread } from './types';
 
@@ -153,6 +154,12 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider {
     };
 
     await this.store.addThread(document.uri, thread);
+    const sidecarUri = await this.store.getReviewFileUri(document.uri);
+    const markerInserted = await insertInlineAnchorMarker(document, thread, sidecarUri);
+
+    if (!markerInserted) {
+      vscode.window.showWarningMessage('Feedback was saved, but the Markdown anchor marker could not be inserted.');
+    }
   }
 
   private renderHtml(
@@ -161,7 +168,7 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider {
     reviewDocument: ReviewDocument
   ): string {
     const nonce = randomUUID();
-    const renderedMarkdown = this.markdown.render(document.getText());
+    const renderedMarkdown = this.markdown.render(stripInlineAnchorMarkers(document.getText()));
     const mermaidScriptUri = webview.asWebviewUri(
       vscode.Uri.joinPath(this.context.extensionUri, 'out', 'vendor', 'mermaid.min.js')
     );

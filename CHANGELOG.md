@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.0.6
+
+- Adds a split-review toolbar command that opens Markdown source and review preview side by side.
+- Adds compact `ai-review-anchor` metadata comments to Markdown files when feedback is created.
+- Hides review anchor metadata from the custom rendered preview.
+
 ## 0.0.5
 
 - Shows visible review highlights and comment badges in the rendered Markdown preview.

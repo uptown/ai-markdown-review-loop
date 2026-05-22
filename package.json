@@ -2,7 +2,7 @@
   "name": "ai-markdown-review-loop",
   "displayName": "AI Markdown Review Loop",
   "description": "Review Markdown with inline feedback, AI-ready threads, and agent handoff exports.",
-  "version": "0.0.5",
+  "version": "0.0.6",
   "publisher": "uptown",
   "license": "MIT",
   "repository": {
@@ -27,12 +27,21 @@
     "onCustomEditor:aiMarkdownReviewLoop.reviewEditor",
     "onLanguage:markdown",
     "onCommand:aiMarkdownReviewLoop.openReviewPreview",
+    "onCommand:aiMarkdownReviewLoop.openReviewBeside",
     "onCommand:aiMarkdownReviewLoop.reviewDocument",
     "onCommand:aiMarkdownReviewLoop.exportFeedback"
   ],
   "main": "./out/extension.js",
   "contributes": {
     "commands": [
+      {
+        "command": "aiMarkdownReviewLoop.openReviewBeside",
+        "title": "AI Markdown Review: Open Review Beside",
+        "icon": {
+          "light": "media/split-review-icon.svg",
+          "dark": "media/split-review-icon.svg"
+        }
+      },
       {
         "command": "aiMarkdownReviewLoop.openReviewPreview",
         "title": "AI Markdown Review: Open Review Preview",
@@ -53,6 +62,10 @@
     "menus": {
       "editor/title": [
         {
+          "command": "aiMarkdownReviewLoop.openReviewBeside",
+          "group": "navigation@-11"
+        },
+        {
           "command": "aiMarkdownReviewLoop.openReviewPreview",
           "group": "navigation@-10"
         },
@@ -64,6 +77,10 @@
       ],
       "editor/title/context": [
         {
+          "command": "aiMarkdownReviewLoop.openReviewBeside",
+          "group": "navigation@-1"
+        },
+        {
           "command": "aiMarkdownReviewLoop.openReviewPreview",
           "group": "navigation@0"
         },
@@ -74,6 +91,11 @@
         }
       ],
       "editor/context": [
+        {
+          "command": "aiMarkdownReviewLoop.openReviewBeside",
+          "when": "resourceExtname == .md || resourceLangId == markdown",
+          "group": "navigation@0"
+        },
         {
           "command": "aiMarkdownReviewLoop.openReviewPreview",
           "when": "resourceExtname == .md || resourceLangId == markdown",
@@ -87,6 +109,11 @@
       ],
       "explorer/context": [
         {
+          "command": "aiMarkdownReviewLoop.openReviewBeside",
+          "when": "resourceExtname == .md",
+          "group": "navigation@0"
+        },
+        {
           "command": "aiMarkdownReviewLoop.openReviewPreview",
           "when": "resourceExtname == .md",
           "group": "navigation@1"
@@ -99,6 +126,12 @@
       ]
     },
     "keybindings": [
+      {
+        "command": "aiMarkdownReviewLoop.openReviewBeside",
+        "key": "ctrl+alt+shift+r",
+        "mac": "cmd+alt+shift+r",
+        "when": "editorLangId == markdown"
+      },
       {
         "command": "aiMarkdownReviewLoop.openReviewPreview",
         "key": "ctrl+alt+r",
