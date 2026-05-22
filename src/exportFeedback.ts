@@ -33,6 +33,21 @@ export function renderFeedbackExport(reviewDocument: ReviewDocument): string {
       ``
     );
 
+    if (thread.thread.length > 0) {
+      lines.push(
+        `Discussion:`,
+        ``
+      );
+
+      for (const reply of thread.thread) {
+        lines.push(
+          `- ${reply.role} (${reply.createdAt}):`,
+          indentBlock(reply.text),
+          ``
+        );
+      }
+    }
+
     if (thread.suggestedPatch) {
       lines.push(
         `Suggested patch:`,
@@ -57,4 +72,11 @@ export function renderFeedbackExport(reviewDocument: ReviewDocument): string {
 
 function quoteInline(value: string): string {
   return `"${value.replace(/"/g, '\\"')}"`;
+}
+
+function indentBlock(value: string): string {
+  return value
+    .split(/\r?\n/)
+    .map(line => `  ${line}`)
+    .join('\n');
 }

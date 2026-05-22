@@ -12,6 +12,7 @@ The first MVP focuses on a local workflow:
 - Drag-select rendered text and attach feedback from an inline comment popover.
 - See saved comments as highlights and small badges in the rendered document.
 - Click a highlighted region or badge to inspect, resolve, or reject saved comments.
+- Reply under review comments to preserve discussion context for future AI handoff.
 - Click a thread in `Review Threads` to jump back to its highlighted content.
 - Persist compact `ai-review-anchor` metadata in the Markdown file while storing full thread data in sidecar JSON.
 - Attach feedback directly to a Mermaid diagram source block.
@@ -40,6 +41,7 @@ Installed usage:
 2. Click the split-review icon in the editor title toolbar, right-click the editor and choose `AI Markdown Review: Open Review Beside`, or press `Cmd+Alt+Shift+R`.
 3. Drag-select rendered text in the review preview.
 4. Save feedback inline and the selected text will be highlighted with a comment badge.
+5. Reply under a review thread when you need to add discussion context before exporting feedback.
 
 ## Commands
 

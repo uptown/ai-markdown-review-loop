@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import { createHash } from 'crypto';
-import { ReviewDocument, ReviewThread } from './types';
+import { ReviewDocument, ReviewReply, ReviewThread } from './types';
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder('utf-8');
@@ -101,6 +101,29 @@ export class ReviewStore {
     return reviewDocument;
   }
 
+  async addReply(
+    documentUri: vscode.Uri,
+    threadId: string,
+    text: string
+  ): Promise<ReviewDocument> {
+    const reviewDocument = await this.load(documentUri);
+    const thread = reviewDocument.threads.find(candidate => candidate.id === threadId);
+
+    if (!thread) {
+      throw new Error(`Review thread not found: ${threadId}`);
+    }
+
+    const now = new Date().toISOString();
+    thread.thread.push({
+      role: 'user',
+      text,
+      createdAt: now
+    });
+    thread.updatedAt = now;
+    await this.save(documentUri, reviewDocument);
+    return reviewDocument;
+  }
+
   async getReviewFileUri(documentUri: vscode.Uri): Promise<vscode.Uri> {
     const workspaceFolder = vscode.workspace.getWorkspaceFolder(documentUri);
     const root = workspaceFolder?.uri ?? this.context.globalStorageUri;
@@ -151,8 +174,16 @@ function isReviewThread(value: unknown): value is ReviewThread {
     && isOneOf(value.severity, ['low', 'medium', 'high'])
     && typeof value.comment === 'string'
     && Array.isArray(value.thread)
+    && value.thread.every(isReviewReply)
     && typeof value.createdAt === 'string'
     && typeof value.updatedAt === 'string';
+}
+
+function isReviewReply(value: unknown): value is ReviewReply {
+  return isRecord(value)
+    && isOneOf(value.role, ['user', 'assistant'])
+    && typeof value.text === 'string'
+    && typeof value.createdAt === 'string';
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

@@ -135,6 +135,22 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider {
           await render();
         }
 
+        if (message?.type === 'addReply') {
+          const replyText = String(message.text ?? '').trim();
+
+          if (!replyText) {
+            vscode.window.showWarningMessage('Reply text is empty.');
+            return;
+          }
+
+          await this.store.addReply(
+            document.uri,
+            String(message.threadId),
+            replyText
+          );
+          await render();
+        }
+
         if (message?.type === 'copyText') {
           await vscode.env.clipboard.writeText(String(message.text ?? ''));
           vscode.window.showInformationMessage('Copied Mermaid source.');
@@ -470,6 +486,43 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider {
       margin-top: 10px;
       flex-wrap: wrap;
     }
+    .reply-list {
+      margin-top: 10px;
+      border-left: 2px solid var(--border);
+      padding-left: 10px;
+    }
+    .reply-item {
+      margin-top: 8px;
+    }
+    .reply-meta {
+      color: var(--muted);
+      font-size: 12px;
+      margin-bottom: 3px;
+    }
+    .reply-text {
+      margin: 0;
+      line-height: 1.45;
+    }
+    .reply-form {
+      margin-top: 10px;
+    }
+    .reply-form textarea {
+      box-sizing: border-box;
+      width: 100%;
+      min-height: 64px;
+      resize: vertical;
+      border: 1px solid var(--vscode-input-border, var(--border));
+      border-radius: 4px;
+      padding: 8px;
+      color: var(--vscode-input-foreground);
+      background: var(--vscode-input-background);
+      font: inherit;
+    }
+    .reply-actions {
+      display: flex;
+      justify-content: flex-end;
+      margin-top: 6px;
+    }
     .comment-composer textarea {
       box-sizing: border-box;
       width: 100%;
@@ -644,6 +697,28 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider {
       window.getSelection()?.removeAllRanges();
     });
 
+    document.addEventListener('submit', (event) => {
+      const target = event.target;
+
+      if (!(target instanceof HTMLFormElement) || !target.matches('[data-reply-form]')) {
+        return;
+      }
+
+      event.preventDefault();
+      const textArea = target.querySelector('textarea');
+      const text = String(textArea?.value || '').trim();
+
+      if (!text) {
+        return;
+      }
+
+      vscode.postMessage({
+        type: 'addReply',
+        threadId: target.getAttribute('data-thread-id'),
+        text
+      });
+    });
+
     document.addEventListener('click', (event) => {
       const target = event.target;
 
@@ -725,6 +800,8 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider {
           '<header><span>' + escapeHtml(thread.type) + ' · ' + escapeHtml(thread.source) + '</span><span>' + escapeHtml(thread.severity) + '</span></header>',
           '<blockquote>' + escapeHtml(thread.anchor.text || 'Document') + '</blockquote>',
           '<p>' + escapeHtml(thread.comment) + '</p>',
+          renderReplies(thread),
+          renderReplyForm(thread),
           '<div class="thread-actions">',
           '<button class="secondary" data-status="resolved">Resolve</button>',
           '<button class="secondary" data-status="rejected">Reject</button>',
@@ -732,7 +809,7 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider {
         ].join('');
 
         element.addEventListener('click', (event) => {
-          if (event.target instanceof HTMLElement && event.target.closest('button')) {
+          if (event.target instanceof HTMLElement && event.target.closest('button, textarea, form, .reply-list')) {
             return;
           }
 
@@ -997,12 +1074,54 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider {
         '<span>' + escapeHtml(thread.status || 'open') + '</span>',
         '</div>',
         '<p class="comment-overlay-comment">' + escapeHtml(thread.comment || '') + '</p>',
+        renderReplies(thread),
+        renderReplyForm(thread),
         '<div class="comment-overlay-actions">',
         '<button class="secondary compact" data-thread-id="' + escapeHtml(thread.id) + '" data-overlay-status="resolved">Resolve</button>',
         '<button class="secondary compact" data-thread-id="' + escapeHtml(thread.id) + '" data-overlay-status="rejected">Reject</button>',
         '</div>',
         '</section>'
       ].join('');
+    }
+
+    function renderReplies(thread) {
+      const replies = Array.isArray(thread.thread) ? thread.thread : [];
+
+      if (replies.length === 0) {
+        return '';
+      }
+
+      return [
+        '<div class="reply-list">',
+        ...replies.map((reply) => [
+          '<div class="reply-item">',
+          '<div class="reply-meta">' + escapeHtml(reply.role || 'user') + ' · ' + escapeHtml(formatDate(reply.createdAt)) + '</div>',
+          '<p class="reply-text">' + escapeHtml(reply.text || '') + '</p>',
+          '</div>'
+        ].join('')),
+        '</div>'
+      ].join('');
+    }
+
+    function renderReplyForm(thread) {
+      return [
+        '<form class="reply-form" data-reply-form data-thread-id="' + escapeHtml(thread.id) + '">',
+        '<textarea placeholder="Reply to this thread"></textarea>',
+        '<div class="reply-actions">',
+        '<button type="submit" class="compact">Reply</button>',
+        '</div>',
+        '</form>'
+      ].join('');
+    }
+
+    function formatDate(value) {
+      const date = new Date(value);
+
+      if (Number.isNaN(date.getTime())) {
+        return '';
+      }
+
+      return date.toLocaleString();
     }
 
     function hideCommentOverlay() {
