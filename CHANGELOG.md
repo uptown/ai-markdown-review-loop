@@ -21,7 +21,7 @@
 - Adds Accept actions to close agreed review feedback separately from resolve/reject.
 - Shows suggested replacement patches with an Apply Edit action that updates Markdown only when the target is reliable.
 - Submits comment and reply textareas with Enter while keeping Shift+Enter for multi-line text.
-- Adds Node unit tests for suggested patch selection and agent feedback export guardrails.
+- Adds Node unit and scenario tests for suggested patch selection, inline anchor metadata, review lifecycle flow, and agent feedback export guardrails.
 - Extends license policy guidance to cover test tooling and future dependencies.
 - Adds agent editing guidelines and workflow documentation for iterative human/AI review handoff.
 

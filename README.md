@@ -129,6 +129,8 @@ npm run check
 npm run package
 ```
 
+`npm run check` runs TypeScript type checking plus Node-based regression tests for review export, suggested patch selection, inline anchor metadata, and the review lifecycle scenario.
+
 License policy and bundled dependency notices:
 
 - [License Policy](./docs/LICENSE-POLICY.md)
