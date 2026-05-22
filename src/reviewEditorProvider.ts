@@ -7,6 +7,7 @@ import {
   findMissingInlineAnchorMarkers,
   insertInlineAnchorMarker,
   removeInlineAnchorMarker,
+  removeInlineAnchorMarkers,
   stripInlineAnchorMarkers
 } from './inlineMarkers';
 import { ReviewStore } from './reviewStore';
@@ -159,6 +160,27 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider {
             }
           }
 
+          await render();
+        }
+
+        if (message?.type === 'cleanupStaleAnchors') {
+          const threadIds = Array.isArray(message.threadIds)
+            ? message.threadIds.map((threadId: unknown) => String(threadId)).filter(Boolean)
+            : [];
+
+          if (threadIds.length === 0) {
+            vscode.window.showWarningMessage('No stale review anchors were selected for cleanup.');
+            return;
+          }
+
+          const cleaned = await removeInlineAnchorMarkers(document, threadIds);
+
+          if (!cleaned) {
+            vscode.window.showWarningMessage('Stale review anchors could not be cleaned up.');
+            return;
+          }
+
+          vscode.window.showInformationMessage(`Cleaned ${threadIds.length} stale review anchor(s).`);
           await render();
         }
 
@@ -347,6 +369,12 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider {
     .storage-warning p {
       margin: 0;
       line-height: 1.45;
+    }
+    .storage-warning-actions {
+      display: flex;
+      gap: 8px;
+      margin-top: 10px;
+      flex-wrap: wrap;
     }
     button {
       border: 0;
@@ -750,6 +778,21 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider {
       const target = event.target;
 
       if (!(target instanceof HTMLElement)) {
+        return;
+      }
+
+      const cleanupButton = target.closest('[data-cleanup-stale-anchors]');
+
+      if (cleanupButton) {
+        event.preventDefault();
+        event.stopPropagation();
+        vscode.postMessage({
+          type: 'cleanupStaleAnchors',
+          threadIds: String(cleanupButton.getAttribute('data-thread-ids') || '')
+            .split(',')
+            .map((threadId) => threadId.trim())
+            .filter(Boolean)
+        });
         return;
       }
 
@@ -1470,10 +1513,14 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider {
 
     const sidecar = missingMarkers.find(marker => marker.sidecar)?.sidecar ?? '.ai-markdown-review/documents/*.json';
     const markerLabel = missingMarkers.length === 1 ? 'anchor' : 'anchors';
+    const markerIds = missingMarkers.map(marker => marker.id).join(',');
 
     return `<section class="storage-warning" role="status">
     <strong>Review sidecar data is missing or incomplete.</strong>
-    <p>This Markdown file still contains ${missingMarkers.length} ai-review-anchor ${markerLabel}, but the matching review thread data was not found in <code>${escapeHtml(sidecar)}</code>. Comment text cannot be rebuilt from inline anchors; restore the sidecar JSON from backup/source control, or remove the stale anchors if the comments are no longer needed.</p>
+    <p>This Markdown file still contains ${missingMarkers.length} ai-review-anchor ${markerLabel}, but the matching review thread data was not found in <code>${escapeHtml(sidecar)}</code>. Comment text cannot be rebuilt from inline anchors; restore the sidecar JSON from backup/source control, or clean the stale anchors if the comments are no longer needed.</p>
+    <div class="storage-warning-actions">
+      <button type="button" class="secondary compact" data-cleanup-stale-anchors data-thread-ids="${escapeHtml(markerIds)}">Clean stale anchors</button>
+    </div>
   </section>`;
   }
 

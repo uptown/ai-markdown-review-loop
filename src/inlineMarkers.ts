@@ -79,6 +79,19 @@ export async function removeInlineAnchorMarker(
   document: vscode.TextDocument,
   threadId: string
 ): Promise<boolean> {
+  return removeInlineAnchorMarkers(document, [threadId]);
+}
+
+export async function removeInlineAnchorMarkers(
+  document: vscode.TextDocument,
+  threadIds: Iterable<string>
+): Promise<boolean> {
+  const ids = new Set(threadIds);
+
+  if (ids.size === 0) {
+    return true;
+  }
+
   const text = document.getText();
   const edit = new vscode.WorkspaceEdit();
   let changed = false;
@@ -89,11 +102,11 @@ export async function removeInlineAnchorMarker(
   while ((match = inlineAnchorPattern.exec(text)) !== null) {
     const markers = readInlineAnchorMarkers(match[0]);
 
-    if (!markers.some(marker => marker.id === threadId)) {
+    if (!markers.some(marker => ids.has(marker.id))) {
       continue;
     }
 
-    const remainingMarkers = markers.filter(marker => marker.id !== threadId);
+    const remainingMarkers = markers.filter(marker => !ids.has(marker.id));
     const replacement = remainingMarkers.length === 0
       ? ''
       : `${createInlineAnchorMarker(remainingMarkers)}${getTrailingNewline(match[0])}`;
