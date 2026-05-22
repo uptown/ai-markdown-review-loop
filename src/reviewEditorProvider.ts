@@ -2,7 +2,12 @@ import * as vscode from 'vscode';
 import MarkdownIt from 'markdown-it';
 import { randomUUID } from 'crypto';
 import { createAnchor } from './anchors';
-import { findMissingInlineAnchorMarkers, insertInlineAnchorMarker, stripInlineAnchorMarkers } from './inlineMarkers';
+import {
+  findMissingInlineAnchorMarkers,
+  insertInlineAnchorMarker,
+  removeInlineAnchorMarker,
+  stripInlineAnchorMarkers
+} from './inlineMarkers';
 import { ReviewStore } from './reviewStore';
 import { ReviewDocument, ReviewStatus, ReviewThread } from './types';
 
@@ -132,6 +137,15 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider {
             String(message.threadId),
             { status }
           );
+
+          if (status !== 'open') {
+            const markerRemoved = await removeInlineAnchorMarker(document, String(message.threadId));
+
+            if (!markerRemoved) {
+              vscode.window.showWarningMessage('Review status was updated, but the Markdown anchor marker could not be removed.');
+            }
+          }
+
           await render();
         }
 

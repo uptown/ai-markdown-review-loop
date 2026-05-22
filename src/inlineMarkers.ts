@@ -75,6 +75,40 @@ export async function insertInlineAnchorMarker(
   return vscode.workspace.applyEdit(edit);
 }
 
+export async function removeInlineAnchorMarker(
+  document: vscode.TextDocument,
+  threadId: string
+): Promise<boolean> {
+  const text = document.getText();
+  const edit = new vscode.WorkspaceEdit();
+  let changed = false;
+  let match: RegExpExecArray | null;
+
+  inlineAnchorPattern.lastIndex = 0;
+
+  while ((match = inlineAnchorPattern.exec(text)) !== null) {
+    const markers = readInlineAnchorMarkers(match[0]);
+
+    if (!markers.some(marker => marker.id === threadId)) {
+      continue;
+    }
+
+    const remainingMarkers = markers.filter(marker => marker.id !== threadId);
+    const replacement = remainingMarkers.length === 0
+      ? ''
+      : `${createInlineAnchorMarker(remainingMarkers)}${getTrailingNewline(match[0])}`;
+    const range = new vscode.Range(
+      document.positionAt(match.index),
+      document.positionAt(match.index + match[0].length)
+    );
+
+    edit.replace(document.uri, range, replacement);
+    changed = true;
+  }
+
+  return changed ? vscode.workspace.applyEdit(edit) : true;
+}
+
 function createInlineAnchorPayload(
   document: vscode.TextDocument,
   thread: ReviewThread,
@@ -214,6 +248,18 @@ function dedupeMarkers(markers: InlineAnchorMarker[]): InlineAnchorMarker[] {
   }
 
   return deduped;
+}
+
+function getTrailingNewline(value: string): string {
+  if (value.endsWith('\r\n')) {
+    return '\r\n';
+  }
+
+  if (value.endsWith('\n')) {
+    return '\n';
+  }
+
+  return '';
 }
 
 function isInlineAnchorMarker(value: unknown): value is InlineAnchorMarker {
