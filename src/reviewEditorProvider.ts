@@ -642,8 +642,19 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider {
     }
     .reply-item {
       margin-top: 8px;
+      border-left: 2px solid transparent;
+      padding-left: 8px;
+    }
+    .reply-item.source-human {
+      border-left-color: rgba(77, 163, 255, 0.72);
+    }
+    .reply-item.source-ai {
+      border-left-color: rgba(199, 146, 234, 0.72);
     }
     .reply-meta {
+      display: flex;
+      align-items: center;
+      gap: 6px;
       color: var(--muted);
       font-size: 12px;
       margin-bottom: 3px;
@@ -1554,6 +1565,22 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider {
       return '<span class="source-chip ' + sourceClass(thread) + '">' + escapeHtml(sourceLabel(thread)) + '</span>';
     }
 
+    function replyRoleKind(reply) {
+      return String(reply?.role || 'user') === 'assistant' ? 'ai' : 'human';
+    }
+
+    function replyRoleClass(reply) {
+      return sourceDisplay(replyRoleKind(reply)).cssClass;
+    }
+
+    function replyRoleLabel(reply) {
+      return sourceDisplay(replyRoleKind(reply)).label;
+    }
+
+    function renderReplyRoleChip(reply) {
+      return '<span class="source-chip ' + replyRoleClass(reply) + '">' + escapeHtml(replyRoleLabel(reply)) + '</span>';
+    }
+
     function getThreadIds(element) {
       const encodedIds = element.getAttribute('data-thread-ids');
 
@@ -1618,8 +1645,8 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider {
       return [
         '<div class="reply-list">',
         ...replies.map((reply) => [
-          '<div class="reply-item">',
-          '<div class="reply-meta">' + escapeHtml(reply.role || 'user') + ' · ' + escapeHtml(formatDate(reply.createdAt)) + '</div>',
+          '<div class="reply-item ' + replyRoleClass(reply) + '">',
+          '<div class="reply-meta">' + renderReplyRoleChip(reply) + '<span>' + escapeHtml(formatDate(reply.createdAt)) + '</span></div>',
           '<p class="reply-text">' + escapeHtml(reply.text || '') + '</p>',
           '</div>'
         ].join('')),

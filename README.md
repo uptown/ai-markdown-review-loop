@@ -12,7 +12,7 @@ The first MVP focuses on a local workflow:
 - Drag-select rendered text and attach feedback from an inline comment popover.
 - See saved comments as highlights and small badges in the rendered document.
 - Click a highlighted region or badge to inspect, resolve, or reject saved comments.
-- Reply under review comments to preserve discussion context for future AI handoff.
+- Reply under review comments with clear `You`/`AI` attribution for future AI handoff.
 - Distinguish user comments from AI-generated review comments with separate labels, badges, and highlight colors.
 - Click a thread in `Review Threads` to jump back to its highlighted content.
 - Persist compact `ai-review-anchor` metadata in the Markdown file while storing full thread data in sidecar JSON.
