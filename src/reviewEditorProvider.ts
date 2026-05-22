@@ -259,6 +259,10 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider {
       margin-bottom: 12px;
       background: var(--vscode-editor-background);
     }
+    .thread.is-active {
+      border-color: #8ad83f;
+      box-shadow: inset 3px 0 0 #8ad83f;
+    }
     .thread header {
       display: flex;
       justify-content: space-between;
@@ -290,6 +294,10 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider {
       overflow: hidden;
       background: var(--vscode-editor-background);
     }
+    .mermaid-figure.has-review {
+      border-color: #d7a100;
+      box-shadow: inset 0 0 0 1px rgba(215, 161, 0, 0.34);
+    }
     .mermaid-toolbar {
       display: flex;
       justify-content: space-between;
@@ -303,6 +311,7 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider {
     }
     .mermaid-actions {
       display: flex;
+      align-items: center;
       gap: 6px;
     }
     .mermaid-render {
@@ -379,6 +388,50 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider {
       gap: 8px;
       margin-top: 8px;
     }
+    .review-anchor {
+      border-radius: 3px;
+      background: rgba(255, 203, 64, 0.28);
+      box-shadow: inset 0 -2px 0 rgba(215, 161, 0, 0.9);
+    }
+    .review-anchor-block {
+      position: relative;
+      border-radius: 4px;
+      outline: 1px solid rgba(215, 161, 0, 0.65);
+      background: rgba(255, 203, 64, 0.12);
+    }
+    .review-anchor.is-active,
+    .review-anchor-block.is-active {
+      background: rgba(138, 216, 63, 0.22);
+      outline: 2px solid rgba(138, 216, 63, 0.9);
+      box-shadow: inset 0 -2px 0 #8ad83f;
+    }
+    .review-badge {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 18px;
+      height: 18px;
+      margin-left: 5px;
+      padding: 0 5px;
+      border: 1px solid rgba(31, 36, 40, 0.24);
+      border-radius: 999px;
+      color: #172018;
+      background: #8ad83f;
+      font-size: 11px;
+      font-weight: 700;
+      line-height: 1;
+      vertical-align: text-top;
+      cursor: pointer;
+      user-select: none;
+    }
+    .review-block-badge {
+      position: absolute;
+      top: -10px;
+      right: -10px;
+    }
+    .mermaid-review-badge {
+      margin-left: 0;
+    }
     @media (max-width: 900px) {
       .layout {
         grid-template-columns: 1fr;
@@ -431,8 +484,6 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider {
     let activeSelectionText = '';
     let activeSelectionRect = null;
     let selectionTimer = undefined;
-
-    renderMermaidDiagrams();
 
     document.getElementById('add-comment').addEventListener('click', () => {
       const selection = String(window.getSelection() || '').trim();
@@ -521,8 +572,8 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider {
       }
     });
 
-    const threadsContainer = document.getElementById('threads');
     const openThreads = state.threads.filter((thread) => thread.status === 'open');
+    const threadsContainer = document.getElementById('threads');
 
     if (openThreads.length === 0) {
       threadsContainer.innerHTML = '<p class="empty">No open feedback yet.</p>';
@@ -530,6 +581,7 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider {
       for (const thread of openThreads) {
         const element = document.createElement('section');
         element.className = 'thread';
+        element.dataset.threadId = thread.id;
         element.innerHTML = [
           '<header><span>' + escapeHtml(thread.type) + ' · ' + escapeHtml(thread.source) + '</span><span>' + escapeHtml(thread.severity) + '</span></header>',
           '<blockquote>' + escapeHtml(thread.anchor.text || 'Document') + '</blockquote>',
@@ -554,6 +606,10 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider {
       }
     }
 
+    decorateReviewAnchors(openThreads);
+    decorateMermaidReviewBadges(openThreads);
+    renderMermaidDiagrams();
+
     function escapeHtml(value) {
       return String(value)
         .replace(/&/g, '&amp;')
@@ -566,6 +622,197 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider {
     function getMermaidSource(figure) {
       const sourceElement = figure.querySelector('.mermaid-source code');
       return String(sourceElement?.textContent || '').trim();
+    }
+
+    function decorateReviewAnchors(threads) {
+      for (const thread of threads) {
+        const anchorText = normalizeInline(thread.anchor?.text || '');
+
+        if (!anchorText || anchorText.length < 2 || looksLikeMermaidSource(anchorText)) {
+          continue;
+        }
+
+        if (!highlightTextNode(thread, anchorText)) {
+          highlightContainingBlock(thread, anchorText);
+        }
+      }
+    }
+
+    function highlightTextNode(thread, anchorText) {
+      const walker = document.createTreeWalker(markdownBody, NodeFilter.SHOW_TEXT, {
+        acceptNode(node) {
+          const parent = node.parentElement;
+
+          if (!parent || shouldSkipHighlightParent(parent)) {
+            return NodeFilter.FILTER_REJECT;
+          }
+
+          return node.nodeValue && normalizeInline(node.nodeValue).includes(anchorText)
+            ? NodeFilter.FILTER_ACCEPT
+            : NodeFilter.FILTER_SKIP;
+        }
+      });
+
+      const node = walker.nextNode();
+
+      if (!node || !node.nodeValue) {
+        return false;
+      }
+
+      const index = normalizeInline(node.nodeValue).indexOf(anchorText);
+
+      if (index < 0) {
+        return false;
+      }
+
+      const rawIndex = findRawIndexForNormalizedText(node.nodeValue, anchorText, index);
+
+      if (rawIndex < 0) {
+        return false;
+      }
+
+      const matchLength = findRawLengthForNormalizedText(node.nodeValue.slice(rawIndex), anchorText);
+
+      if (matchLength <= 0) {
+        return false;
+      }
+
+      const matchNode = node.splitText(rawIndex);
+      const afterNode = matchNode.splitText(matchLength);
+      const marker = document.createElement('span');
+      marker.className = 'review-anchor';
+      marker.dataset.threadId = thread.id;
+      marker.textContent = matchNode.nodeValue;
+
+      const badge = createReviewBadge(thread, '');
+      marker.appendChild(badge);
+      matchNode.parentNode?.insertBefore(marker, matchNode);
+      matchNode.remove();
+      afterNode.parentElement?.normalize();
+      return true;
+    }
+
+    function highlightContainingBlock(thread, anchorText) {
+      const candidates = Array.from(markdownBody.querySelectorAll('p, li, h1, h2, h3, h4, h5, h6, td, th, blockquote'));
+      const target = candidates.find((element) => {
+        return !shouldSkipHighlightParent(element)
+          && normalizeInline(element.textContent || '').includes(anchorText);
+      });
+
+      if (!target) {
+        return;
+      }
+
+      target.classList.add('review-anchor-block');
+      target.dataset.threadId = thread.id;
+      target.appendChild(createReviewBadge(thread, 'review-block-badge'));
+    }
+
+    function decorateMermaidReviewBadges(threads) {
+      const figures = Array.from(document.querySelectorAll('[data-mermaid-diagram]'));
+
+      for (const figure of figures) {
+        const source = normalizeInline(getMermaidSource(figure));
+        const matches = threads.filter((thread) => {
+          const anchorText = normalizeInline(thread.anchor?.text || '');
+          return anchorText && (anchorText === source || source.includes(anchorText) || anchorText.includes(source));
+        });
+
+        if (matches.length === 0) {
+          continue;
+        }
+
+        figure.classList.add('has-review');
+        figure.dataset.threadId = matches[0].id;
+        const actions = figure.querySelector('.mermaid-actions');
+        actions?.prepend(createReviewBadge(matches[0], 'mermaid-review-badge', String(matches.length)));
+      }
+    }
+
+    function createReviewBadge(thread, extraClass, label) {
+      const badge = document.createElement('button');
+      badge.type = 'button';
+      badge.className = ('review-badge ' + extraClass).trim();
+      badge.title = 'Open comment';
+      badge.textContent = label || '1';
+      badge.dataset.threadId = thread.id;
+      badge.addEventListener('click', (event) => {
+        event.stopPropagation();
+        focusThread(thread.id);
+      });
+      return badge;
+    }
+
+    function focusThread(threadId) {
+      document.querySelectorAll('.is-active').forEach((element) => element.classList.remove('is-active'));
+      document.querySelectorAll('[data-thread-id="' + cssEscape(threadId) + '"]').forEach((element) => {
+        element.classList.add('is-active');
+      });
+
+      const threadCard = document.querySelector('.thread[data-thread-id="' + cssEscape(threadId) + '"]');
+      threadCard?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+
+    function shouldSkipHighlightParent(element) {
+      return Boolean(element.closest('button, textarea, pre, code, .review-anchor, .comment-composer, .selection-popover, .mermaid-source'));
+    }
+
+    function normalizeInline(value) {
+      return String(value).replace(/\\s+/g, ' ').trim();
+    }
+
+    function looksLikeMermaidSource(value) {
+      return /\\b(flowchart|graph|sequenceDiagram|classDiagram|stateDiagram|erDiagram|journey|gantt|pie|mindmap|timeline|gitGraph)\\b/i.test(value);
+    }
+
+    function cssEscape(value) {
+      return String(value).replace(/"/g, '\\\\"');
+    }
+
+    function findRawIndexForNormalizedText(rawText, normalizedNeedle, normalizedIndex) {
+      let normalizedCursor = 0;
+      let inWhitespace = false;
+
+      for (let rawIndex = 0; rawIndex < rawText.length; rawIndex += 1) {
+        const char = rawText[rawIndex];
+        const isWhitespace = /\\s/.test(char);
+
+        if (isWhitespace) {
+          if (!inWhitespace) {
+            if (normalizedCursor === normalizedIndex) {
+              return rawIndex;
+            }
+            normalizedCursor += 1;
+          }
+          inWhitespace = true;
+        } else {
+          inWhitespace = false;
+          if (normalizedCursor === normalizedIndex) {
+            return rawIndex;
+          }
+          normalizedCursor += 1;
+        }
+
+        if (normalizedCursor > normalizedIndex + normalizedNeedle.length) {
+          break;
+        }
+      }
+
+      return normalizedIndex;
+    }
+
+    function findRawLengthForNormalizedText(rawText, normalizedNeedle) {
+      let normalizedValue = '';
+
+      for (let rawIndex = 0; rawIndex < rawText.length; rawIndex += 1) {
+        normalizedValue = normalizeInline(rawText.slice(0, rawIndex + 1));
+
+        if (normalizedValue.length >= normalizedNeedle.length) {
+          return rawIndex + 1;
+        }
+      }
+
+      return rawText.length;
     }
 
     function scheduleSelectionComposer(openImmediately) {

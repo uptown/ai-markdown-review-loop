@@ -2,7 +2,7 @@
   "name": "ai-markdown-review-loop",
   "displayName": "AI Markdown Review Loop",
   "description": "Review Markdown with inline feedback, AI-ready threads, and agent handoff exports.",
-  "version": "0.0.4",
+  "version": "0.0.5",
   "publisher": "uptown",
   "license": "MIT",
   "repository": {

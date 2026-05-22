@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.0.5
+
+- Shows visible review highlights and comment badges in the rendered Markdown preview.
+- Marks Mermaid diagram cards that have attached review feedback.
+- Replaces the toolbar shortcut asset with a clearer comment-review icon.
+
 ## 0.0.4
 
 - Adds a custom editor title toolbar icon for opening AI Review.
