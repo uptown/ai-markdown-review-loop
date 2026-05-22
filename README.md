@@ -11,6 +11,7 @@ The first MVP focuses on a local workflow:
 - Use the green AI Review icon in the VS Code editor title toolbar.
 - Drag-select rendered text and attach feedback from an inline comment popover.
 - Submit comments and replies with `Enter`, while `Shift+Enter` keeps a newline.
+- Empty comment composers close on outside click or Escape, while typed drafts stay open.
 - See saved comments as highlights and small badges in the rendered document.
 - Click a highlighted region or badge to inspect, accept, resolve, or reject saved comments.
 - Reply under review comments with clear `You`/`AI` attribution for future AI handoff.

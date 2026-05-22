@@ -967,6 +967,7 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
       if (event.key === 'Escape') {
         hideCommentOverlay();
         hideSelectionPopover();
+        hideComposerIfEmpty();
       }
 
       if (event.key === 'Enter'
@@ -1036,6 +1037,8 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
       if (!(target instanceof HTMLElement)) {
         return;
       }
+
+      hideComposerIfEmpty(target);
 
       const applyPatchButton = target.closest('[data-apply-suggested-patch]');
 
@@ -2097,6 +2100,22 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
     function hideComposer() {
       commentComposer.style.display = 'none';
       commentBody.value = '';
+    }
+
+    function hideComposerIfEmpty(target) {
+      if (commentComposer.style.display !== 'block') {
+        return;
+      }
+
+      if (target?.closest?.('.comment-composer, .selection-popover')) {
+        return;
+      }
+
+      if (commentBody.value.trim()) {
+        return;
+      }
+
+      hideComposer();
     }
 
     function positionFloatingElement(element, rect, preferredWidth) {
