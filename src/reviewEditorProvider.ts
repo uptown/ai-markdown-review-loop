@@ -286,16 +286,6 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider {
       padding: 16px;
       overflow: auto;
     }
-    .toolbar {
-      position: sticky;
-      top: 0;
-      z-index: 2;
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      padding: 10px 0 16px;
-      background: var(--vscode-editor-background);
-    }
     button {
       border: 0;
       border-radius: 4px;
@@ -311,10 +301,6 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider {
     }
     button.compact {
       padding: 4px 8px;
-      font-size: 12px;
-    }
-    .hint {
-      color: var(--muted);
       font-size: 12px;
     }
     .thread {
@@ -417,7 +403,8 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider {
       margin: 8px 0 0;
     }
     .selection-popover,
-    .comment-composer {
+    .comment-composer,
+    .comment-overlay {
       position: fixed;
       z-index: 20;
       display: none;
@@ -433,6 +420,36 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider {
     .comment-composer {
       width: 320px;
       padding: 10px;
+    }
+    .comment-overlay {
+      box-sizing: border-box;
+      width: 360px;
+      max-height: min(520px, calc(100vh - 24px));
+      overflow: auto;
+      padding: 12px;
+    }
+    .comment-overlay-item + .comment-overlay-item {
+      margin-top: 12px;
+      padding-top: 12px;
+      border-top: 1px solid var(--border);
+    }
+    .comment-overlay-meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-bottom: 8px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+    .comment-overlay-comment {
+      margin: 0;
+      line-height: 1.45;
+    }
+    .comment-overlay-actions {
+      display: flex;
+      gap: 6px;
+      margin-top: 10px;
+      flex-wrap: wrap;
     }
     .comment-composer textarea {
       box-sizing: border-box;
@@ -518,10 +535,6 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider {
 <body>
   <div class="layout">
     <main>
-      <div class="toolbar">
-        <button id="add-comment">Add Feedback</button>
-        <span class="hint">Select rendered text, then add feedback.</span>
-      </div>
       <article id="markdown-body">${renderedMarkdown}</article>
     </main>
     <aside>
@@ -540,6 +553,7 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider {
       <button type="submit" class="compact">Save</button>
     </div>
   </form>
+  <div id="comment-overlay" class="comment-overlay" role="dialog" aria-label="Review comments"></div>
   <script nonce="${nonce}" src="${mermaidScriptUri}"></script>
   <script nonce="${nonce}">
     const vscode = acquireVsCodeApi();
@@ -550,22 +564,12 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider {
     const commentComposer = document.getElementById('comment-composer');
     const commentBody = document.getElementById('comment-body');
     const commentCancel = document.getElementById('comment-cancel');
+    const commentOverlay = document.getElementById('comment-overlay');
     let activeSelectionText = '';
     let activeSelectionOccurrence = 0;
     let activeSourceLine = undefined;
     let activeSelectionRect = null;
     let selectionTimer = undefined;
-
-    document.getElementById('add-comment').addEventListener('click', () => {
-      captureCurrentSelection();
-      const selection = String(window.getSelection() || '').trim();
-      vscode.postMessage({
-        type: 'addComment',
-        anchorText: activeSelectionText || selection,
-        anchorOccurrence: activeSelectionOccurrence,
-        sourceLine: activeSourceLine
-      });
-    });
 
     document.addEventListener('selectionchange', () => {
       scheduleSelectionComposer(false);
@@ -589,8 +593,8 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider {
 
     document.addEventListener('keydown', (event) => {
       if (event.key === 'Escape') {
+        hideCommentOverlay();
         hideSelectionPopover();
-        hideComposer();
       }
 
       if ((event.metaKey || event.ctrlKey) && event.key === 'Enter' && commentComposer.style.display === 'block') {
@@ -626,31 +630,63 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider {
         return;
       }
 
-      const figure = target.closest('[data-mermaid-diagram]');
+      const overlayAction = target.closest('[data-overlay-status]');
 
-      if (!figure) {
+      if (overlayAction) {
+        event.stopPropagation();
+        vscode.postMessage({
+          type: 'updateStatus',
+          threadId: overlayAction.getAttribute('data-thread-id'),
+          status: overlayAction.getAttribute('data-overlay-status')
+        });
         return;
       }
 
-      const source = getMermaidSource(figure);
-
-      if (target.matches('[data-mermaid-feedback]')) {
-        activeSelectionText = source;
-        activeSelectionOccurrence = 0;
-        activeSourceLine = getSourceLine(figure);
-        const rect = target.getBoundingClientRect();
-        activeSelectionRect = {
-          left: rect.left,
-          right: rect.right,
-          top: rect.top,
-          bottom: rect.bottom
-        };
-        openComposer();
+      if (target.closest('#comment-overlay')) {
+        return;
       }
 
-      if (target.matches('[data-mermaid-copy]')) {
-        vscode.postMessage({ type: 'copyText', text: source });
+      const figure = target.closest('[data-mermaid-diagram]');
+
+      if (figure) {
+        const source = getMermaidSource(figure);
+
+        if (target.matches('[data-mermaid-feedback]')) {
+          activeSelectionText = source;
+          activeSelectionOccurrence = 0;
+          activeSourceLine = getSourceLine(figure);
+          const rect = target.getBoundingClientRect();
+          activeSelectionRect = {
+            left: rect.left,
+            right: rect.right,
+            top: rect.top,
+            bottom: rect.bottom
+          };
+          openComposer();
+          return;
+        }
+
+        if (target.matches('[data-mermaid-copy]')) {
+          vscode.postMessage({ type: 'copyText', text: source });
+          return;
+        }
       }
+
+      const commentTarget = target.closest('.review-badge, .review-anchor, .review-anchor-block, [data-mermaid-diagram].has-review');
+
+      if (commentTarget) {
+        const threadIds = getThreadIds(commentTarget);
+
+        if (threadIds.length > 0) {
+          event.stopPropagation();
+          const sourceElement = target.closest('.review-badge') || commentTarget;
+          openCommentOverlay(threadIds, sourceElement);
+          focusThread(threadIds[0]);
+          return;
+        }
+      }
+
+      hideCommentOverlay();
     });
 
     const openThreads = state.threads.filter((thread) => thread.status === 'open');
@@ -698,6 +734,7 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider {
 
     decorateReviewAnchors(openThreads);
     decorateMermaidReviewBadges(openThreads);
+    attachRelatedThreadIds(openThreads);
     renderMermaidDiagrams();
 
     function escapeHtml(value) {
@@ -781,6 +818,7 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider {
           const marker = document.createElement('span');
           marker.className = 'review-anchor';
           marker.dataset.threadId = thread.id;
+          marker.title = 'Open comment';
           marker.textContent = matchNode.nodeValue;
 
           const badge = createReviewBadge(thread, '');
@@ -822,6 +860,7 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider {
 
       target.classList.add('review-anchor-block');
       target.dataset.threadId = thread.id;
+      target.title = 'Open comment';
       target.appendChild(createReviewBadge(thread, 'review-block-badge'));
     }
 
@@ -841,6 +880,7 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider {
 
         figure.classList.add('has-review');
         figure.dataset.threadId = matches[0].id;
+        figure.dataset.threadIds = matches.map((thread) => thread.id).join(',');
         const actions = figure.querySelector('.mermaid-actions');
         actions?.prepend(createReviewBadge(matches[0], 'mermaid-review-badge', String(matches.length)));
       }
@@ -853,11 +893,100 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider {
       badge.title = 'Open comment';
       badge.textContent = label || '1';
       badge.dataset.threadId = thread.id;
-      badge.addEventListener('click', (event) => {
-        event.stopPropagation();
-        focusThread(thread.id);
-      });
       return badge;
+    }
+
+    function attachRelatedThreadIds(threads) {
+      const anchors = Array.from(markdownBody.querySelectorAll('.review-anchor, .review-anchor-block'));
+
+      for (const anchor of anchors) {
+        const baseThread = findThread(anchor.dataset.threadId);
+        const relatedThreads = getRelatedThreads(baseThread, threads);
+
+        if (relatedThreads.length === 0) {
+          continue;
+        }
+
+        anchor.dataset.threadIds = relatedThreads.map((thread) => thread.id).join(',');
+        const badge = anchor.querySelector('.review-badge');
+
+        if (badge) {
+          badge.dataset.threadId = relatedThreads[0].id;
+          badge.dataset.threadIds = anchor.dataset.threadIds;
+          badge.textContent = String(relatedThreads.length);
+          badge.title = relatedThreads.length === 1 ? 'Open comment' : 'Open comments';
+        }
+      }
+    }
+
+    function getRelatedThreads(baseThread, threads) {
+      if (!baseThread) {
+        return [];
+      }
+
+      const baseText = normalizeInline(baseThread.anchor?.text || '');
+
+      return threads.filter((thread) => {
+        const anchorText = normalizeInline(thread.anchor?.text || '');
+        return anchorText && anchorText === baseText;
+      });
+    }
+
+    function getThreadIds(element) {
+      const encodedIds = element.getAttribute('data-thread-ids');
+
+      if (encodedIds) {
+        return encodedIds.split(',').map((value) => value.trim()).filter(Boolean);
+      }
+
+      const threadId = element.getAttribute('data-thread-id');
+      return threadId ? [threadId] : [];
+    }
+
+    function findThread(threadId) {
+      return openThreads.find((thread) => thread.id === threadId);
+    }
+
+    function openCommentOverlay(threadIds, sourceElement) {
+      const threads = threadIds.map(findThread).filter(Boolean);
+
+      if (threads.length === 0) {
+        hideCommentOverlay();
+        return;
+      }
+
+      commentOverlay.innerHTML = threads.map(renderCommentOverlayItem).join('');
+      const rect = sourceElement.getBoundingClientRect();
+      positionFloatingElement(commentOverlay, {
+        left: rect.left,
+        right: rect.right,
+        top: rect.top,
+        bottom: rect.bottom
+      }, 360);
+      commentOverlay.style.display = 'block';
+    }
+
+    function renderCommentOverlayItem(thread) {
+      return [
+        '<section class="comment-overlay-item">',
+        '<div class="comment-overlay-meta">',
+        '<span>' + escapeHtml(thread.type || 'note') + '</span>',
+        '<span>' + escapeHtml(thread.source || 'human') + '</span>',
+        '<span>' + escapeHtml(thread.severity || 'medium') + '</span>',
+        '<span>' + escapeHtml(thread.status || 'open') + '</span>',
+        '</div>',
+        '<p class="comment-overlay-comment">' + escapeHtml(thread.comment || '') + '</p>',
+        '<div class="comment-overlay-actions">',
+        '<button class="secondary compact" data-thread-id="' + escapeHtml(thread.id) + '" data-overlay-status="resolved">Resolve</button>',
+        '<button class="secondary compact" data-thread-id="' + escapeHtml(thread.id) + '" data-overlay-status="rejected">Reject</button>',
+        '</div>',
+        '</section>'
+      ].join('');
+    }
+
+    function hideCommentOverlay() {
+      commentOverlay.style.display = 'none';
+      commentOverlay.innerHTML = '';
     }
 
     function focusThread(threadId) {
@@ -881,7 +1010,7 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider {
     }
 
     function shouldSkipHighlightParent(element) {
-      return Boolean(element.closest('button, textarea, pre, code, .review-anchor, .comment-composer, .selection-popover, .mermaid-source'));
+      return Boolean(element.closest('button, textarea, pre, code, .review-anchor, .comment-composer, .selection-popover, .comment-overlay, .mermaid-source'));
     }
 
     function normalizeInline(value) {
@@ -1065,6 +1194,7 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider {
         return;
       }
 
+      hideCommentOverlay();
       hideSelectionPopover();
       commentBody.value = '';
       positionFloatingElement(commentComposer, activeSelectionRect, 340);

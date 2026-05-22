@@ -9,9 +9,9 @@ The first MVP focuses on a local workflow:
 - Render Mermaid diagrams from fenced `mermaid` code blocks.
 - Open the review preview from a Markdown editor title shortcut.
 - Use the green AI Review icon in the VS Code editor title toolbar.
-- Use top-of-file CodeLens shortcuts: `Open AI Review`, `Review Document`, and `Export Feedback`.
 - Drag-select rendered text and attach feedback from an inline comment popover.
 - See saved comments as highlights and small badges in the rendered document.
+- Click a highlighted region or badge to inspect, resolve, or reject saved comments.
 - Click a thread in `Review Threads` to jump back to its highlighted content.
 - Persist compact `ai-review-anchor` metadata in the Markdown file while storing full thread data in sidecar JSON.
 - Attach feedback directly to a Mermaid diagram source block.
@@ -37,7 +37,7 @@ To run inside VS Code:
 Installed usage:
 
 1. Open a Markdown file.
-2. Click the split-review icon in the editor title toolbar, click `Open AI Review Beside` above the first line, right-click the editor and choose `AI Markdown Review: Open Review Beside`, or press `Cmd+Alt+Shift+R`.
+2. Click the split-review icon in the editor title toolbar, right-click the editor and choose `AI Markdown Review: Open Review Beside`, or press `Cmd+Alt+Shift+R`.
 3. Drag-select rendered text in the review preview.
 4. Save feedback inline and the selected text will be highlighted with a comment badge.
 
@@ -51,7 +51,6 @@ Installed usage:
 
 - Green editor title toolbar icon: open review preview.
 - Split-review editor title toolbar icon: open Markdown source and review preview side by side.
-- Top-of-file CodeLens shortcuts on Markdown files: open review, review document, export feedback.
 - Editor context menu on Markdown files: open review preview or export feedback.
 - Keyboard shortcut: `Cmd+Alt+R` on macOS, `Ctrl+Alt+R` elsewhere.
 - Split keyboard shortcut: `Cmd+Alt+Shift+R` on macOS, `Ctrl+Alt+Shift+R` elsewhere.

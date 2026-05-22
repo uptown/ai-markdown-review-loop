@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.0.8
+
+- Removes the top preview Add Feedback button and Markdown source shortcut provider.
+- Adds a read-only comment overlay from highlighted regions and badges, including Resolve and Reject actions.
+
 ## 0.0.7
 
 - Makes Review Threads cards jump back to their highlighted content in the rendered preview.
@@ -25,7 +30,7 @@
 
 ## 0.0.3
 
-- Adds top-of-file CodeLens shortcuts for Markdown files.
+- Adds Markdown editor shortcuts.
 - Broadens Markdown menu visibility using file extension and language context.
 
 ## 0.0.2

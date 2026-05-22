@@ -2,7 +2,6 @@ import * as vscode from 'vscode';
 import { renderFeedbackExport } from './exportFeedback';
 import { insertInlineAnchorMarker } from './inlineMarkers';
 import { createLocalReviewThreads } from './localReview';
-import { MarkdownCodeLensProvider } from './markdownCodeLensProvider';
 import { ReviewEditorProvider, reviewEditorViewType } from './reviewEditorProvider';
 import { ReviewStore } from './reviewStore';
 
@@ -11,10 +10,6 @@ export function activate(context: vscode.ExtensionContext): void {
   const provider = new ReviewEditorProvider(context, store);
 
   context.subscriptions.push(
-    vscode.languages.registerCodeLensProvider(
-      { language: 'markdown', scheme: 'file' },
-      new MarkdownCodeLensProvider()
-    ),
     vscode.window.registerCustomEditorProvider(reviewEditorViewType, provider, {
       webviewOptions: {
         retainContextWhenHidden: true
