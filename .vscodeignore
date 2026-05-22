@@ -1,6 +1,7 @@
 .git/**
 .github/**
 .agent/**
+.ai-markdown-review/**
 .vscode/**
 src/**
 scripts/**

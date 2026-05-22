@@ -368,6 +368,11 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider {
       background: var(--vscode-input-background);
       font: inherit;
     }
+    .comment-composer-label {
+      margin: 0 0 8px;
+      color: var(--muted);
+      font-size: 12px;
+    }
     .comment-composer-actions {
       display: flex;
       justify-content: flex-end;
@@ -406,6 +411,7 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider {
     <button id="selection-comment" class="compact">Comment</button>
   </div>
   <form id="comment-composer" class="comment-composer">
+    <p class="comment-composer-label">Comment on selected text</p>
     <textarea id="comment-body" placeholder="Add feedback for this selection"></textarea>
     <div class="comment-composer-actions">
       <button type="button" id="comment-cancel" class="secondary compact">Cancel</button>
@@ -424,6 +430,7 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider {
     const commentCancel = document.getElementById('comment-cancel');
     let activeSelectionText = '';
     let activeSelectionRect = null;
+    let selectionTimer = undefined;
 
     renderMermaidDiagrams();
 
@@ -433,15 +440,15 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider {
     });
 
     document.addEventListener('selectionchange', () => {
-      window.setTimeout(updateSelectionPopover, 0);
+      scheduleSelectionComposer(false);
     });
 
-    markdownBody.addEventListener('mouseup', () => {
-      window.setTimeout(updateSelectionPopover, 0);
+    markdownBody.addEventListener('pointerup', () => {
+      scheduleSelectionComposer(true);
     });
 
     markdownBody.addEventListener('keyup', () => {
-      window.setTimeout(updateSelectionPopover, 0);
+      scheduleSelectionComposer(false);
     });
 
     selectionCommentButton.addEventListener('click', () => {
@@ -450,7 +457,18 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider {
 
     commentCancel.addEventListener('click', () => {
       hideComposer();
-      updateSelectionPopover();
+    });
+
+    document.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape') {
+        hideSelectionPopover();
+        hideComposer();
+      }
+
+      if ((event.metaKey || event.ctrlKey) && event.key === 'Enter' && commentComposer.style.display === 'block') {
+        event.preventDefault();
+        commentComposer.requestSubmit();
+      }
     });
 
     commentComposer.addEventListener('submit', (event) => {
@@ -550,23 +568,54 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider {
       return String(sourceElement?.textContent || '').trim();
     }
 
+    function scheduleSelectionComposer(openImmediately) {
+      window.clearTimeout(selectionTimer);
+      selectionTimer = window.setTimeout(() => {
+        if (commentComposer.style.display === 'block') {
+          return;
+        }
+
+        const hasSelection = captureCurrentSelection();
+
+        if (!hasSelection) {
+          hideSelectionPopover();
+          return;
+        }
+
+        if (openImmediately) {
+          openComposer();
+        } else {
+          positionFloatingElement(selectionPopover, activeSelectionRect, 120);
+          selectionPopover.style.display = 'block';
+        }
+      }, openImmediately ? 80 : 160);
+    }
+
     function updateSelectionPopover() {
       if (commentComposer.style.display === 'block') {
         return;
       }
 
+      if (!captureCurrentSelection()) {
+        hideSelectionPopover();
+        return;
+      }
+
+      positionFloatingElement(selectionPopover, activeSelectionRect, 120);
+      selectionPopover.style.display = 'block';
+    }
+
+    function captureCurrentSelection() {
       const selection = window.getSelection();
 
       if (!selection || selection.rangeCount === 0 || selection.isCollapsed) {
-        hideSelectionPopover();
-        return;
+        return false;
       }
 
       const selectedText = String(selection).trim();
 
       if (!selectedText) {
-        hideSelectionPopover();
-        return;
+        return false;
       }
 
       const range = selection.getRangeAt(0);
@@ -575,15 +624,13 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider {
         : range.commonAncestorContainer.parentElement;
 
       if (!container || !markdownBody.contains(container)) {
-        hideSelectionPopover();
-        return;
+        return false;
       }
 
-      const rect = range.getBoundingClientRect();
+      const rect = getBestSelectionRect(range);
 
       if (!rect || rect.width === 0 && rect.height === 0) {
-        hideSelectionPopover();
-        return;
+        return false;
       }
 
       activeSelectionText = selectedText;
@@ -593,8 +640,18 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider {
         top: rect.top,
         bottom: rect.bottom
       };
-      positionFloatingElement(selectionPopover, activeSelectionRect, 120);
-      selectionPopover.style.display = 'block';
+
+      return true;
+    }
+
+    function getBestSelectionRect(range) {
+      const rects = Array.from(range.getClientRects()).filter((rect) => rect.width > 0 || rect.height > 0);
+
+      if (rects.length > 0) {
+        return rects[rects.length - 1];
+      }
+
+      return range.getBoundingClientRect();
     }
 
     function openComposer() {
