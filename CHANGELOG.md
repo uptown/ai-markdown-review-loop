@@ -4,6 +4,7 @@
 
 - Warns when Markdown inline review anchors refer to sidecar comment JSON that is missing or incomplete.
 - Adds reply threads under review comments and includes discussion history in agent exports.
+- Compacts multiple inline review anchors at the same insertion point into one grouped marker.
 
 ## 0.0.8
 
