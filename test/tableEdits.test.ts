@@ -87,16 +87,121 @@ describe('Markdown table edits', () => {
     assert.equal(updates.length, 1);
     assert.match(updates[0].update.thread?.[0].text ?? '', /edited the table/);
   });
+
+  it('keeps a table cell comment attached to the edited cell value', () => {
+    const markdown = [
+      'Before',
+      '| Feature | Status |',
+      '| --- | --- |',
+      '| Tables | Gap |',
+      '| Mermaid | Open |',
+      'After'
+    ].join('\n');
+    const replacement = createMarkdownTableReplacement({
+      headers: ['Feature', 'Status'],
+      alignments: ['none', 'none'],
+      rows: [
+        ['Tables', 'Fixed'],
+        ['Mermaid', 'Open']
+      ]
+    });
+    const plan = createLineRangeEditPlan(markdown, {
+      lineStart: 2,
+      lineEnd: 5,
+      replacement,
+      actor: 'user',
+      intent: 'manual_table_edit'
+    });
+    const updates = buildReviewAwareThreadUpdates(markdown, [
+      thread('rv_table_cell', 'Gap', 4)
+    ], plan, now);
+
+    assert.equal(updates.length, 1);
+    assert.equal(updates[0].update.anchor?.text, 'Fixed');
+    assert.equal(updates[0].update.anchor?.lineStart, 4);
+    assert.equal(updates[0].update.anchor?.lineEnd, 4);
+    assert.equal(updates[0].update.anchor?.confidence, 'exact');
+  });
+
+  it('uses the original table line to disambiguate repeated cell comments', () => {
+    const markdown = [
+      'Before',
+      '| Feature | Status |',
+      '| --- | --- |',
+      '| Tables | Pending |',
+      '| Mermaid | Pending |',
+      'After'
+    ].join('\n');
+    const replacement = createMarkdownTableReplacement({
+      headers: ['Feature', 'Status'],
+      alignments: ['none', 'none'],
+      rows: [
+        ['Tables', 'Fixed'],
+        ['Mermaid', 'Open']
+      ]
+    });
+    const plan = createLineRangeEditPlan(markdown, {
+      lineStart: 2,
+      lineEnd: 5,
+      replacement,
+      actor: 'user',
+      intent: 'manual_table_edit'
+    });
+    const updates = buildReviewAwareThreadUpdates(markdown, [
+      thread('rv_second_row', 'Pending', 5)
+    ], plan, now);
+
+    assert.equal(updates.length, 1);
+    assert.equal(updates[0].update.anchor?.text, 'Open');
+    assert.equal(updates[0].update.anchor?.lineStart, 5);
+    assert.equal(updates[0].update.anchor?.lineEnd, 5);
+    assert.equal(updates[0].update.anchor?.confidence, 'exact');
+  });
+
+  it('keeps a partial cell comment on its original row when another row is an exact match', () => {
+    const markdown = [
+      'Before',
+      '| Feature | Status |',
+      '| --- | --- |',
+      '| Tables | Pending review |',
+      '| Mermaid | Pending |',
+      'After'
+    ].join('\n');
+    const replacement = createMarkdownTableReplacement({
+      headers: ['Feature', 'Status'],
+      alignments: ['none', 'none'],
+      rows: [
+        ['Tables', 'Fixed review'],
+        ['Mermaid', 'Open']
+      ]
+    });
+    const plan = createLineRangeEditPlan(markdown, {
+      lineStart: 2,
+      lineEnd: 5,
+      replacement,
+      actor: 'user',
+      intent: 'manual_table_edit'
+    });
+    const updates = buildReviewAwareThreadUpdates(markdown, [
+      thread('rv_partial_cell', 'Pending', 4)
+    ], plan, now);
+
+    assert.equal(updates.length, 1);
+    assert.equal(updates[0].update.anchor?.text, 'Fixed');
+    assert.equal(updates[0].update.anchor?.lineStart, 4);
+    assert.equal(updates[0].update.anchor?.lineEnd, 4);
+    assert.equal(updates[0].update.anchor?.confidence, 'exact');
+  });
 });
 
-function thread(id: string, anchorText: string): ReviewThread {
+function thread(id: string, anchorText: string, lineStart = 2, lineEnd = 4): ReviewThread {
   return {
     id,
     documentUri: 'file:///workspace/spec.md',
     anchor: {
       text: anchorText,
-      lineStart: 2,
-      lineEnd: 4,
+      lineStart,
+      lineEnd,
       confidence: 'exact'
     },
     type: 'note',

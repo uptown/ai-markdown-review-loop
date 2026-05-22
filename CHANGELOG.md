@@ -25,6 +25,7 @@
 - Uses Turndown for block-editor HTML-to-Markdown conversion instead of a hand-rolled serializer.
 - Adds Mermaid source editing from rendered diagram cards through the review-aware edit pipeline.
 - Adds a rendered Markdown table grid editor with row, column, and alignment controls through the review-aware edit pipeline.
+- Keeps table-cell comment anchors attached to edited cells, including repeated text in different rows.
 - Submits comment and reply textareas with Enter while keeping Shift+Enter for multi-line text.
 - Keeps the active comment overlay or review thread focused after saving a reply.
 - Shows accepted, resolved, and rejected review history with linked/outdated anchor state and a Restore action.

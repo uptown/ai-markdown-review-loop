@@ -11,6 +11,29 @@ export interface MarkdownTableBlock extends MarkdownTableData {
   lineEnd: number;
 }
 
+export interface MarkdownTableAnchorCandidate {
+  text: string;
+  start: number;
+  length: number;
+}
+
+interface CellAnchorCandidate {
+  text: string;
+  start: number;
+  length: number;
+}
+
+interface SourceTableCell {
+  tableLineIndex: number;
+  columnIndex: number;
+  text: string;
+}
+
+interface MarkdownTableCellRange {
+  start: number;
+  end: number;
+}
+
 export function collectMarkdownTables(markdown: string): MarkdownTableBlock[] {
   const normalizedMarkdown = markdown.replace(/\r\n?/g, '\n');
   const lines = normalizedMarkdown.split('\n');
@@ -94,6 +117,48 @@ export function normalizeMarkdownTableData(input: {
   };
 }
 
+export function findTableAnchorReplacementCandidate(
+  editedTableMarkdown: string,
+  replacementTableMarkdown: string,
+  anchorText: string,
+  preferredTableLineIndex?: number
+): MarkdownTableAnchorCandidate | undefined {
+  const sourceTable = parseMarkdownTableLines(editedTableMarkdown.replace(/\r\n?/g, '\n').split('\n'));
+  const replacementTable = parseMarkdownTableLines(
+    replacementTableMarkdown.replace(/\r\n?/g, '\n').split('\n')
+  );
+
+  if (!sourceTable || !replacementTable) {
+    return undefined;
+  }
+
+  const sourceCell = findSourceTableCell(sourceTable, anchorText, preferredTableLineIndex);
+
+  if (!sourceCell) {
+    return undefined;
+  }
+
+  const replacementCellText = cellTextAt(replacementTable, sourceCell.tableLineIndex, sourceCell.columnIndex);
+
+  if (!replacementCellText) {
+    return undefined;
+  }
+
+  const cellCandidate = findCellAnchorCandidate(sourceCell.text, replacementCellText, anchorText);
+
+  if (!cellCandidate) {
+    return undefined;
+  }
+
+  return createReplacementCellAnchorCandidate(
+    replacementTableMarkdown.replace(/\r\n?/g, '\n'),
+    sourceCell.tableLineIndex,
+    sourceCell.columnIndex,
+    replacementCellText,
+    cellCandidate
+  );
+}
+
 function parseMarkdownTableLines(lines: string[]): MarkdownTableData | undefined {
   if (lines.length < 2 || !isSeparatorLine(lines[1])) {
     return undefined;
@@ -108,6 +173,284 @@ function parseMarkdownTableLines(lines: string[]): MarkdownTableData | undefined
     alignments,
     rows
   });
+}
+
+function findSourceTableCell(
+  table: MarkdownTableData,
+  anchorText: string,
+  preferredTableLineIndex?: number
+): SourceTableCell | undefined {
+  const anchor = normalizeComparableText(anchorText);
+
+  if (!anchor) {
+    return undefined;
+  }
+
+  const cells = tableCells(table);
+  const candidates = cells.flatMap(row => row.cells
+    .map((text, columnIndex) => ({
+      tableLineIndex: row.tableLineIndex,
+      columnIndex,
+      text,
+      score: sourceCellMatchScore(text, anchorText, preferredTableLineIndex, row.tableLineIndex)
+    }))
+    .filter(candidate => candidate.score < Number.POSITIVE_INFINITY));
+
+  candidates.sort((left, right) => left.score - right.score);
+  return candidates[0]
+    ? {
+        tableLineIndex: candidates[0].tableLineIndex,
+        columnIndex: candidates[0].columnIndex,
+        text: candidates[0].text
+      }
+    : undefined;
+}
+
+function sourceCellMatchScore(
+  cellText: string,
+  anchorText: string,
+  preferredTableLineIndex: number | undefined,
+  tableLineIndex: number
+): number {
+  const normalizedCell = normalizeComparableText(cellText);
+  const normalizedAnchor = normalizeComparableText(anchorText);
+
+  if (!normalizedAnchor) {
+    return Number.POSITIVE_INFINITY;
+  }
+
+  let score = Number.POSITIVE_INFINITY;
+
+  if (cellText === anchorText) {
+    score = 0;
+  } else if (normalizedCell === normalizedAnchor) {
+    score = 10;
+  } else if (cellText.includes(anchorText)) {
+    score = 20;
+  } else if (normalizedCell.includes(normalizedAnchor)) {
+    score = 30;
+  }
+
+  if (score === Number.POSITIVE_INFINITY || preferredTableLineIndex === undefined) {
+    return score;
+  }
+
+  return score + (Math.abs(tableLineIndex - preferredTableLineIndex) * 100);
+}
+
+function findCellAnchorCandidate(
+  sourceCellText: string,
+  replacementCellText: string,
+  anchorText: string
+): CellAnchorCandidate | undefined {
+  const exactReplacementStart = replacementCellText.indexOf(anchorText);
+
+  if (exactReplacementStart >= 0) {
+    return {
+      text: replacementCellText.slice(exactReplacementStart, exactReplacementStart + anchorText.length),
+      start: exactReplacementStart,
+      length: anchorText.length
+    };
+  }
+
+  const exactSourceStart = sourceCellText.indexOf(anchorText);
+
+  if (exactSourceStart >= 0) {
+    const prefix = sourceCellText.slice(0, exactSourceStart);
+    const suffix = sourceCellText.slice(exactSourceStart + anchorText.length);
+
+    if (replacementCellText.startsWith(prefix) && replacementCellText.endsWith(suffix)) {
+      const start = prefix.length;
+      const end = replacementCellText.length - suffix.length;
+
+      if (end > start) {
+        return {
+          text: replacementCellText.slice(start, end),
+          start,
+          length: end - start
+        };
+      }
+    }
+  }
+
+  if (normalizeComparableText(sourceCellText) === normalizeComparableText(anchorText)) {
+    return {
+      text: replacementCellText,
+      start: 0,
+      length: replacementCellText.length
+    };
+  }
+
+  return undefined;
+}
+
+function createReplacementCellAnchorCandidate(
+  replacementTableMarkdown: string,
+  tableLineIndex: number,
+  columnIndex: number,
+  replacementCellText: string,
+  cellCandidate: CellAnchorCandidate
+): MarkdownTableAnchorCandidate | undefined {
+  const lines = replacementTableMarkdown.split('\n');
+  const targetLine = lines[tableLineIndex];
+
+  if (targetLine === undefined) {
+    return undefined;
+  }
+
+  const ranges = splitMarkdownTableRowRanges(targetLine);
+  const range = ranges[columnIndex];
+
+  if (!range) {
+    return undefined;
+  }
+
+  const serializedCellText = serializeCell(replacementCellText);
+  const serializedCellStart = targetLine.slice(range.start, range.end).indexOf(serializedCellText);
+
+  if (serializedCellStart < 0) {
+    return undefined;
+  }
+
+  const contentStart = range.start + serializedCellStart;
+  const serializedStart = contentStart
+    + displayOffsetToSerializedOffset(serializedCellText, cellCandidate.start);
+  const serializedEnd = contentStart
+    + displayOffsetToSerializedOffset(serializedCellText, cellCandidate.start + cellCandidate.length);
+  const lineStart = lineStartOffset(replacementTableMarkdown, tableLineIndex);
+
+  return {
+    text: cellCandidate.text,
+    start: lineStart + serializedStart,
+    length: Math.max(0, serializedEnd - serializedStart)
+  };
+}
+
+function tableCells(table: MarkdownTableData): Array<{
+  tableLineIndex: number;
+  cells: string[];
+}> {
+  return [
+    {
+      tableLineIndex: 0,
+      cells: table.headers
+    },
+    ...table.rows.map((cells, rowIndex) => ({
+      tableLineIndex: rowIndex + 2,
+      cells
+    }))
+  ];
+}
+
+function cellTextAt(
+  table: MarkdownTableData,
+  tableLineIndex: number,
+  columnIndex: number
+): string | undefined {
+  const row = tableLineIndex === 0
+    ? table.headers
+    : table.rows[tableLineIndex - 2];
+  return row?.[columnIndex];
+}
+
+function splitMarkdownTableRowRanges(line: string): MarkdownTableCellRange[] {
+  if (!line.includes('|')) {
+    return [];
+  }
+
+  const ranges: MarkdownTableCellRange[] = [];
+  let cellStart = line.startsWith('|') ? 1 : 0;
+  let codeFenceLength = 0;
+
+  for (let index = cellStart; index < line.length; index += 1) {
+    const character = line[index];
+
+    if (character === '`' && !isEscaped(line, index)) {
+      const fenceLength = countBackticks(line, index);
+
+      if (codeFenceLength === 0) {
+        codeFenceLength = fenceLength;
+      } else if (fenceLength === codeFenceLength) {
+        codeFenceLength = 0;
+      }
+
+      index += fenceLength - 1;
+      continue;
+    }
+
+    if (character === '|' && codeFenceLength === 0 && !isEscaped(line, index)) {
+      ranges.push(createCellRange(line, cellStart, index));
+      cellStart = index + 1;
+    }
+  }
+
+  if (cellStart < line.length) {
+    ranges.push(createCellRange(line, cellStart, line.length));
+  }
+
+  return ranges;
+}
+
+function createCellRange(line: string, start: number, end: number): MarkdownTableCellRange {
+  let contentStart = start;
+  let contentEnd = end;
+
+  while (contentStart < contentEnd && /\s/.test(line[contentStart])) {
+    contentStart += 1;
+  }
+
+  while (contentEnd > contentStart && /\s/.test(line[contentEnd - 1])) {
+    contentEnd -= 1;
+  }
+
+  return {
+    start: contentStart,
+    end: contentEnd
+  };
+}
+
+function displayOffsetToSerializedOffset(serializedText: string, displayOffset: number): number {
+  let displayCursor = 0;
+
+  for (let index = 0; index < serializedText.length; index += 1) {
+    if (displayCursor >= displayOffset) {
+      return index;
+    }
+
+    if (serializedText[index] === '\\' && serializedText[index + 1] === '|') {
+      index += 1;
+    }
+
+    displayCursor += 1;
+  }
+
+  return serializedText.length;
+}
+
+function lineStartOffset(text: string, zeroBasedLineIndex: number): number {
+  if (zeroBasedLineIndex <= 0) {
+    return 0;
+  }
+
+  let lineIndex = 0;
+
+  for (let index = 0; index < text.length; index += 1) {
+    if (text[index] !== '\n') {
+      continue;
+    }
+
+    lineIndex += 1;
+
+    if (lineIndex === zeroBasedLineIndex) {
+      return index + 1;
+    }
+  }
+
+  return text.length;
+}
+
+function normalizeComparableText(value: string): string {
+  return value.replace(/\s+/g, ' ').trim();
 }
 
 function isTableRow(line: string): boolean {

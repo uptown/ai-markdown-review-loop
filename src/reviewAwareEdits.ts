@@ -1,4 +1,5 @@
 import { hashAnchor, normalizeAnchorText } from './anchorText';
+import { findTableAnchorReplacementCandidate } from './tableEdits';
 import type { ReviewStatus, ReviewThread } from './types';
 
 const contextRadius = 180;
@@ -198,6 +199,26 @@ function createNextAnchor(
     );
   }
 
+  if (plan.intent === 'manual_table_edit') {
+    const preferredTableLineIndex = tableLineIndexForThread(thread, plan);
+    const tableCandidate = findTableAnchorReplacementCandidate(
+      editedRangeText,
+      plan.replacement,
+      thread.anchor.text,
+      preferredTableLineIndex
+    );
+
+    if (tableCandidate) {
+      return createExactReplacementAnchor(
+        thread,
+        afterMarkdown,
+        plan.start,
+        tableCandidate,
+        now
+      );
+    }
+  }
+
   const candidate = findReplacementAnchorCandidate(
     editedRangeText,
     plan.replacement,
@@ -321,6 +342,19 @@ function isAffectedThread(thread: ReviewThread, plan: ReviewAwareEditPlan): bool
 
   const threadLineEnd = Math.max(threadLineStart, thread.anchor.lineEnd ?? threadLineStart);
   return threadLineStart <= plan.lineEnd && threadLineEnd >= plan.lineStart;
+}
+
+function tableLineIndexForThread(
+  thread: ReviewThread,
+  plan: ReviewAwareEditPlan
+): number | undefined {
+  const locatedLine = thread.anchor.lastLocatedLine ?? thread.anchor.lineStart;
+
+  if (!locatedLine) {
+    return undefined;
+  }
+
+  return Math.max(0, locatedLine - plan.lineStart);
 }
 
 function createOutcomeReplyText(thread: ReviewThread, plan: ReviewAwareEditPlan): string {
