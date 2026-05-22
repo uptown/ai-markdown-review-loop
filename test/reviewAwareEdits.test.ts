@@ -87,7 +87,7 @@ describe('review-aware edits', () => {
     );
   });
 
-  it('marks partial comment anchors missing instead of expanding them to a rewritten block', () => {
+  it('updates a partial comment anchor to the edited word in the same context slot', () => {
     const markdown = [
       'Intro context',
       'The owner must document rollback steps.',
@@ -96,7 +96,61 @@ describe('review-aware edits', () => {
     const plan = createLineRangeEditPlan(markdown, {
       lineStart: 2,
       lineEnd: 2,
-      replacement: 'The owner must document release steps.',
+      replacement: 'The owner must document fallback steps.',
+      actor: 'user',
+      intent: 'manual_block_edit'
+    });
+    const updates = buildReviewAwareThreadUpdates(markdown, [
+      thread('rv_partial', {
+        anchorText: 'rollback',
+        lineStart: 2
+      })
+    ], plan, now);
+
+    assert.equal(updates.length, 1);
+    assert.equal(updates[0].update.anchor?.text, 'fallback');
+    assert.equal(updates[0].update.anchor?.confidence, 'exact');
+    assert.equal(updates[0].update.anchor?.lineStart, 2);
+    assert.equal(updates[0].update.anchor?.lineEnd, 2);
+    assert.notEqual(updates[0].update.anchor?.text, 'The owner must document fallback steps.');
+  });
+
+  it('updates a multi-word partial anchor to the edited phrase in the same context slot', () => {
+    const markdown = [
+      'Intro context',
+      'The owner must document rollback steps.',
+      'Outro context'
+    ].join('\n');
+    const plan = createLineRangeEditPlan(markdown, {
+      lineStart: 2,
+      lineEnd: 2,
+      replacement: 'The owner must document fallback steps.',
+      actor: 'user',
+      intent: 'manual_block_edit'
+    });
+    const updates = buildReviewAwareThreadUpdates(markdown, [
+      thread('rv_partial', {
+        anchorText: 'rollback steps',
+        lineStart: 2
+      })
+    ], plan, now);
+
+    assert.equal(updates.length, 1);
+    assert.equal(updates[0].update.anchor?.text, 'fallback steps');
+    assert.equal(updates[0].update.anchor?.confidence, 'exact');
+    assert.notEqual(updates[0].update.anchor?.text, 'The owner must document fallback steps.');
+  });
+
+  it('marks partial comment anchors missing when a rewrite has no reliable local slot', () => {
+    const markdown = [
+      'Intro context',
+      'The owner must document rollback steps.',
+      'Outro context'
+    ].join('\n');
+    const plan = createLineRangeEditPlan(markdown, {
+      lineStart: 2,
+      lineEnd: 2,
+      replacement: 'A completely different release safety plan is required.',
       actor: 'user',
       intent: 'manual_block_edit'
     });
@@ -110,7 +164,6 @@ describe('review-aware edits', () => {
     assert.equal(updates.length, 1);
     assert.equal(updates[0].update.anchor?.text, 'rollback steps');
     assert.equal(updates[0].update.anchor?.confidence, 'missing');
-    assert.notEqual(updates[0].update.anchor?.text, 'The owner must document release steps.');
   });
 
   it('marks the target suggested edit accepted while preserving its outcome reply', () => {

@@ -48,6 +48,12 @@ export interface ReviewAwareThreadUpdate {
   update: Partial<ReviewThread>;
 }
 
+interface ReplacementAnchorCandidate {
+  text: string;
+  start: number;
+  length: number;
+}
+
 export function createOffsetEditPlan(
   markdown: string,
   input: CreateOffsetEditPlanInput
@@ -106,17 +112,8 @@ export function buildReviewAwareThreadUpdates(
   now: string
 ): ReviewAwareThreadUpdate[] {
   const afterMarkdown = applyReviewAwareEditToMarkdown(beforeMarkdown, plan);
-  const editedRangeText = normalizeAnchorText(beforeMarkdown.slice(plan.start, plan.end));
+  const editedRangeText = beforeMarkdown.slice(plan.start, plan.end);
   const replacementAnchorText = normalizeAnchorText(plan.replacement);
-  const replacementStartLine = lineNumberAtOffset(afterMarkdown, plan.start);
-  const replacementEndLine = plan.replacement.length > 0
-    ? lineNumberAtOffset(afterMarkdown, plan.start + plan.replacement.length)
-    : replacementStartLine;
-  const context = createOffsetContext(
-    afterMarkdown,
-    plan.start,
-    plan.replacement.length
-  );
   const updates: ReviewAwareThreadUpdate[] = [];
 
   for (const thread of threads) {
@@ -127,11 +124,9 @@ export function buildReviewAwareThreadUpdates(
     const nextAnchor = createNextAnchor(
       thread,
       plan,
+      afterMarkdown,
       editedRangeText,
       replacementAnchorText,
-      replacementStartLine,
-      replacementEndLine,
-      context,
       now
     );
     const update: Partial<ReviewThread> = {
@@ -179,50 +174,132 @@ export function lineNumberAtOffset(text: string, offset: number): number {
 function createNextAnchor(
   thread: ReviewThread,
   plan: ReviewAwareEditPlan,
+  afterMarkdown: string,
   editedRangeText: string,
   replacementAnchorText: string,
-  replacementStartLine: number,
-  replacementEndLine: number,
-  context: Pick<ReviewThread['anchor'], 'contextBefore' | 'contextAfter'>,
   now: string
 ): ReviewThread['anchor'] {
   const existingAnchorText = normalizeAnchorText(thread.anchor.text);
   const anchorCoveredWholeEditedRange = Boolean(existingAnchorText)
-    && existingAnchorText === editedRangeText;
+    && existingAnchorText === normalizeAnchorText(editedRangeText);
 
   if ((thread.id === plan.targetThreadId || anchorCoveredWholeEditedRange) && replacementAnchorText) {
-    return {
-      ...thread.anchor,
-      text: replacementAnchorText,
-      lineStart: replacementStartLine,
-      lineEnd: replacementEndLine,
-      hash: hashAnchor(replacementAnchorText),
-      occurrence: undefined,
-      contextBefore: context.contextBefore,
-      contextAfter: context.contextAfter,
-      confidence: 'exact',
-      lastLocatedLine: replacementStartLine,
-      lastLocatedAt: now
-    };
+    return createExactReplacementAnchor(
+      thread,
+      afterMarkdown,
+      plan.start,
+      {
+        text: plan.replacement,
+        start: 0,
+        length: plan.replacement.length
+      },
+      now
+    );
   }
 
-  const normalizedReplacement = normalizeAnchorText(plan.replacement);
-  const stillExistsInEditedRange = Boolean(existingAnchorText)
-    && normalizedReplacement.includes(existingAnchorText);
-  const nextAnchorText = thread.anchor.text;
+  const candidate = findReplacementAnchorCandidate(
+    editedRangeText,
+    plan.replacement,
+    thread.anchor.text
+  );
 
+  if (candidate) {
+    return createExactReplacementAnchor(
+      thread,
+      afterMarkdown,
+      plan.start,
+      candidate,
+      now
+    );
+  }
+
+  const missingLine = lineNumberAtOffset(afterMarkdown, plan.start);
+  const context = createOffsetContext(afterMarkdown, plan.start, plan.replacement.length);
+  const nextAnchorText = thread.anchor.text;
   return {
     ...thread.anchor,
     text: nextAnchorText,
-    lineStart: replacementStartLine,
-    lineEnd: stillExistsInEditedRange ? replacementEndLine : replacementStartLine,
+    lineStart: missingLine,
+    lineEnd: missingLine,
     hash: hashAnchor(nextAnchorText),
     occurrence: undefined,
     contextBefore: context.contextBefore,
     contextAfter: context.contextAfter,
-    confidence: stillExistsInEditedRange ? 'exact' : 'missing',
-    lastLocatedLine: replacementStartLine,
+    confidence: 'missing',
+    lastLocatedLine: missingLine,
     lastLocatedAt: now
+  };
+}
+
+function createExactReplacementAnchor(
+  thread: ReviewThread,
+  afterMarkdown: string,
+  replacementOffset: number,
+  candidate: ReplacementAnchorCandidate,
+  now: string
+): ReviewThread['anchor'] {
+  const nextAnchorText = normalizeAnchorText(candidate.text);
+  const candidateOffset = replacementOffset + candidate.start;
+  const lineStart = lineNumberAtOffset(afterMarkdown, candidateOffset);
+  const lineEnd = candidate.length > 0
+    ? lineNumberAtOffset(afterMarkdown, candidateOffset + candidate.length)
+    : lineStart;
+  const context = createOffsetContext(afterMarkdown, candidateOffset, candidate.length);
+
+  return {
+    ...thread.anchor,
+    text: nextAnchorText,
+    lineStart,
+    lineEnd,
+    hash: hashAnchor(nextAnchorText),
+    occurrence: undefined,
+    contextBefore: context.contextBefore,
+    contextAfter: context.contextAfter,
+    confidence: 'exact',
+    lastLocatedLine: lineStart,
+    lastLocatedAt: now
+  };
+}
+
+function findReplacementAnchorCandidate(
+  editedRangeText: string,
+  replacementText: string,
+  anchorText: string
+): ReplacementAnchorCandidate | undefined {
+  const exactStart = replacementText.indexOf(anchorText);
+
+  if (exactStart >= 0) {
+    return {
+      text: replacementText.slice(exactStart, exactStart + anchorText.length),
+      start: exactStart,
+      length: anchorText.length
+    };
+  }
+
+  const editedAnchorStart = editedRangeText.indexOf(anchorText);
+
+  if (editedAnchorStart < 0) {
+    return undefined;
+  }
+
+  const prefix = editedRangeText.slice(0, editedAnchorStart);
+  const suffix = editedRangeText.slice(editedAnchorStart + anchorText.length);
+
+  if (!replacementText.startsWith(prefix) || !replacementText.endsWith(suffix)) {
+    return undefined;
+  }
+
+  const start = prefix.length;
+  const end = replacementText.length - suffix.length;
+
+  if (end <= start) {
+    return undefined;
+  }
+
+  return {
+    text: replacementText.slice(start, end),
+    start,
+    length: end - start
   };
 }
 
