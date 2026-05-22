@@ -184,6 +184,27 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider {
           await render();
         }
 
+        if (message?.type === 'anchorLocated') {
+          const sourceLine = parseSourceLine(message.sourceLine);
+          const threadId = String(message.threadId ?? '');
+
+          if (sourceLine && threadId) {
+            const reviewDocument = await this.store.load(document.uri);
+            const thread = reviewDocument.threads.find(candidate => candidate.id === threadId);
+
+            if (thread?.status === 'open'
+              && (thread.anchor.lineStart !== sourceLine || thread.anchor.lineEnd !== sourceLine)) {
+              await this.store.updateThread(document.uri, threadId, {
+                anchor: {
+                  ...thread.anchor,
+                  lineStart: sourceLine,
+                  lineEnd: sourceLine
+                }
+              });
+            }
+          }
+        }
+
         if (message?.type === 'addReply') {
           const replyText = String(message.text ?? '').trim();
 
@@ -937,7 +958,8 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider {
         }
 
         if (!highlightTextNode(thread, anchorText)
-          && !highlightContainingBlock(thread, anchorText)) {
+          && !highlightContainingBlock(thread, anchorText)
+          && !highlightContextBlock(thread, anchorText)) {
           highlightMarkerBlock(thread);
         }
       }
@@ -1034,6 +1056,108 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider {
       return true;
     }
 
+    function highlightContextBlock(thread, anchorText) {
+      const candidates = Array.from(markdownBody.querySelectorAll('[data-source-line], p, li, h1, h2, h3, h4, h5, h6, td, th, blockquote'));
+      let best;
+      let bestScore = 0;
+
+      for (const element of candidates) {
+        if (shouldSkipHighlightParent(element)) {
+          continue;
+        }
+
+        const score = scoreAnchorCandidate(element, thread, anchorText);
+
+        if (score > bestScore) {
+          best = element;
+          bestScore = score;
+        }
+      }
+
+      if (!best || bestScore < 3) {
+        return false;
+      }
+
+      attachThreadToAnchorElement(best, thread, 'review-block-badge');
+      return true;
+    }
+
+    function scoreAnchorCandidate(element, thread, anchorText) {
+      const text = normalizeInline(getElementContextText(element));
+      const before = normalizeInline(thread.anchor?.contextBefore || '');
+      const after = normalizeInline(thread.anchor?.contextAfter || '');
+      let score = 0;
+
+      if (anchorText) {
+        const overlap = tokenOverlapRatio(anchorText, text);
+
+        if (overlap >= 0.55) {
+          score += 4 * overlap;
+        }
+      }
+
+      if (before && contextMatches(text, before, 'tail')) {
+        score += 3;
+      }
+
+      if (after && contextMatches(text, after, 'head')) {
+        score += 3;
+      }
+
+      const sourceLine = Number(element.getAttribute('data-source-line'));
+      const lineHint = Number(markerLineHints[thread.id]);
+
+      if (Number.isFinite(sourceLine) && Number.isFinite(lineHint)) {
+        const distance = Math.abs(sourceLine - lineHint);
+        score += Math.max(0, 1.5 - Math.min(distance, 30) / 20);
+      }
+
+      return score;
+    }
+
+    function getElementContextText(element) {
+      return [
+        element.previousElementSibling?.textContent || '',
+        element.textContent || '',
+        element.nextElementSibling?.textContent || ''
+      ].join(' ');
+    }
+
+    function contextMatches(haystack, context, edge) {
+      return contextSnippets(context, edge).some((snippet) => haystack.includes(snippet));
+    }
+
+    function contextSnippets(context, edge) {
+      const normalized = normalizeInline(context);
+      const lengths = [90, 60, 36, 24];
+
+      return lengths
+        .filter((length) => normalized.length >= length)
+        .map((length) => edge === 'tail'
+          ? normalized.slice(normalized.length - length)
+          : normalized.slice(0, length));
+    }
+
+    function tokenOverlapRatio(needle, haystack) {
+      const needleTokens = uniqueTokens(needle);
+
+      if (needleTokens.length === 0) {
+        return 0;
+      }
+
+      const haystackTokens = new Set(uniqueTokens(haystack));
+      const matches = needleTokens.filter((token) => haystackTokens.has(token)).length;
+      return matches / needleTokens.length;
+    }
+
+    function uniqueTokens(value) {
+      return Array.from(new Set(
+        normalizeInline(value)
+          .split(/[^\\p{L}\\p{N}_-]+/u)
+          .filter((token) => token.length >= 4)
+      ));
+    }
+
     function highlightMarkerBlock(thread) {
       const lineHint = Number(markerLineHints[thread.id]);
 
@@ -1088,6 +1212,21 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider {
       badge.dataset.threadIds = element.dataset.threadIds;
       badge.textContent = String(nextIds.length);
       badge.title = nextIds.length === 1 ? 'Open comment' : 'Open comments';
+      reportLocatedAnchor(element, thread);
+    }
+
+    function reportLocatedAnchor(element, thread) {
+      const sourceLine = Number(element.getAttribute('data-source-line'));
+
+      if (!Number.isFinite(sourceLine) || sourceLine < 1) {
+        return;
+      }
+
+      vscode.postMessage({
+        type: 'anchorLocated',
+        threadId: thread.id,
+        sourceLine
+      });
     }
 
     function decorateMermaidReviewBadges(threads) {

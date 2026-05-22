@@ -12,6 +12,7 @@
 - Trims inline anchor metadata to the minimum open-thread pointer shape and cleans closed stale anchors.
 - Keeps comments visible after the commented text changes by falling back to stored line hints.
 - Rewrites Markdown review anchors as one document-level `ai-review-anchors` index per document and uses sidecar line hints for changed text.
+- Stores sidecar context snippets around new comments, uses them to relocate comments after text edits, and refreshes line hints from the preview.
 
 ## 0.0.8
 

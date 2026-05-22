@@ -7,6 +7,8 @@ interface AnchorOptions {
   lineHint?: number;
 }
 
+const contextRadius = 180;
+
 export function createAnchor(
   document: vscode.TextDocument,
   selectedText: string,
@@ -29,24 +31,31 @@ export function createAnchor(
   }
 
   if (!match) {
+    const lineContext = createLineContext(document, lineHint);
+
     return {
       text: normalized,
       lineStart: lineHint,
       lineEnd: lineHint,
       hash: hashAnchor(normalized),
-      occurrence
+      occurrence,
+      contextBefore: lineContext.contextBefore,
+      contextAfter: lineContext.contextAfter
     };
   }
 
   const start = document.positionAt(match.index);
   const end = document.positionAt(match.index + match.length);
+  const context = createOffsetContext(fullText, match.index, match.length);
 
   return {
     text: normalized,
     lineStart: start.line + 1,
     lineEnd: end.line + 1,
     hash: hashAnchor(normalized),
-    occurrence
+    occurrence,
+    contextBefore: context.contextBefore,
+    contextAfter: context.contextAfter
   };
 }
 
@@ -104,4 +113,35 @@ function pickOccurrence(
   }
 
   return matches[Math.min(occurrence, matches.length - 1)];
+}
+
+function createOffsetContext(
+  fullText: string,
+  matchIndex: number,
+  matchLength: number
+): Pick<ReviewAnchor, 'contextBefore' | 'contextAfter'> {
+  const before = fullText.slice(Math.max(0, matchIndex - contextRadius), matchIndex);
+  const after = fullText.slice(matchIndex + matchLength, matchIndex + matchLength + contextRadius);
+
+  return {
+    contextBefore: normalizeAnchorText(before) || undefined,
+    contextAfter: normalizeAnchorText(after) || undefined
+  };
+}
+
+function createLineContext(
+  document: vscode.TextDocument,
+  lineHint: number | undefined
+): Pick<ReviewAnchor, 'contextBefore' | 'contextAfter'> {
+  if (!lineHint) {
+    return {};
+  }
+
+  const line = Math.max(0, Math.min(document.lineCount - 1, lineHint - 1));
+  const lineRange = document.lineAt(line).range;
+  return createOffsetContext(
+    document.getText(),
+    document.offsetAt(lineRange.start),
+    document.offsetAt(lineRange.end) - document.offsetAt(lineRange.start)
+  );
 }

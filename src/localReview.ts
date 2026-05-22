@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import { randomUUID } from 'crypto';
 import { ReviewThread } from './types';
-import { hashAnchor } from './anchors';
+import { hashAnchor, normalizeAnchorText } from './anchors';
 
 export function createLocalReviewThreads(document: vscode.TextDocument): ReviewThread[] {
   const text = document.getText();
@@ -70,7 +70,9 @@ function createThread(
       text: anchorText,
       lineStart: input.lineNumber,
       lineEnd: input.lineNumber,
-      hash: hashAnchor(anchorText)
+      hash: hashAnchor(anchorText),
+      contextBefore: getNeighborLine(document, input.lineNumber - 1),
+      contextAfter: getNeighborLine(document, input.lineNumber + 1)
     },
     type: input.type,
     source: 'local',
@@ -81,4 +83,12 @@ function createThread(
     createdAt: input.now,
     updatedAt: input.now
   };
+}
+
+function getNeighborLine(document: vscode.TextDocument, oneBasedLine: number): string | undefined {
+  if (oneBasedLine < 1 || oneBasedLine > document.lineCount) {
+    return undefined;
+  }
+
+  return normalizeAnchorText(document.lineAt(oneBasedLine - 1).text) || undefined;
 }
