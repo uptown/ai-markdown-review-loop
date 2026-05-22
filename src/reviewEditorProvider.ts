@@ -6,6 +6,7 @@ import {
   appendClosedReviewLog,
   findStaleInlineAnchorMarkers,
   insertInlineAnchorMarker,
+  readInlineAnchorMarkers,
   removeInlineAnchorMarker,
   removeInlineAnchorMarkers,
   stripInlineAnchorMarkers
@@ -294,11 +295,13 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider {
     const documentText = document.getText();
     const renderedMarkdown = this.markdown.render(stripInlineAnchorMarkers(documentText));
     const storageWarning = this.renderStorageWarning(documentText, reviewDocument);
+    const markerLineHints = this.getMarkerLineHints(documentText);
     const mermaidScriptUri = webview.asWebviewUri(
       vscode.Uri.joinPath(this.context.extensionUri, 'out', 'vendor', 'mermaid.min.js')
     );
     const state = JSON.stringify({
-      threads: reviewDocument.threads
+      threads: reviewDocument.threads,
+      markerLineHints
     }).replace(/</g, '\\u003c');
 
     return `<!DOCTYPE html>
@@ -687,6 +690,7 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider {
   <script nonce="${nonce}">
     const vscode = acquireVsCodeApi();
     const state = ${state};
+    const markerLineHints = state.markerLineHints || {};
     const markdownBody = document.getElementById('markdown-body');
     const selectionPopover = document.getElementById('selection-popover');
     const selectionCommentButton = document.getElementById('selection-comment');
@@ -933,8 +937,9 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider {
           continue;
         }
 
-        if (!highlightTextNode(thread, anchorText)) {
-          highlightContainingBlock(thread, anchorText);
+        if (!highlightTextNode(thread, anchorText)
+          && !highlightContainingBlock(thread, anchorText)) {
+          highlightMarkerBlock(thread);
         }
       }
     }
@@ -1023,13 +1028,67 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider {
       }
 
       if (!target) {
-        return;
+        return false;
       }
 
-      target.classList.add('review-anchor-block');
-      target.dataset.threadId = thread.id;
-      target.title = 'Open comment';
-      target.appendChild(createReviewBadge(thread, 'review-block-badge'));
+      attachThreadToAnchorElement(target, thread, 'review-block-badge');
+      return true;
+    }
+
+    function highlightMarkerBlock(thread) {
+      const lineHint = Number(markerLineHints[thread.id]);
+
+      if (!Number.isFinite(lineHint)) {
+        return false;
+      }
+
+      const candidates = Array.from(markdownBody.querySelectorAll('[data-source-line]'));
+      let target;
+      let targetLine = 0;
+
+      for (const element of candidates) {
+        if (shouldSkipHighlightParent(element)) {
+          continue;
+        }
+
+        const sourceLine = Number(element.getAttribute('data-source-line'));
+
+        if (!Number.isFinite(sourceLine) || sourceLine > lineHint || sourceLine < targetLine) {
+          continue;
+        }
+
+        target = element;
+        targetLine = sourceLine;
+      }
+
+      if (!target) {
+        return false;
+      }
+
+      attachThreadToAnchorElement(target, thread, 'review-block-badge');
+      return true;
+    }
+
+    function attachThreadToAnchorElement(element, thread, badgeClass) {
+      element.classList.add('review-anchor-block');
+      element.title = 'Open comment';
+
+      const existingIds = getThreadIds(element);
+      const nextIds = existingIds.includes(thread.id) ? existingIds : [...existingIds, thread.id];
+      element.dataset.threadId = nextIds[0];
+      element.dataset.threadIds = nextIds.join(',');
+
+      let badge = element.querySelector(':scope > .review-badge');
+
+      if (!badge) {
+        badge = createReviewBadge(thread, badgeClass);
+        element.appendChild(badge);
+      }
+
+      badge.dataset.threadId = nextIds[0];
+      badge.dataset.threadIds = element.dataset.threadIds;
+      badge.textContent = String(nextIds.length);
+      badge.title = nextIds.length === 1 ? 'Open comment' : 'Open comments';
     }
 
     function decorateMermaidReviewBadges(threads) {
@@ -1075,14 +1134,20 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider {
           continue;
         }
 
-        anchor.dataset.threadIds = relatedThreads.map((thread) => thread.id).join(',');
+        const nextIds = [
+          ...getThreadIds(anchor),
+          ...relatedThreads.map((thread) => thread.id)
+        ].filter((threadId, index, threadIds) => threadIds.indexOf(threadId) === index);
+
+        anchor.dataset.threadId = nextIds[0];
+        anchor.dataset.threadIds = nextIds.join(',');
         const badge = anchor.querySelector('.review-badge');
 
         if (badge) {
-          badge.dataset.threadId = relatedThreads[0].id;
+          badge.dataset.threadId = nextIds[0];
           badge.dataset.threadIds = anchor.dataset.threadIds;
-          badge.textContent = String(relatedThreads.length);
-          badge.title = relatedThreads.length === 1 ? 'Open comment' : 'Open comments';
+          badge.textContent = String(nextIds.length);
+          badge.title = nextIds.length === 1 ? 'Open comment' : 'Open comments';
         }
       }
     }
@@ -1519,6 +1584,29 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider {
       <button type="button" class="secondary compact" data-cleanup-stale-anchors data-thread-ids="${escapeHtml(markerIds)}">Clean stale anchors</button>
     </div>
   </section>`;
+  }
+
+  private getMarkerLineHints(documentText: string): Record<string, number> {
+    const hints: Record<string, number> = {};
+    let renderedLine = 1;
+
+    for (const line of documentText.split(/\r?\n/)) {
+      const markers = readInlineAnchorMarkers(line);
+
+      if (markers.length > 0) {
+        const targetLine = Math.max(1, renderedLine - 1);
+
+        for (const marker of markers) {
+          hints[marker.id] = targetLine;
+        }
+
+        continue;
+      }
+
+      renderedLine += 1;
+    }
+
+    return hints;
   }
 
   private renderErrorHtml(document: vscode.TextDocument, message: string): string {

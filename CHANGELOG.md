@@ -10,6 +10,7 @@
 - Moves closed review threads to `.ai-markdown-review/resolved/` and appends a compact end-of-file audit log.
 - Adds a one-click cleanup action for stale inline anchors when their sidecar data is missing.
 - Trims inline anchor metadata to the minimum open-thread pointer shape and cleans closed stale anchors.
+- Keeps comments visible after the commented text changes by falling back to inline anchor position.
 
 ## 0.0.8
 

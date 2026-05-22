@@ -100,6 +100,8 @@ Compact anchors are also inserted into the Markdown source:
 
 The custom preview hides these anchors, but AI agents that read the Markdown can use them to connect document locations with sidecar review data.
 
+If the commented text changes and the original text snippet no longer matches, the preview falls back to the inline anchor position so the review thread still appears near the edited block.
+
 If the sidecar JSON is deleted or no longer contains matching thread data, the review preview and feedback export warn that inline anchors are stale. The original comment text cannot be rebuilt from the inline anchors alone; restore the sidecar JSON from backup/source control or use `Clean stale anchors` in the preview warning if the comments are no longer needed.
 
 When several review threads point to the same insertion point, the extension stores them in one grouped `ai-review-anchors` metadata comment instead of adding one metadata line per thread:
