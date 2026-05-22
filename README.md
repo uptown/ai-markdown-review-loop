@@ -95,14 +95,18 @@ MVP review data is stored under:
 Compact anchors are also inserted into the Markdown source:
 
 ```md
-<!-- ai-review-anchor:{"id":"rv_...","status":"open","hash":"sha256:...","sidecar":".ai-markdown-review/documents/...json"} -->
+<!-- ai-review-anchor:{"id":"rv_...","sidecar":".ai-markdown-review/documents/...json"} -->
 ```
 
 The custom preview hides these anchors, but AI agents that read the Markdown can use them to connect document locations with sidecar review data.
 
 If the sidecar JSON is deleted or no longer contains matching thread data, the review preview and feedback export warn that inline anchors are stale. The original comment text cannot be rebuilt from the inline anchors alone; restore the sidecar JSON from backup/source control or use `Clean stale anchors` in the preview warning if the comments are no longer needed.
 
-When several review threads point to the same insertion point, the extension stores them in one grouped `ai-review-anchors` metadata comment instead of adding one metadata line per thread.
+When several review threads point to the same insertion point, the extension stores them in one grouped `ai-review-anchors` metadata comment instead of adding one metadata line per thread:
+
+```md
+<!-- ai-review-anchors:{"sidecar":".ai-markdown-review/documents/...json","ids":["rv_...","rv_..."]} -->
+```
 
 Resolved or rejected review threads move from `documents/` to `resolved/`. Their inline Markdown anchor metadata is removed so closed feedback does not leave stale `status:"open"` comments in the source, and a compact `ai-review-log` entry is appended at the end of the Markdown file as an audit pointer.
 

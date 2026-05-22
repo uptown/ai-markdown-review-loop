@@ -9,6 +9,7 @@
 - Removes resolved or rejected review threads from inline Markdown anchor metadata.
 - Moves closed review threads to `.ai-markdown-review/resolved/` and appends a compact end-of-file audit log.
 - Adds a one-click cleanup action for stale inline anchors when their sidecar data is missing.
+- Trims inline anchor metadata to the minimum open-thread pointer shape and cleans closed stale anchors.
 
 ## 0.0.8
 

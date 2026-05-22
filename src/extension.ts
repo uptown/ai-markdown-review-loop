@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import { renderFeedbackExport } from './exportFeedback';
-import { findMissingInlineAnchorMarkers, insertInlineAnchorMarker } from './inlineMarkers';
+import { findStaleInlineAnchorMarkers, insertInlineAnchorMarker } from './inlineMarkers';
 import { createLocalReviewThreads } from './localReview';
 import { ReviewEditorProvider, reviewEditorViewType } from './reviewEditorProvider';
 import { ReviewStore } from './reviewStore';
@@ -85,14 +85,11 @@ export function activate(context: vscode.ExtensionContext): void {
       }
 
       const reviewDocument = await store.load(document.uri);
-      const missingMarkers = findMissingInlineAnchorMarkers(
-        document.getText(),
-        reviewDocument.threads.map(thread => thread.id)
-      );
+      const missingMarkers = findStaleInlineAnchorMarkers(document.getText(), reviewDocument.threads);
 
       if (missingMarkers.length > 0) {
         vscode.window.showWarningMessage(
-          `Review sidecar data is missing or incomplete for ${missingMarkers.length} inline anchor(s). Restore the sidecar JSON before treating this export as complete.`
+          `Review sidecar data is missing, incomplete, or closed for ${missingMarkers.length} inline anchor(s). Clean stale anchors or restore the sidecar JSON before treating this export as complete.`
         );
       }
 
@@ -159,6 +156,6 @@ function appendStorageWarning(
     '',
     '## Review Storage Warning',
     '',
-    `This Markdown file contains ${missingMarkers.length} ai-review-anchor marker(s) that do not have matching thread data in ${sidecar}. The original comment text is unavailable from inline anchors alone; restore the sidecar JSON before treating this export as complete.`
+    `This Markdown file contains ${missingMarkers.length} stale ai-review-anchor marker(s) whose matching thread data is missing from ${sidecar} or no longer open. The original comment text is unavailable from inline anchors alone; clean stale anchors or restore the sidecar JSON before treating this export as complete.`
   ].join('\n');
 }

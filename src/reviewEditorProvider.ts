@@ -4,7 +4,7 @@ import { randomUUID } from 'crypto';
 import { createAnchor } from './anchors';
 import {
   appendClosedReviewLog,
-  findMissingInlineAnchorMarkers,
+  findStaleInlineAnchorMarkers,
   insertInlineAnchorMarker,
   removeInlineAnchorMarker,
   removeInlineAnchorMarkers,
@@ -1502,10 +1502,7 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider {
   }
 
   private renderStorageWarning(documentText: string, reviewDocument: ReviewDocument): string {
-    const missingMarkers = findMissingInlineAnchorMarkers(
-      documentText,
-      reviewDocument.threads.map(thread => thread.id)
-    );
+    const missingMarkers = findStaleInlineAnchorMarkers(documentText, reviewDocument.threads);
 
     if (missingMarkers.length === 0) {
       return '';
@@ -1516,8 +1513,8 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider {
     const markerIds = missingMarkers.map(marker => marker.id).join(',');
 
     return `<section class="storage-warning" role="status">
-    <strong>Review sidecar data is missing or incomplete.</strong>
-    <p>This Markdown file still contains ${missingMarkers.length} ai-review-anchor ${markerLabel}, but the matching review thread data was not found in <code>${escapeHtml(sidecar)}</code>. Comment text cannot be rebuilt from inline anchors; restore the sidecar JSON from backup/source control, or clean the stale anchors if the comments are no longer needed.</p>
+    <strong>Review anchors need cleanup.</strong>
+    <p>This Markdown file still contains ${missingMarkers.length} stale ai-review-anchor ${markerLabel}. The matching review thread data is missing from <code>${escapeHtml(sidecar)}</code> or no longer open. Comment text cannot be rebuilt from inline anchors; restore the sidecar JSON from backup/source control, or clean the stale anchors if the comments are no longer needed.</p>
     <div class="storage-warning-actions">
       <button type="button" class="secondary compact" data-cleanup-stale-anchors data-thread-ids="${escapeHtml(markerIds)}">Clean stale anchors</button>
     </div>

@@ -34,12 +34,16 @@ export function readInlineAnchorMarkers(markdown: string): InlineAnchorMarker[] 
   return markers;
 }
 
-export function findMissingInlineAnchorMarkers(
+export function findStaleInlineAnchorMarkers(
   markdown: string,
-  knownThreadIds: Iterable<string>
+  threads: ReviewThread[]
 ): InlineAnchorMarker[] {
-  const knownIds = new Set(knownThreadIds);
-  return readInlineAnchorMarkers(markdown).filter(marker => !knownIds.has(marker.id));
+  const threadsById = new Map(threads.map(thread => [thread.id, thread]));
+
+  return readInlineAnchorMarkers(markdown).filter(marker => {
+    const thread = threadsById.get(marker.id);
+    return !thread || thread.status !== 'open';
+  });
 }
 
 export async function insertInlineAnchorMarker(
@@ -53,7 +57,7 @@ export async function insertInlineAnchorMarker(
     return true;
   }
 
-  const markerPayload = createInlineAnchorPayload(document, thread, sidecarUri);
+  const markerPayload = createInlineAnchorPayload(thread, sidecarUri);
   const insertLine = resolveMarkerInsertLine(document, thread);
   const markerBlock = findAdjacentMarkerBlock(document, insertLine);
   const payloads = markerBlock
@@ -151,27 +155,31 @@ export async function appendClosedReviewLog(
 }
 
 function createInlineAnchorPayload(
-  document: vscode.TextDocument,
   thread: ReviewThread,
   sidecarUri: vscode.Uri
 ): InlineAnchorMarker {
   const sidecar = vscode.workspace.asRelativePath(sidecarUri, false);
   return {
     id: thread.id,
-    status: thread.status,
-    hash: thread.anchor.hash,
-    sidecar,
-    lineStart: thread.anchor.lineStart,
-    lineEnd: thread.anchor.lineEnd
+    sidecar
   };
 }
 
 function createInlineAnchorMarker(payloads: InlineAnchorMarker[]): string {
   if (payloads.length === 1) {
-    return `<!-- ai-review-anchor:${JSON.stringify(payloads[0])} -->`;
+    return `<!-- ai-review-anchor:${JSON.stringify(compactMarker(payloads[0]))} -->`;
   }
 
-  return `<!-- ai-review-anchors:${JSON.stringify(payloads)} -->`;
+  const sidecar = payloads[0]?.sidecar;
+
+  if (sidecar && payloads.every(payload => payload.sidecar === sidecar)) {
+    return `<!-- ai-review-anchors:${JSON.stringify({
+      sidecar,
+      ids: payloads.map(payload => payload.id)
+    })} -->`;
+  }
+
+  return `<!-- ai-review-anchors:${JSON.stringify(payloads.map(compactMarker))} -->`;
 }
 
 function resolveMarkerInsertLine(document: vscode.TextDocument, thread: ReviewThread): number {
@@ -268,11 +276,22 @@ function parseInlineAnchorPayload(payload: string): InlineAnchorMarker[] {
       return parsed.filter(isInlineAnchorMarker);
     }
 
+    if (isCompactInlineAnchorGroup(parsed)) {
+      return parsed.ids.map(id => ({ id, sidecar: parsed.sidecar }));
+    }
+
     return isInlineAnchorMarker(parsed) ? [parsed] : [];
   } catch {
     // Ignore malformed anchors here; invalid sidecar JSON is handled separately.
     return [];
   }
+}
+
+function compactMarker(marker: InlineAnchorMarker): InlineAnchorMarker {
+  return {
+    id: marker.id,
+    sidecar: marker.sidecar
+  };
 }
 
 function dedupeMarkers(markers: InlineAnchorMarker[]): InlineAnchorMarker[] {
@@ -313,6 +332,13 @@ function isInlineAnchorMarker(value: unknown): value is InlineAnchorMarker {
     && optionalString(value.sidecar)
     && optionalNumber(value.lineStart)
     && optionalNumber(value.lineEnd);
+}
+
+function isCompactInlineAnchorGroup(value: unknown): value is { sidecar: string; ids: string[] } {
+  return isRecord(value)
+    && typeof value.sidecar === 'string'
+    && Array.isArray(value.ids)
+    && value.ids.every(id => typeof id === 'string');
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
