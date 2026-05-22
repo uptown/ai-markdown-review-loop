@@ -62,16 +62,23 @@ export function activate(context: vscode.ExtensionContext): void {
         return;
       }
 
-      await store.addThreads(document.uri, threads);
+      const { addedThreads } = await store.addThreads(document.uri, threads);
+
+      if (addedThreads.length === 0) {
+        vscode.window.showInformationMessage('Local review found no new feedback items.');
+        await vscode.commands.executeCommand('vscode.openWith', document.uri, reviewEditorViewType);
+        return;
+      }
+
       const sidecarUri = await store.getReviewFileUri(document.uri);
 
-      for (const thread of [...threads].sort((left, right) => {
+      for (const thread of [...addedThreads].sort((left, right) => {
         return (right.anchor.lineEnd ?? 0) - (left.anchor.lineEnd ?? 0);
       })) {
         await insertInlineAnchorMarker(document, thread, sidecarUri);
       }
 
-      vscode.window.showInformationMessage(`Added ${threads.length} local review feedback item(s).`);
+      vscode.window.showInformationMessage(`Added ${addedThreads.length} local review feedback item(s).`);
       await vscode.commands.executeCommand('vscode.openWith', document.uri, reviewEditorViewType);
     }),
     vscode.commands.registerCommand('aiMarkdownReviewLoop.exportFeedback', async (targetUri?: vscode.Uri) => {

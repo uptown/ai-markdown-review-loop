@@ -8,6 +8,7 @@ export interface ReviewAnchor {
   lineStart?: number;
   lineEnd?: number;
   hash?: string;
+  occurrence?: number;
 }
 
 export interface SuggestedPatch {

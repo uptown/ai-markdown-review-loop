@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.0.7
+
+- Makes Review Threads cards jump back to their highlighted content in the rendered preview.
+- Keeps `.agent/` local-only through `.gitignore`.
+- Adds MIT license policy and third-party notices.
+
 ## 0.0.6
 
 - Adds a split-review toolbar command that opens Markdown source and review preview side by side.

@@ -3,4 +3,5 @@ out/
 *.vsix
 .DS_Store
 .vscode-test/
+.agent/
 .ai-markdown-review/

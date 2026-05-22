@@ -9,6 +9,10 @@ node_modules/**
 *.vsix
 tsconfig.json
 package-lock.json
+.gitignore
+.nvmrc
+docs/PRD.md
+docs/mermaid-sample.md
 out/*.js
 !out/extension.js
 !out/vendor/**

@@ -4,7 +4,7 @@ import { randomUUID } from 'crypto';
 import { createAnchor } from './anchors';
 import { insertInlineAnchorMarker, stripInlineAnchorMarkers } from './inlineMarkers';
 import { ReviewStore } from './reviewStore';
-import { ReviewDocument, ReviewThread } from './types';
+import { ReviewDocument, ReviewStatus, ReviewThread } from './types';
 
 const viewType = 'aiMarkdownReviewLoop.reviewEditor';
 
@@ -22,13 +22,40 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider {
     private readonly store: ReviewStore
   ) {
     const defaultFence = this.markdown.renderer.rules.fence;
+    const sourceMappedRules = [
+      'paragraph_open',
+      'heading_open',
+      'blockquote_open',
+      'list_item_open',
+      'table_open',
+      'tr_open'
+    ];
+
+    for (const ruleName of sourceMappedRules) {
+      const defaultRule = this.markdown.renderer.rules[ruleName];
+
+      this.markdown.renderer.rules[ruleName] = (tokens, index, options, env, self) => {
+        const token = tokens[index];
+        const sourceLine = token.map?.[0];
+
+        if (typeof sourceLine === 'number') {
+          token.attrSet('data-source-line', String(sourceLine + 1));
+        }
+
+        if (defaultRule) {
+          return defaultRule(tokens, index, options, env, self);
+        }
+
+        return self.renderToken(tokens, index, options);
+      };
+    }
 
     this.markdown.renderer.rules.fence = (tokens, index, options, env, self) => {
       const token = tokens[index];
       const language = token.info.trim().split(/\s+/)[0]?.toLowerCase();
 
       if (language === 'mermaid') {
-        return this.renderMermaidFence(token.content);
+        return this.renderMermaidFence(token.content, token.map?.[0]);
       }
 
       if (defaultFence) {
@@ -55,8 +82,12 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider {
     };
 
     const render = async () => {
-      const reviewDocument = await this.store.load(document.uri);
-      webviewPanel.webview.html = this.renderHtml(webviewPanel.webview, document, reviewDocument);
+      try {
+        const reviewDocument = await this.store.load(document.uri);
+        webviewPanel.webview.html = this.renderHtml(webviewPanel.webview, document, reviewDocument);
+      } catch (error) {
+        webviewPanel.webview.html = this.renderErrorHtml(document, formatError(error));
+      }
     };
 
     const changeSubscription = vscode.workspace.onDidChangeTextDocument(event => {
@@ -69,38 +100,60 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider {
       changeSubscription.dispose();
     });
 
+    webviewPanel.onDidChangeViewState(event => {
+      if (event.webviewPanel.active) {
+        this.currentDocumentUri = document.uri;
+      }
+    });
+
     webviewPanel.webview.onDidReceiveMessage(async message => {
-      if (message?.type === 'addComment') {
-        await this.addComment(
-          document,
-          String(message.anchorText ?? ''),
-          typeof message.comment === 'string' ? message.comment : undefined
+      try {
+        if (message?.type === 'addComment') {
+          await this.addComment(
+            document,
+            String(message.anchorText ?? ''),
+            typeof message.comment === 'string' ? message.comment : undefined,
+          parseOccurrence(message.anchorOccurrence),
+          parseSourceLine(message.sourceLine)
         );
-        await render();
-      }
+          await render();
+        }
 
-      if (message?.type === 'updateStatus') {
-        await this.store.updateThread(
-          document.uri,
-          String(message.threadId),
-          { status: message.status }
-        );
-        await render();
-      }
+        if (message?.type === 'updateStatus') {
+          const status = parseReviewStatus(message.status);
 
-      if (message?.type === 'copyText') {
-        await vscode.env.clipboard.writeText(String(message.text ?? ''));
-        vscode.window.showInformationMessage('Copied Mermaid source.');
+          if (!status) {
+            vscode.window.showWarningMessage('Ignored invalid review status update.');
+            return;
+          }
+
+          await this.store.updateThread(
+            document.uri,
+            String(message.threadId),
+            { status }
+          );
+          await render();
+        }
+
+        if (message?.type === 'copyText') {
+          await vscode.env.clipboard.writeText(String(message.text ?? ''));
+          vscode.window.showInformationMessage('Copied Mermaid source.');
+        }
+      } catch (error) {
+        vscode.window.showErrorMessage(`AI Markdown Review failed: ${formatError(error)}`);
       }
     });
 
     await render();
   }
 
-  private renderMermaidFence(source: string): string {
+  private renderMermaidFence(source: string, zeroBasedSourceLine?: number): string {
     const escapedSource = escapeHtml(source.trim());
+    const sourceLine = typeof zeroBasedSourceLine === 'number'
+      ? ` data-source-line="${zeroBasedSourceLine + 1}"`
+      : '';
 
-    return `<figure class="mermaid-figure" data-mermaid-diagram>
+    return `<figure class="mermaid-figure" data-mermaid-diagram${sourceLine}>
   <div class="mermaid-toolbar">
     <span>Mermaid</span>
     <div class="mermaid-actions">
@@ -119,7 +172,9 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider {
   private async addComment(
     document: vscode.TextDocument,
     selectedText: string,
-    providedComment?: string
+    providedComment?: string,
+    anchorOccurrence?: number,
+    sourceLine?: number
   ): Promise<void> {
     const normalizedSelection = selectedText.trim();
 
@@ -142,7 +197,10 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider {
     const thread: ReviewThread = {
       id: `rv_${randomUUID()}`,
       documentUri: document.uri.toString(),
-      anchor: createAnchor(document, normalizedSelection),
+      anchor: createAnchor(document, normalizedSelection, {
+        occurrence: anchorOccurrence,
+        lineHint: sourceLine
+      }),
       type: 'note',
       source: 'human',
       status: 'open',
@@ -265,6 +323,7 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider {
       padding: 12px;
       margin-bottom: 12px;
       background: var(--vscode-editor-background);
+      cursor: pointer;
     }
     .thread.is-active {
       border-color: #8ad83f;
@@ -289,6 +348,9 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider {
       gap: 6px;
       margin-top: 10px;
       flex-wrap: wrap;
+    }
+    .thread-actions button {
+      cursor: pointer;
     }
     .empty {
       color: var(--muted);
@@ -489,12 +551,20 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider {
     const commentBody = document.getElementById('comment-body');
     const commentCancel = document.getElementById('comment-cancel');
     let activeSelectionText = '';
+    let activeSelectionOccurrence = 0;
+    let activeSourceLine = undefined;
     let activeSelectionRect = null;
     let selectionTimer = undefined;
 
     document.getElementById('add-comment').addEventListener('click', () => {
+      captureCurrentSelection();
       const selection = String(window.getSelection() || '').trim();
-      vscode.postMessage({ type: 'addComment', anchorText: selection });
+      vscode.postMessage({
+        type: 'addComment',
+        anchorText: activeSelectionText || selection,
+        anchorOccurrence: activeSelectionOccurrence,
+        sourceLine: activeSourceLine
+      });
     });
 
     document.addEventListener('selectionchange', () => {
@@ -540,6 +610,8 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider {
       vscode.postMessage({
         type: 'addComment',
         anchorText: activeSelectionText,
+        anchorOccurrence: activeSelectionOccurrence,
+        sourceLine: activeSourceLine,
         comment: body
       });
       hideSelectionPopover();
@@ -564,6 +636,8 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider {
 
       if (target.matches('[data-mermaid-feedback]')) {
         activeSelectionText = source;
+        activeSelectionOccurrence = 0;
+        activeSourceLine = getSourceLine(figure);
         const rect = target.getBoundingClientRect();
         activeSelectionRect = {
           left: rect.left,
@@ -589,6 +663,7 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider {
         const element = document.createElement('section');
         element.className = 'thread';
         element.dataset.threadId = thread.id;
+        element.title = 'Jump to commented content';
         element.innerHTML = [
           '<header><span>' + escapeHtml(thread.type) + ' · ' + escapeHtml(thread.source) + '</span><span>' + escapeHtml(thread.severity) + '</span></header>',
           '<blockquote>' + escapeHtml(thread.anchor.text || 'Document') + '</blockquote>',
@@ -598,6 +673,14 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider {
           '<button class="secondary" data-status="rejected">Reject</button>',
           '</div>'
         ].join('');
+
+        element.addEventListener('click', (event) => {
+          if (event.target instanceof HTMLElement && event.target.closest('button')) {
+            return;
+          }
+
+          focusAnchor(thread.id);
+        });
 
         for (const button of element.querySelectorAll('button[data-status]')) {
           button.addEventListener('click', () => {
@@ -631,6 +714,12 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider {
       return String(sourceElement?.textContent || '').trim();
     }
 
+    function getSourceLine(element) {
+      const sourceElement = element?.closest?.('[data-source-line]');
+      const sourceLine = Number(sourceElement?.getAttribute('data-source-line'));
+      return Number.isFinite(sourceLine) && sourceLine > 0 ? Math.floor(sourceLine) : undefined;
+    }
+
     function decorateReviewAnchors(threads) {
       for (const thread of threads) {
         const anchorText = normalizeInline(thread.anchor?.text || '');
@@ -659,52 +748,73 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider {
             : NodeFilter.FILTER_SKIP;
         }
       });
+      let remaining = getAnchorOccurrence(thread);
+      let node = walker.nextNode();
 
-      const node = walker.nextNode();
+      while (node?.nodeValue) {
+        const normalizedNode = normalizeInline(node.nodeValue);
+        let searchStart = 0;
+        let index = normalizedNode.indexOf(anchorText, searchStart);
 
-      if (!node || !node.nodeValue) {
-        return false;
+        while (index >= 0) {
+          if (remaining > 0) {
+            remaining -= 1;
+            searchStart = index + anchorText.length;
+            index = normalizedNode.indexOf(anchorText, searchStart);
+            continue;
+          }
+
+          const rawIndex = findRawIndexForNormalizedText(node.nodeValue, anchorText, index);
+
+          if (rawIndex < 0) {
+            return false;
+          }
+
+          const matchLength = findRawLengthForNormalizedText(node.nodeValue.slice(rawIndex), anchorText);
+
+          if (matchLength <= 0) {
+            return false;
+          }
+
+          const matchNode = node.splitText(rawIndex);
+          const afterNode = matchNode.splitText(matchLength);
+          const marker = document.createElement('span');
+          marker.className = 'review-anchor';
+          marker.dataset.threadId = thread.id;
+          marker.textContent = matchNode.nodeValue;
+
+          const badge = createReviewBadge(thread, '');
+          marker.appendChild(badge);
+          matchNode.parentNode?.insertBefore(marker, matchNode);
+          matchNode.remove();
+          afterNode.parentElement?.normalize();
+          return true;
+        }
+
+        node = walker.nextNode();
       }
 
-      const index = normalizeInline(node.nodeValue).indexOf(anchorText);
-
-      if (index < 0) {
-        return false;
-      }
-
-      const rawIndex = findRawIndexForNormalizedText(node.nodeValue, anchorText, index);
-
-      if (rawIndex < 0) {
-        return false;
-      }
-
-      const matchLength = findRawLengthForNormalizedText(node.nodeValue.slice(rawIndex), anchorText);
-
-      if (matchLength <= 0) {
-        return false;
-      }
-
-      const matchNode = node.splitText(rawIndex);
-      const afterNode = matchNode.splitText(matchLength);
-      const marker = document.createElement('span');
-      marker.className = 'review-anchor';
-      marker.dataset.threadId = thread.id;
-      marker.textContent = matchNode.nodeValue;
-
-      const badge = createReviewBadge(thread, '');
-      marker.appendChild(badge);
-      matchNode.parentNode?.insertBefore(marker, matchNode);
-      matchNode.remove();
-      afterNode.parentElement?.normalize();
-      return true;
+      return false;
     }
 
     function highlightContainingBlock(thread, anchorText) {
       const candidates = Array.from(markdownBody.querySelectorAll('p, li, h1, h2, h3, h4, h5, h6, td, th, blockquote'));
-      const target = candidates.find((element) => {
-        return !shouldSkipHighlightParent(element)
-          && normalizeInline(element.textContent || '').includes(anchorText);
-      });
+      let remaining = getAnchorOccurrence(thread);
+      let target;
+
+      for (const element of candidates) {
+        if (shouldSkipHighlightParent(element) || !normalizeInline(element.textContent || '').includes(anchorText)) {
+          continue;
+        }
+
+        if (remaining > 0) {
+          remaining -= 1;
+          continue;
+        }
+
+        target = element;
+        break;
+      }
 
       if (!target) {
         return;
@@ -760,6 +870,16 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider {
       threadCard?.scrollIntoView({ behavior: 'smooth', block: 'center' });
     }
 
+    function focusAnchor(threadId) {
+      document.querySelectorAll('.is-active').forEach((element) => element.classList.remove('is-active'));
+      document.querySelectorAll('[data-thread-id="' + cssEscape(threadId) + '"]').forEach((element) => {
+        element.classList.add('is-active');
+      });
+
+      const anchor = markdownBody.querySelector('[data-thread-id="' + cssEscape(threadId) + '"]');
+      anchor?.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'nearest' });
+    }
+
     function shouldSkipHighlightParent(element) {
       return Boolean(element.closest('button, textarea, pre, code, .review-anchor, .comment-composer, .selection-popover, .mermaid-source'));
     }
@@ -770,6 +890,11 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider {
 
     function looksLikeMermaidSource(value) {
       return /\\b(flowchart|graph|sequenceDiagram|classDiagram|stateDiagram|erDiagram|journey|gantt|pie|mindmap|timeline|gitGraph)\\b/i.test(value);
+    }
+
+    function getAnchorOccurrence(thread) {
+      const occurrence = Number(thread.anchor?.occurrence);
+      return Number.isFinite(occurrence) ? Math.max(0, Math.floor(occurrence)) : 0;
     }
 
     function cssEscape(value) {
@@ -888,6 +1013,8 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider {
       }
 
       activeSelectionText = selectedText;
+      activeSelectionOccurrence = countPriorOccurrences(range, selectedText);
+      activeSourceLine = getSourceLine(container);
       activeSelectionRect = {
         left: rect.left,
         right: rect.right,
@@ -896,6 +1023,31 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider {
       };
 
       return true;
+    }
+
+    function countPriorOccurrences(range, selectedText) {
+      const needle = normalizeInline(selectedText);
+
+      if (!needle) {
+        return 0;
+      }
+
+      const priorRange = range.cloneRange();
+      priorRange.selectNodeContents(markdownBody);
+      priorRange.setEnd(range.startContainer, range.startOffset);
+      return countOccurrences(normalizeInline(priorRange.toString()), needle);
+    }
+
+    function countOccurrences(haystack, needle) {
+      let count = 0;
+      let index = haystack.indexOf(needle);
+
+      while (index >= 0) {
+        count += 1;
+        index = haystack.indexOf(needle, index + Math.max(1, needle.length));
+      }
+
+      return count;
     }
 
     function getBestSelectionRect(range) {
@@ -1004,6 +1156,43 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider {
 </body>
 </html>`;
   }
+
+  private renderErrorHtml(document: vscode.TextDocument, message: string): string {
+    return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AI Markdown Review</title>
+  <style>
+    body {
+      margin: 0;
+      padding: 24px;
+      color: var(--vscode-editor-foreground);
+      background: var(--vscode-editor-background);
+      font-family: var(--vscode-font-family);
+    }
+    .error {
+      max-width: 760px;
+      border: 1px solid var(--vscode-inputValidation-errorBorder);
+      border-radius: 6px;
+      padding: 16px;
+      background: var(--vscode-inputValidation-errorBackground);
+    }
+    code {
+      font-family: var(--vscode-editor-font-family);
+    }
+  </style>
+</head>
+<body>
+  <section class="error">
+    <h2>Review data needs attention</h2>
+    <p>The sidecar for <code>${escapeHtml(document.fileName)}</code> could not be loaded, so this preview is paused to avoid overwriting existing review feedback.</p>
+    <p>${escapeHtml(message)}</p>
+  </section>
+</body>
+</html>`;
+  }
 }
 
 export { viewType as reviewEditorViewType };
@@ -1015,4 +1204,36 @@ function escapeHtml(value: string): string {
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#039;');
+}
+
+function parseOccurrence(value: unknown): number | undefined {
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    return undefined;
+  }
+
+  return Math.max(0, Math.floor(value));
+}
+
+function parseSourceLine(value: unknown): number | undefined {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < 1) {
+    return undefined;
+  }
+
+  return Math.floor(value);
+}
+
+function parseReviewStatus(value: unknown): ReviewStatus | undefined {
+  if (value === 'open' || value === 'accepted' || value === 'rejected' || value === 'resolved') {
+    return value;
+  }
+
+  return undefined;
+}
+
+function formatError(error: unknown): string {
+  if (error instanceof Error) {
+    return error.message;
+  }
+
+  return String(error);
 }

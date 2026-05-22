@@ -12,6 +12,7 @@ The first MVP focuses on a local workflow:
 - Use top-of-file CodeLens shortcuts: `Open AI Review`, `Review Document`, and `Export Feedback`.
 - Drag-select rendered text and attach feedback from an inline comment popover.
 - See saved comments as highlights and small badges in the rendered document.
+- Click a thread in `Review Threads` to jump back to its highlighted content.
 - Persist compact `ai-review-anchor` metadata in the Markdown file while storing full thread data in sidecar JSON.
 - Attach feedback directly to a Mermaid diagram source block.
 - Store review threads in a workspace-local sidecar file.
@@ -101,6 +102,11 @@ The custom preview hides these anchors, but AI agents that read the Markdown can
 ```bash
 npm run package
 ```
+
+License policy and bundled dependency notices:
+
+- [License Policy](./docs/LICENSE-POLICY.md)
+- [Third-Party Notices](./THIRD_PARTY_NOTICES.md)
 
 Publishing requires a Visual Studio Marketplace publisher and a `vsce` login:
 
