@@ -14,7 +14,7 @@ export function createInlineAnchorBlockPattern(): RegExp {
 }
 
 export function stripInlineAnchorMarkers(markdown: string): string {
-  return markdown.replace(createInlineAnchorBlockPattern(), '');
+  return markdown.replace(/[ \t]*<!-- ai-review-(?:anchors?|log):.*?-->\r?\n?/g, '');
 }
 
 export function readInlineAnchorMarkers(markdown: string): InlineAnchorMarker[] {

@@ -72,15 +72,25 @@ describe('inline marker payloads', () => {
     ]);
   });
 
-  it('strips inline anchor comments from rendered Markdown source', () => {
+  it('strips inline review metadata comments from rendered Markdown source', () => {
     const markdown = [
       '# Title',
       '<!-- ai-review-anchor:{"id":"rv_legacy","sidecar":".ai-markdown-review/documents/spec.json"} -->',
       'Body',
-      '<!-- ai-review-anchors:{"sidecar":".ai-markdown-review/documents/spec.json","ids":["rv_a"]} -->'
+      '<!-- ai-review-anchors:{"sidecar":".ai-markdown-review/documents/spec.json","ids":["rv_a"]} -->',
+      '<!-- ai-review-log:{"id":"rv_done","status":"resolved","sidecar":".ai-markdown-review/resolved/spec.json"} -->'
     ].join('\n');
 
     assert.equal(stripInlineAnchorMarkers(markdown), '# Title\nBody\n');
+  });
+
+  it('strips adjacent review log comments even when they were written on one line', () => {
+    const markdown = [
+      'Body',
+      '<!-- ai-review-log:{"id":"rv_a","status":"resolved"} --> <!-- ai-review-log:{"id":"rv_b","status":"accepted"} -->'
+    ].join('\n');
+
+    assert.equal(stripInlineAnchorMarkers(markdown), 'Body\n');
   });
 });
 
