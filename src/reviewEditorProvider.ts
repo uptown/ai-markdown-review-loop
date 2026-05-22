@@ -25,6 +25,12 @@ import { AnchorConfidence, ReviewDocument, ReviewStatus, ReviewThread } from './
 
 const viewType = 'aiMarkdownReviewLoop.reviewEditor';
 
+interface PreviewRestoreState {
+  focusThreadId?: string;
+  overlayThreadIds?: string[];
+  replyThreadId?: string;
+}
+
 export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vscode.Disposable {
   private readonly markdown = new MarkdownIt({
     html: false,
@@ -104,10 +110,10 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
       localResourceRoots: [this.context.extensionUri]
     };
 
-    const render = async () => {
+    const render = async (restoreState?: PreviewRestoreState) => {
       try {
         const reviewDocument = await this.store.load(document.uri);
-        webviewPanel.webview.html = this.renderHtml(webviewPanel.webview, document, reviewDocument);
+        webviewPanel.webview.html = this.renderHtml(webviewPanel.webview, document, reviewDocument, restoreState);
       } catch (error) {
         webviewPanel.webview.html = this.renderErrorHtml(document, formatError(error));
       }
@@ -203,18 +209,25 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
 
         if (message?.type === 'addReply') {
           const replyText = String(message.text ?? '').trim();
+          const threadId = String(message.threadId ?? '');
 
-          if (!replyText) {
+          if (!replyText || !threadId) {
             vscode.window.showWarningMessage('Reply text is empty.');
             return;
           }
 
           await this.store.addReply(
             document.uri,
-            String(message.threadId),
+            threadId,
             replyText
           );
-          await render();
+          await render({
+            focusThreadId: threadId,
+            overlayThreadIds: message.origin === 'overlay'
+              ? parseThreadIds(message.threadIds, threadId)
+              : undefined,
+            replyThreadId: threadId
+          });
         }
 
         if (message?.type === 'applySuggestedPatch') {
@@ -471,7 +484,8 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
   private renderHtml(
     webview: vscode.Webview,
     document: vscode.TextDocument,
-    reviewDocument: ReviewDocument
+    reviewDocument: ReviewDocument,
+    restoreState?: PreviewRestoreState
   ): string {
     const nonce = randomUUID();
     const documentText = document.getText();
@@ -486,7 +500,8 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
       threads: reviewDocument.threads,
       markerLineHints,
       documentVersion: document.version,
-      sourceLineCount: countMarkdownLines(previewMarkdown)
+      sourceLineCount: countMarkdownLines(previewMarkdown),
+      restoreState: restoreState ?? {}
     }).replace(/</g, '\\u003c');
 
     return `<!DOCTYPE html>
@@ -1106,6 +1121,7 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
     const markerLineHints = state.markerLineHints || {};
     const documentVersion = Number(state.documentVersion);
     const sourceLineCount = Number(state.sourceLineCount) || 1;
+    const restoreState = state.restoreState || {};
     const markdownBody = document.getElementById('markdown-body');
     const selectionPopover = document.getElementById('selection-popover');
     const selectionCommentButton = document.getElementById('selection-comment');
@@ -1255,6 +1271,8 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
       vscode.postMessage({
         type: 'addReply',
         threadId: target.getAttribute('data-thread-id'),
+        threadIds: getThreadIds(commentOverlay),
+        origin: target.closest('#comment-overlay') ? 'overlay' : 'thread',
         text
       });
     });
@@ -1429,6 +1447,7 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
     attachRelatedThreadIds(openThreads);
     markMissingAnchors(openThreads);
     decorateEditableMarkdownBlocks();
+    restorePreviewState();
     renderMermaidDiagrams();
 
     function escapeHtml(value) {
@@ -2163,6 +2182,7 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
       }
 
       commentOverlay.innerHTML = threads.map(renderCommentOverlayItem).join('');
+      commentOverlay.dataset.threadIds = threads.map((thread) => thread.id).join(',');
       const rect = sourceElement.getBoundingClientRect();
       positionFloatingElement(commentOverlay, {
         left: rect.left,
@@ -2175,7 +2195,7 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
 
     function renderCommentOverlayItem(thread) {
       return [
-        '<section class="comment-overlay-item ' + sourceClass(thread) + '">',
+        '<section class="comment-overlay-item ' + sourceClass(thread) + '" data-thread-id="' + escapeHtml(thread.id) + '">',
         '<div class="comment-overlay-meta">',
         renderSourceChip(thread),
         renderMetaChip('Type', thread.type || 'note'),
@@ -2256,6 +2276,53 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
     function hideCommentOverlay() {
       commentOverlay.style.display = 'none';
       commentOverlay.innerHTML = '';
+      delete commentOverlay.dataset.threadIds;
+    }
+
+    function restorePreviewState() {
+      const focusThreadId = String(restoreState.focusThreadId || '');
+      const overlayThreadIds = Array.isArray(restoreState.overlayThreadIds)
+        ? restoreState.overlayThreadIds.map(String).filter(Boolean)
+        : [];
+
+      if (focusThreadId) {
+        focusThread(focusThreadId, overlayThreadIds.length === 0);
+      }
+
+      if (overlayThreadIds.length > 0) {
+        const sourceElement = findOverlaySourceElement(overlayThreadIds[0]);
+
+        if (sourceElement) {
+          openCommentOverlay(overlayThreadIds, sourceElement);
+          focusThread(focusThreadId || overlayThreadIds[0], false);
+        }
+      }
+
+      const replyThreadId = String(restoreState.replyThreadId || focusThreadId || overlayThreadIds[0] || '');
+
+      if (replyThreadId) {
+        focusReplyInput(replyThreadId);
+      }
+    }
+
+    function findOverlaySourceElement(threadId) {
+      const badge = markdownBody.querySelector('.review-badge[data-thread-id="' + cssEscape(threadId) + '"]');
+
+      if (badge) {
+        return badge;
+      }
+
+      return markdownBody.querySelector('[data-thread-id="' + cssEscape(threadId) + '"]');
+    }
+
+    function focusReplyInput(threadId) {
+      const openOverlayInput = commentOverlay.style.display === 'block'
+        ? commentOverlay.querySelector('[data-reply-form][data-thread-id="' + cssEscape(threadId) + '"] textarea')
+        : undefined;
+      const input = openOverlayInput
+        || document.querySelector('.thread [data-reply-form][data-thread-id="' + cssEscape(threadId) + '"] textarea');
+
+      input?.focus();
     }
 
     function focusThread(threadId, shouldScroll) {
@@ -2712,6 +2779,18 @@ function parseReviewStatus(value: unknown): ReviewStatus | undefined {
   }
 
   return undefined;
+}
+
+function parseThreadIds(value: unknown, fallbackThreadId: string): string[] {
+  const threadIds = Array.isArray(value)
+    ? value.map(threadId => String(threadId).trim()).filter(Boolean)
+    : [];
+
+  if (threadIds.length > 0) {
+    return threadIds;
+  }
+
+  return fallbackThreadId ? [fallbackThreadId] : [];
 }
 
 function countMarkdownLines(value: string): number {

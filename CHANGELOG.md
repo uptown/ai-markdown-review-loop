@@ -24,6 +24,7 @@
 - Adds a constrained rendered-block Markdown editor and rewrite path that use the same review-aware edit pipeline.
 - Uses Turndown for block-editor HTML-to-Markdown conversion instead of a hand-rolled serializer.
 - Submits comment and reply textareas with Enter while keeping Shift+Enter for multi-line text.
+- Keeps the active comment overlay or review thread focused after saving a reply.
 - Dismisses an empty selected-text comment composer on outside click or Escape while preserving typed drafts.
 - Hides compact `ai-review-log` audit comments from the rendered Markdown review preview.
 - Adds Node unit and scenario tests for suggested patch selection, review-aware edits, inline anchor metadata, review lifecycle flow, and agent feedback export guardrails.
