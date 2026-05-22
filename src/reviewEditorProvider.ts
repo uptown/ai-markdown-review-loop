@@ -6,23 +6,31 @@ import { createAnchor } from './anchors';
 import { htmlBlockToMarkdown } from './htmlToMarkdown';
 import { createMermaidFenceReplacement } from './mermaidEdits';
 import {
-  appendClosedReviewLog,
   findStaleInlineAnchorMarkers,
-  insertInlineAnchorMarker,
-  removeClosedReviewLogMarkers,
-  removeInlineAnchorMarker,
   removeInlineAnchorMarkers,
   stripInlineAnchorMarkers
 } from './inlineMarkers';
+import {
+  appendInlineReviewLogMarker,
+  removeInlineAnchorMarkersFromMarkdown,
+  removeInlineReviewLogMarkers,
+  upsertInlineAnchorMarkersInMarkdown
+} from './inlineMarkerPayloads';
+import {
+  applyReviewThreadUpdatesToDocuments,
+  ClosedReviewThreadUpdate
+} from './reviewDocumentUpdates';
 import { ReviewStore } from './reviewStore';
 import {
+  applyReviewAwareEditToMarkdown,
   buildReviewAwareThreadUpdates,
   createLineRangeEditPlan,
   createOffsetEditPlan,
   ReviewAwareEditIntent,
   ReviewAwareEditPlan
 } from './reviewAwareEdits';
-import { getReviewHistoryAnchorStates } from './reviewHistory';
+import { createRestoredReviewThread, getReviewHistoryAnchorStates } from './reviewHistory';
+import { ReviewUndoController } from './reviewUndo';
 import { ApplyPatchResult, selectSuggestedPatchReplacement } from './suggestedPatches';
 import { AnchorConfidence, ReviewDocument, ReviewStatus, ReviewThread } from './types';
 
@@ -41,6 +49,7 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
     typographer: false
   });
   private readonly anchorMaintenance: AnchorMaintenanceController;
+  private readonly reviewUndo: ReviewUndoController;
 
   private currentDocumentUri: vscode.Uri | undefined;
 
@@ -49,6 +58,7 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
     private readonly store: ReviewStore
   ) {
     this.anchorMaintenance = new AnchorMaintenanceController(store);
+    this.reviewUndo = new ReviewUndoController(store);
     const defaultFence = this.markdown.renderer.rules.fence;
     const sourceMappedRules = [
       'paragraph_open',
@@ -136,7 +146,14 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
 
     const changeSubscription = vscode.workspace.onDidChangeTextDocument(event => {
       if (event.document.uri.toString() === document.uri.toString()) {
-        void render();
+        void (async () => {
+          try {
+            await this.reviewUndo.handleTextDocumentChange(event);
+          } catch (error) {
+            vscode.window.showErrorMessage(`AI Markdown Review undo sync failed: ${formatError(error)}`);
+          }
+          await render();
+        })();
       }
     });
     const saveSubscription = vscode.workspace.onDidSaveTextDocument(event => {
@@ -214,18 +231,7 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
             return;
           }
 
-          const thread = await this.store.restoreThread(document.uri, threadId);
-          const sidecarUri = await this.store.getReviewFileUri(document.uri);
-          const logRemoved = await removeClosedReviewLogMarkers(document, [threadId]);
-          const markerInserted = await insertInlineAnchorMarker(document, thread, sidecarUri);
-
-          if (!logRemoved) {
-            vscode.window.showWarningMessage('Review thread was restored, but the closed audit log could not be removed.');
-          }
-
-          if (!markerInserted) {
-            vscode.window.showWarningMessage('Review thread was restored, but the Markdown anchor marker could not be inserted.');
-          }
+          await this.restoreThread(document, threadId);
 
           vscode.window.showInformationMessage('Restored review thread to open feedback.');
           await render({ focusThreadId: threadId });
@@ -436,13 +442,26 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
       updatedAt: now
     };
 
-    await this.store.addThread(document.uri, thread);
+    const beforeMarkdown = document.getText();
+    const beforeSnapshot = await this.reviewUndo.capture(document.uri);
     const sidecarUri = await this.store.getReviewFileUri(document.uri);
-    const markerInserted = await insertInlineAnchorMarker(document, thread, sidecarUri);
+    const reviewDocument = await this.store.load(document.uri);
+    reviewDocument.threads.push(thread);
+
+    const afterMarkdown = upsertInlineAnchorMarkersInMarkdown(beforeMarkdown, [{
+      id: thread.id,
+      sidecar: vscode.workspace.asRelativePath(sidecarUri, false)
+    }]);
+    const markerInserted = await this.replaceDocumentMarkdown(document, beforeMarkdown, afterMarkdown);
 
     if (!markerInserted) {
-      vscode.window.showWarningMessage('Feedback was saved, but the Markdown anchor marker could not be inserted.');
+      vscode.window.showWarningMessage('Feedback could not be anchored in Markdown.');
+      return;
     }
+
+    await this.store.save(document.uri, reviewDocument);
+    const afterSnapshot = await this.reviewUndo.capture(document.uri);
+    this.reviewUndo.register(document.uri, beforeMarkdown, document.getText(), beforeSnapshot, afterSnapshot);
   }
 
   private async updateThreadStatus(
@@ -451,33 +470,45 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
     status: ReviewStatus,
     update: Partial<ReviewThread> = {}
   ): Promise<void> {
-    await this.store.updateThread(
-      document.uri,
-      threadId,
-      { ...update, status }
-    );
+    const beforeMarkdown = document.getText();
+    const beforeSnapshot = await this.reviewUndo.capture(document.uri);
+    const now = new Date().toISOString();
+    const reviewDocument = await this.store.load(document.uri);
+    const resolvedReviewDocument = await this.store.loadResolved(document.uri);
 
-    if (status === 'open') {
+    if (!reviewDocument.threads.some(thread => thread.id === threadId)) {
+      throw new Error(`Review thread not found: ${threadId}`);
+    }
+
+    const appliedUpdates = applyReviewThreadUpdatesToDocuments(
+      reviewDocument,
+      resolvedReviewDocument,
+      [{
+        threadId,
+        update: { ...update, status }
+      }],
+      now
+    );
+    const afterMarkdown = appliedUpdates.closedThreads.length > 0
+      ? this.applyClosedThreadMarkers(
+        beforeMarkdown,
+        appliedUpdates.closedThreads,
+        now,
+        vscode.workspace.asRelativePath(await this.store.getResolvedReviewFileUri(document.uri), false)
+      )
+      : beforeMarkdown;
+
+    if (!await this.replaceDocumentMarkdown(document, beforeMarkdown, afterMarkdown)) {
+      vscode.window.showWarningMessage('Review status was updated, but the Markdown markers could not be updated.');
       return;
     }
 
-    const resolvedSidecarUri = await this.store.getResolvedReviewFileUri(document.uri);
-    const markerRemoved = await removeInlineAnchorMarker(document, threadId);
-
-    if (!markerRemoved) {
-      vscode.window.showWarningMessage('Review status was updated, but the Markdown anchor marker could not be removed.');
+    await this.store.save(document.uri, appliedUpdates.reviewDocument);
+    if (appliedUpdates.closedThreads.length > 0) {
+      await this.store.saveResolved(document.uri, appliedUpdates.resolvedReviewDocument);
     }
-
-    const logInserted = await appendClosedReviewLog(
-      document,
-      threadId,
-      status,
-      resolvedSidecarUri
-    );
-
-    if (!logInserted) {
-      vscode.window.showWarningMessage('Review status was updated, but the Markdown review log could not be inserted.');
-    }
+    const afterSnapshot = await this.reviewUndo.capture(document.uri);
+    this.reviewUndo.register(document.uri, beforeMarkdown, document.getText(), beforeSnapshot, afterSnapshot);
   }
 
   private async applyReviewAwareEdit(
@@ -485,50 +516,134 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
     plan: ReviewAwareEditPlan
   ): Promise<boolean> {
     const beforeMarkdown = document.getText();
-    const edit = new vscode.WorkspaceEdit();
-    edit.replace(
-      document.uri,
-      new vscode.Range(
-        document.positionAt(plan.start),
-        document.positionAt(plan.end)
-      ),
-      plan.replacement
-    );
-
-    const applied = await vscode.workspace.applyEdit(edit);
-
-    if (!applied) {
-      return false;
-    }
-
+    const beforeSnapshot = await this.reviewUndo.capture(document.uri);
+    const now = new Date().toISOString();
     const reviewDocument = await this.store.load(document.uri);
+    const resolvedReviewDocument = await this.store.loadResolved(document.uri);
     const updates = buildReviewAwareThreadUpdates(
       beforeMarkdown,
       reviewDocument.threads,
       plan,
-      new Date().toISOString()
+      now
     );
+    const appliedUpdates = applyReviewThreadUpdatesToDocuments(
+      reviewDocument,
+      resolvedReviewDocument,
+      updates,
+      now
+    );
+    const editedMarkdown = applyReviewAwareEditToMarkdown(beforeMarkdown, plan);
+    const afterMarkdown = appliedUpdates.closedThreads.length > 0
+      ? this.applyClosedThreadMarkers(
+        editedMarkdown,
+        appliedUpdates.closedThreads,
+        now,
+        vscode.workspace.asRelativePath(await this.store.getResolvedReviewFileUri(document.uri), false)
+      )
+      : editedMarkdown;
 
-    for (const threadUpdate of updates) {
-      const status = threadUpdate.update.status;
-
-      if (status && status !== 'open') {
-        await this.updateThreadStatus(
-          document,
-          threadUpdate.threadId,
-          status,
-          threadUpdate.update
-        );
-      } else {
-        await this.store.updateThread(
-          document.uri,
-          threadUpdate.threadId,
-          threadUpdate.update
-        );
-      }
+    if (!await this.replaceDocumentMarkdown(document, beforeMarkdown, afterMarkdown)) {
+      return false;
     }
 
+    await this.store.save(document.uri, appliedUpdates.reviewDocument);
+    if (appliedUpdates.closedThreads.length > 0) {
+      await this.store.saveResolved(document.uri, appliedUpdates.resolvedReviewDocument);
+    }
+    const afterSnapshot = await this.reviewUndo.capture(document.uri);
+    this.reviewUndo.register(document.uri, beforeMarkdown, document.getText(), beforeSnapshot, afterSnapshot);
     return true;
+  }
+
+  private async restoreThread(
+    document: vscode.TextDocument,
+    threadId: string
+  ): Promise<void> {
+    const beforeMarkdown = document.getText();
+    const beforeSnapshot = await this.reviewUndo.capture(document.uri);
+    const now = new Date().toISOString();
+    const reviewDocument = await this.store.load(document.uri);
+    const existingOpenThread = reviewDocument.threads.find(thread => thread.id === threadId);
+
+    if (existingOpenThread) {
+      return;
+    }
+
+    const resolvedReviewDocument = await this.store.loadResolved(document.uri);
+    const resolvedIndex = resolvedReviewDocument.threads.findIndex(thread => thread.id === threadId);
+
+    if (resolvedIndex < 0) {
+      throw new Error(`Resolved review thread not found: ${threadId}`);
+    }
+
+    const restoredThread = createRestoredReviewThread(
+      resolvedReviewDocument.threads[resolvedIndex],
+      now
+    );
+    const sidecarUri = await this.store.getReviewFileUri(document.uri);
+    const afterMarkdown = upsertInlineAnchorMarkersInMarkdown(
+      removeInlineReviewLogMarkers(beforeMarkdown, [threadId]),
+      [{
+        id: restoredThread.id,
+        sidecar: vscode.workspace.asRelativePath(sidecarUri, false)
+      }]
+    );
+
+    if (!await this.replaceDocumentMarkdown(document, beforeMarkdown, afterMarkdown)) {
+      throw new Error('Markdown markers could not be updated.');
+    }
+
+    resolvedReviewDocument.threads.splice(resolvedIndex, 1);
+    reviewDocument.threads.push(restoredThread);
+    await this.store.save(document.uri, reviewDocument);
+    await this.store.saveResolved(document.uri, resolvedReviewDocument);
+    const afterSnapshot = await this.reviewUndo.capture(document.uri);
+    this.reviewUndo.register(document.uri, beforeMarkdown, document.getText(), beforeSnapshot, afterSnapshot);
+  }
+
+  private applyClosedThreadMarkers(
+    markdown: string,
+    closedThreads: ClosedReviewThreadUpdate[],
+    now: string,
+    resolvedSidecarPath: string
+  ): string {
+    if (closedThreads.length === 0) {
+      return markdown;
+    }
+
+    let nextMarkdown = removeInlineAnchorMarkersFromMarkdown(
+      markdown,
+      closedThreads.map(thread => thread.threadId)
+    );
+
+    for (const thread of closedThreads) {
+      nextMarkdown = appendInlineReviewLogMarker(nextMarkdown, {
+        id: thread.threadId,
+        status: thread.status,
+        sidecar: resolvedSidecarPath,
+        updatedAt: now
+      });
+    }
+
+    return nextMarkdown;
+  }
+
+  private async replaceDocumentMarkdown(
+    document: vscode.TextDocument,
+    beforeMarkdown: string,
+    afterMarkdown: string
+  ): Promise<boolean> {
+    if (beforeMarkdown === afterMarkdown) {
+      return true;
+    }
+
+    const edit = new vscode.WorkspaceEdit();
+    edit.replace(
+      document.uri,
+      new vscode.Range(document.positionAt(0), document.positionAt(beforeMarkdown.length)),
+      afterMarkdown
+    );
+    return vscode.workspace.applyEdit(edit);
   }
 
   private async applySuggestedPatch(

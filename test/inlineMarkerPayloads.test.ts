@@ -1,12 +1,15 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  appendInlineReviewLogMarker,
   createInlineAnchorMarker,
   findStaleInlineAnchorMarkers,
   readInlineAnchorMarkers,
+  removeInlineAnchorMarkersFromMarkdown,
   removeInlineAnchorMarkerPayloads,
   removeInlineReviewLogMarkers,
-  stripInlineAnchorMarkers
+  stripInlineAnchorMarkers,
+  upsertInlineAnchorMarkersInMarkdown
 } from '../src/inlineMarkerPayloads';
 import type { ReviewThread } from '../src/types';
 
@@ -103,6 +106,45 @@ describe('inline marker payloads', () => {
     assert.equal(
       removeInlineReviewLogMarkers(markdown, ['rv_a']),
       'Body\n <!-- ai-review-log:{"id":"rv_b","status":"accepted"} -->'
+    );
+  });
+
+  it('rewrites inline anchor metadata as one compact marker for undoable document edits', () => {
+    const markdown = [
+      'Body',
+      '<!-- ai-review-anchor:{"id":"rv_a","sidecar":".ai-markdown-review/documents/spec.json"} -->'
+    ].join('\n');
+
+    assert.equal(
+      upsertInlineAnchorMarkersInMarkdown(markdown, [{ id: 'rv_b', sidecar }]),
+      [
+        'Body',
+        '<!-- ai-review-anchors:{"sidecar":".ai-markdown-review/documents/spec.json","ids":["rv_a","rv_b"]} -->',
+        ''
+      ].join('\n')
+    );
+  });
+
+  it('removes closed anchors and appends compact review logs in source order', () => {
+    const markdown = [
+      'Body',
+      '<!-- ai-review-anchors:{"sidecar":".ai-markdown-review/documents/spec.json","ids":["rv_a","rv_b"]} -->'
+    ].join('\n');
+    const withoutClosed = removeInlineAnchorMarkersFromMarkdown(markdown, ['rv_a']);
+
+    assert.equal(
+      appendInlineReviewLogMarker(withoutClosed, {
+        id: 'rv_a',
+        status: 'accepted',
+        sidecar: '.ai-markdown-review/resolved/spec.json',
+        updatedAt: '2026-05-23T00:00:00.000Z'
+      }),
+      [
+        'Body',
+        '<!-- ai-review-anchors:{"sidecar":".ai-markdown-review/documents/spec.json","ids":["rv_b"]} -->',
+        '<!-- ai-review-log:{"id":"rv_a","status":"accepted","sidecar":".ai-markdown-review/resolved/spec.json","updatedAt":"2026-05-23T00:00:00.000Z"} -->',
+        ''
+      ].join('\n')
     );
   });
 });

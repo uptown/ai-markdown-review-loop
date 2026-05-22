@@ -9,6 +9,13 @@ export interface InlineAnchorMarker {
   lineEnd?: number;
 }
 
+export interface InlineReviewLogMarker {
+  id: string;
+  status: string;
+  sidecar: string;
+  updatedAt: string;
+}
+
 export function createInlineAnchorBlockPattern(): RegExp {
   return /^<!-- ai-review-anchors?:.*?-->\r?\n?/gm;
 }
@@ -75,6 +82,10 @@ export function createInlineAnchorMarker(payloads: InlineAnchorMarker[]): string
   return `<!-- ai-review-anchors:${JSON.stringify(payloads.map(compactMarker))} -->`;
 }
 
+export function createInlineReviewLogMarker(payload: InlineReviewLogMarker): string {
+  return `<!-- ai-review-log:${JSON.stringify(payload)} -->`;
+}
+
 export function dedupeInlineAnchorMarkers(markers: InlineAnchorMarker[]): InlineAnchorMarker[] {
   const seen = new Set<string>();
   const deduped: InlineAnchorMarker[] = [];
@@ -97,6 +108,55 @@ export function removeInlineAnchorMarkerPayloads(
 ): InlineAnchorMarker[] {
   const ids = new Set(threadIds);
   return dedupeInlineAnchorMarkers(markers.filter(marker => !ids.has(marker.id)));
+}
+
+export function replaceInlineAnchorMarkersInMarkdown(
+  markdown: string,
+  markers: InlineAnchorMarker[]
+): string {
+  const withoutAnchors = markdown.replace(createInlineAnchorBlockPattern(), '');
+  const deduped = dedupeInlineAnchorMarkers(markers);
+
+  if (deduped.length === 0) {
+    return withoutAnchors;
+  }
+
+  return appendMetadataLine(withoutAnchors, createInlineAnchorMarker(deduped));
+}
+
+export function upsertInlineAnchorMarkersInMarkdown(
+  markdown: string,
+  markers: InlineAnchorMarker[]
+): string {
+  return replaceInlineAnchorMarkersInMarkdown(
+    markdown,
+    [
+      ...readInlineAnchorMarkers(markdown),
+      ...markers
+    ]
+  );
+}
+
+export function removeInlineAnchorMarkersFromMarkdown(
+  markdown: string,
+  threadIds: Iterable<string>
+): string {
+  return replaceInlineAnchorMarkersInMarkdown(
+    markdown,
+    removeInlineAnchorMarkerPayloads(readInlineAnchorMarkers(markdown), threadIds)
+  );
+}
+
+export function appendInlineReviewLogMarker(
+  markdown: string,
+  payload: InlineReviewLogMarker
+): string {
+  if (markdown.includes(`ai-review-log:{"id":"${payload.id}"`)
+    || markdown.includes(`ai-review-log:{"id": "${payload.id}"`)) {
+    return markdown;
+  }
+
+  return appendMetadataLine(markdown, createInlineReviewLogMarker(payload));
 }
 
 function parseInlineAnchorPayload(payload: string): InlineAnchorMarker[] {
@@ -132,6 +192,11 @@ function compactMarker(marker: InlineAnchorMarker): InlineAnchorMarker {
     id: marker.id,
     sidecar: marker.sidecar
   };
+}
+
+function appendMetadataLine(markdown: string, marker: string): string {
+  const prefix = markdown.length > 0 && !markdown.endsWith('\n') ? '\n' : '';
+  return `${markdown}${prefix}${marker}\n`;
 }
 
 function isInlineAnchorMarker(value: unknown): value is InlineAnchorMarker {

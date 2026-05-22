@@ -276,7 +276,7 @@ export class ReviewStore {
     await this.saveResolved(documentUri, resolvedDocument);
   }
 
-  private async saveResolved(documentUri: vscode.Uri, reviewDocument: ReviewDocument): Promise<void> {
+  async saveResolved(documentUri: vscode.Uri, reviewDocument: ReviewDocument): Promise<void> {
     const reviewUri = await this.getResolvedReviewFileUri(documentUri);
     const payload: ReviewDocument = {
       documentUri: documentUri.toString(),

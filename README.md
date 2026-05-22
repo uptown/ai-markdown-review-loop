@@ -132,6 +132,8 @@ Suggested replacement patches are treated as document edits, not just review dec
 
 Rendered block edits use the same review-aware edit pipeline. The MVP editor is intentionally constrained to source-mapped Markdown blocks instead of replacing the whole file with a free-form WYSIWYG surface, so open comments can stay attached to the edited range and ordinary source edits still fall back to debounced re-anchoring.
 
+Review-aware edits, new comment anchors, review decisions, and restored threads register sidecar snapshots with the Markdown edit. Undo and redo restore the matching `.ai-markdown-review` sidecar state when the Markdown text rolls backward or forward.
+
 ## Packaging
 
 ```bash
