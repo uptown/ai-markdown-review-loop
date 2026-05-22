@@ -4,7 +4,11 @@ import type { ReviewStatus, ReviewThread } from './types';
 const contextRadius = 180;
 
 export type ReviewAwareEditActor = 'user' | 'assistant';
-export type ReviewAwareEditIntent = 'apply_suggestion' | 'manual_block_edit' | 'rewrite_section';
+export type ReviewAwareEditIntent =
+  | 'apply_suggestion'
+  | 'manual_block_edit'
+  | 'manual_mermaid_edit'
+  | 'rewrite_section';
 export type ClosingReviewStatus = Extract<ReviewStatus, 'accepted' | 'resolved' | 'rejected'>;
 
 export interface ReviewAwareEditPlan {
@@ -248,6 +252,10 @@ function createOutcomeReplyText(thread: ReviewThread, plan: ReviewAwareEditPlan)
 
   if (plan.intent === 'rewrite_section') {
     return 'Edit outcome: rewrote overlapping Markdown through the review-aware edit pipeline and refreshed this thread anchor.';
+  }
+
+  if (plan.intent === 'manual_mermaid_edit') {
+    return 'Edit outcome: edited overlapping Mermaid source through the review-aware edit pipeline and refreshed this thread anchor.';
   }
 
   return 'Edit outcome: edited overlapping Markdown through the review-aware edit pipeline and refreshed this thread anchor.';

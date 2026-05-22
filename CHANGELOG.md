@@ -23,6 +23,7 @@
 - Routes Apply Edit through a review-aware edit service that refreshes sidecar anchors/context and records edit outcome replies.
 - Adds a constrained rendered-block Markdown editor and rewrite path that use the same review-aware edit pipeline.
 - Uses Turndown for block-editor HTML-to-Markdown conversion instead of a hand-rolled serializer.
+- Adds Mermaid source editing from rendered diagram cards through the review-aware edit pipeline.
 - Submits comment and reply textareas with Enter while keeping Shift+Enter for multi-line text.
 - Keeps the active comment overlay or review thread focused after saving a reply.
 - Shows accepted, resolved, and rejected review history with linked/outdated anchor state and a Restore action.

@@ -15,6 +15,7 @@ The first MVP focuses on a local workflow:
 - See saved comments as highlights and small badges in the rendered document.
 - Click a highlighted region or badge to inspect, accept, resolve, or reject saved comments.
 - Edit or rewrite a rendered Markdown block through a constrained block editor that keeps review anchors in sync.
+- Edit Mermaid diagram source from the rendered diagram card through the same review-aware edit pipeline.
 - Reply under review comments with clear `You`/`AI` attribution for future AI handoff.
 - Distinguish user comments from AI-generated review comments with separate labels, badges, and highlight colors.
 - Apply suggested replacement patches from review threads when the patch still matches a reliable anchor.
@@ -86,6 +87,7 @@ flowchart TD
 
 Each diagram card includes:
 
+- `Edit` to update the Mermaid source block without leaving the review preview.
 - `Feedback` to attach review feedback to the diagram source.
 - `Copy` to copy the Mermaid source.
 - A collapsible `Source` view.

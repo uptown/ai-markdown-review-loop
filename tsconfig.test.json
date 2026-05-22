@@ -10,6 +10,7 @@
     "src/exportFeedback.ts",
     "src/htmlToMarkdown.ts",
     "src/inlineMarkerPayloads.ts",
+    "src/mermaidEdits.ts",
     "src/reviewAwareEdits.ts",
     "src/reviewHistory.ts",
     "src/suggestedPatches.ts",

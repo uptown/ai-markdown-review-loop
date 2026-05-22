@@ -4,6 +4,7 @@ import { randomUUID } from 'crypto';
 import { AnchorMaintenanceController } from './anchorMaintenance';
 import { createAnchor } from './anchors';
 import { htmlBlockToMarkdown } from './htmlToMarkdown';
+import { createMermaidFenceReplacement } from './mermaidEdits';
 import {
   appendClosedReviewLog,
   findStaleInlineAnchorMarkers,
@@ -322,6 +323,35 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
           await render();
         }
 
+        if (message?.type === 'editMermaidSource') {
+          const lineStart = parseSourceLine(message.lineStart);
+          const lineEnd = parseSourceLine(message.lineEnd);
+          const source = String(message.source ?? '').trim();
+
+          if (!lineStart || !lineEnd || lineEnd < lineStart || !source) {
+            vscode.window.showWarningMessage('Ignored invalid Mermaid source edit.');
+            return;
+          }
+
+          await this.anchorMaintenance.flush(document);
+          const plan = createLineRangeEditPlan(document.getText(), {
+            lineStart,
+            lineEnd,
+            replacement: createMermaidFenceReplacement(source),
+            actor: 'user',
+            intent: 'manual_mermaid_edit'
+          });
+          const applied = await this.applyReviewAwareEdit(document, plan);
+
+          if (!applied) {
+            vscode.window.showWarningMessage('Mermaid source edit could not be applied.');
+            return;
+          }
+
+          vscode.window.showInformationMessage('Updated Mermaid source and refreshed affected review anchors.');
+          await render();
+        }
+
         if (message?.type === 'copyText') {
           await vscode.env.clipboard.writeText(String(message.text ?? ''));
           vscode.window.showInformationMessage('Copied Mermaid source.');
@@ -351,6 +381,7 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
   <div class="mermaid-toolbar">
     <span>Mermaid</span>
     <div class="mermaid-actions">
+      <button type="button" class="secondary compact" data-mermaid-edit>Edit</button>
       <button type="button" class="secondary compact" data-mermaid-feedback>Feedback</button>
       <button type="button" class="secondary compact" data-mermaid-copy>Copy</button>
     </div>
@@ -872,7 +903,8 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
     .selection-popover,
     .comment-composer,
     .comment-overlay,
-    .block-editor {
+    .block-editor,
+    .mermaid-editor {
       position: fixed;
       z-index: 20;
       display: none;
@@ -903,15 +935,25 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
       max-width: min(680px, calc(100vw - 24px));
       padding: 0;
     }
+    .mermaid-editor {
+      box-sizing: border-box;
+      z-index: 30;
+      width: min(680px, calc(100vw - 24px));
+      max-width: min(680px, calc(100vw - 24px));
+      padding: 0;
+    }
     .block-editor-header,
     .block-editor-toolbar,
-    .block-editor-actions {
+    .block-editor-actions,
+    .mermaid-editor-header,
+    .mermaid-editor-actions {
       display: flex;
       align-items: center;
       gap: 6px;
       padding: 8px 10px;
     }
-    .block-editor-header {
+    .block-editor-header,
+    .mermaid-editor-header {
       justify-content: space-between;
       border-bottom: 1px solid var(--border);
       color: var(--muted);
@@ -935,7 +977,25 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
     .block-editor-surface:focus {
       box-shadow: inset 0 0 0 1px var(--vscode-focusBorder);
     }
-    .block-editor-actions {
+    .mermaid-editor-source {
+      box-sizing: border-box;
+      width: 100%;
+      min-height: 220px;
+      max-height: min(480px, calc(100vh - 180px));
+      resize: vertical;
+      border: 0;
+      padding: 12px;
+      color: var(--vscode-input-foreground);
+      background: var(--vscode-input-background);
+      outline: none;
+      font-family: var(--vscode-editor-font-family);
+      line-height: 1.45;
+    }
+    .mermaid-editor-source:focus {
+      box-shadow: inset 0 0 0 1px var(--vscode-focusBorder);
+    }
+    .block-editor-actions,
+    .mermaid-editor-actions {
       justify-content: flex-end;
       border-top: 1px solid var(--border);
     }
@@ -1199,6 +1259,17 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
       <button type="submit" class="compact">Save</button>
     </div>
   </form>
+  <form id="mermaid-editor" class="mermaid-editor" aria-label="Mermaid source editor">
+    <div class="mermaid-editor-header">
+      <strong>Edit Mermaid source</strong>
+      <span id="mermaid-editor-lines"></span>
+    </div>
+    <textarea id="mermaid-editor-source" class="mermaid-editor-source" spellcheck="false"></textarea>
+    <div class="mermaid-editor-actions">
+      <button type="button" id="mermaid-editor-cancel" class="secondary compact">Cancel</button>
+      <button type="submit" class="compact">Save</button>
+    </div>
+  </form>
   <script nonce="${nonce}" src="${mermaidScriptUri}"></script>
   <script nonce="${nonce}">
     const vscode = acquireVsCodeApi();
@@ -1218,12 +1289,17 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
     const blockEditorLines = document.getElementById('block-editor-lines');
     const blockEditorSurface = document.getElementById('block-editor-surface');
     const blockEditorCancel = document.getElementById('block-editor-cancel');
+    const mermaidEditor = document.getElementById('mermaid-editor');
+    const mermaidEditorLines = document.getElementById('mermaid-editor-lines');
+    const mermaidEditorSource = document.getElementById('mermaid-editor-source');
+    const mermaidEditorCancel = document.getElementById('mermaid-editor-cancel');
     let activeSelectionText = '';
     let activeSelectionOccurrence = 0;
     let activeSourceLine = undefined;
     let activeSelectionRect = null;
     let selectionTimer = undefined;
     let activeBlockEdit = undefined;
+    let activeMermaidEdit = undefined;
 
     document.addEventListener('selectionchange', () => {
       scheduleSelectionComposer(false);
@@ -1249,6 +1325,10 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
       hideBlockEditor();
     });
 
+    mermaidEditorCancel.addEventListener('click', () => {
+      hideMermaidEditor();
+    });
+
     blockEditor.addEventListener('submit', (event) => {
       event.preventDefault();
 
@@ -1264,6 +1344,22 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
         intent: activeBlockEdit.intent
       });
       hideBlockEditor();
+    });
+
+    mermaidEditor.addEventListener('submit', (event) => {
+      event.preventDefault();
+
+      if (!activeMermaidEdit) {
+        return;
+      }
+
+      vscode.postMessage({
+        type: 'editMermaidSource',
+        lineStart: activeMermaidEdit.lineStart,
+        lineEnd: activeMermaidEdit.lineEnd,
+        source: mermaidEditorSource.value
+      });
+      hideMermaidEditor();
     });
 
     blockEditor.addEventListener('click', (event) => {
@@ -1296,6 +1392,7 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
         hideSelectionPopover();
         hideComposerIfEmpty();
         hideBlockEditorIfClean();
+        hideMermaidEditorIfClean();
       }
 
       if (event.key === 'Enter'
@@ -1376,6 +1473,12 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
 
       hideBlockEditorIfClean();
 
+      if (target.closest('#mermaid-editor')) {
+        return;
+      }
+
+      hideMermaidEditorIfClean();
+
       const blockEditButton = target.closest('[data-edit-markdown-block], [data-rewrite-markdown-block]');
 
       if (blockEditButton) {
@@ -1452,6 +1555,11 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
 
       if (figure) {
         const source = getMermaidSource(figure);
+
+        if (target.matches('[data-mermaid-edit]')) {
+          openMermaidEditor(figure, source);
+          return;
+        }
 
         if (target.matches('[data-mermaid-feedback]')) {
           activeSelectionText = source;
@@ -1656,6 +1764,13 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
         return;
       }
 
+      if (mermaidEditor.style.display === 'block'
+        && activeMermaidEdit
+        && mermaidEditorSource.value !== activeMermaidEdit.originalSource) {
+        mermaidEditorSource.focus();
+        return;
+      }
+
       if (blockEditor.style.display === 'block'
         && activeBlockEdit
         && blockEditorSurface.innerHTML !== activeBlockEdit.originalHtml) {
@@ -1666,6 +1781,7 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
       hideCommentOverlay();
       hideSelectionPopover();
       hideComposerIfEmpty();
+      hideMermaidEditorIfClean();
       activeBlockEdit = {
         ...lineRange,
         intent,
@@ -1692,6 +1808,53 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
       }, 680);
       blockEditor.style.display = 'block';
       blockEditorSurface.focus();
+    }
+
+    function openMermaidEditor(figure, source) {
+      const lineRange = getEditableLineRange(figure);
+
+      if (!lineRange) {
+        return;
+      }
+
+      if (commentComposer.style.display === 'block' && commentBody.value.trim()) {
+        commentBody.focus();
+        return;
+      }
+
+      if (blockEditor.style.display === 'block'
+        && activeBlockEdit
+        && blockEditorSurface.innerHTML !== activeBlockEdit.originalHtml) {
+        blockEditorSurface.focus();
+        return;
+      }
+
+      if (mermaidEditor.style.display === 'block'
+        && activeMermaidEdit
+        && mermaidEditorSource.value !== activeMermaidEdit.originalSource) {
+        mermaidEditorSource.focus();
+        return;
+      }
+
+      hideCommentOverlay();
+      hideSelectionPopover();
+      hideComposerIfEmpty();
+      hideBlockEditorIfClean();
+      activeMermaidEdit = {
+        ...lineRange,
+        originalSource: source
+      };
+      mermaidEditorSource.value = source;
+      mermaidEditorLines.textContent = 'Lines ' + lineRange.lineStart + '-' + lineRange.lineEnd;
+      const rect = figure.getBoundingClientRect();
+      positionFloatingElement(mermaidEditor, {
+        left: rect.left,
+        right: rect.right,
+        top: rect.top,
+        bottom: rect.bottom
+      }, 680);
+      mermaidEditor.style.display = 'block';
+      mermaidEditorSource.focus();
     }
 
     function wrapEditableBlockHtml(block, innerHtml) {
@@ -1759,6 +1922,24 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
       }
 
       hideBlockEditor();
+    }
+
+    function hideMermaidEditor() {
+      mermaidEditor.style.display = 'none';
+      mermaidEditorSource.value = '';
+      activeMermaidEdit = undefined;
+    }
+
+    function hideMermaidEditorIfClean() {
+      if (mermaidEditor.style.display !== 'block') {
+        return;
+      }
+
+      if (activeMermaidEdit && mermaidEditorSource.value !== activeMermaidEdit.originalSource) {
+        return;
+      }
+
+      hideMermaidEditor();
     }
 
     function decorateReviewAnchors(threads) {
@@ -2992,7 +3173,7 @@ function parseThreadIds(value: unknown, fallbackThreadId: string): string[] {
 }
 
 function parseReviewAwareEditIntent(value: unknown): ReviewAwareEditIntent | undefined {
-  if (value === 'manual_block_edit' || value === 'rewrite_section') {
+  if (value === 'manual_block_edit' || value === 'manual_mermaid_edit' || value === 'rewrite_section') {
     return value;
   }
 

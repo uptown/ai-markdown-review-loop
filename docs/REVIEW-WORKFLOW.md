@@ -11,6 +11,7 @@ This extension is built around repeated document-review loops between human auth
 - As an AI-agent user, I want open feedback exported with thread IDs, source labels, discussion history, anchor confidence, and suggested patches so an agent can work from the review queue.
 - As a collaborator, I want comments to remain visible after nearby edits so feedback does not silently disappear when wording changes.
 - As an author, I want rendered-block edits and suggested patch application to use the same review-aware pipeline so sidecar anchors, context, and edit outcomes stay current.
+- As an author, I want to edit Mermaid diagram source from the rendered preview so diagram fixes stay in the same review loop as prose edits.
 - As a reviewer, I want accepted, resolved, and rejected threads to remain visible as history so I can audit decisions and restore one when discussion needs to continue.
 
 ## Action Vocabulary
@@ -19,6 +20,7 @@ This extension is built around repeated document-review loops between human auth
 - `Apply edit`: change the Markdown manually or through an agent patch. This does not close a thread by itself.
 - `Apply Edit`: extension action for a suggested replacement patch. It mutates the Markdown and closes the thread as `accepted` only when the original text has one reliable target.
 - `Edit block`: constrained rendered-preview Markdown editing for a source-mapped block. It mutates Markdown and refreshes overlapping thread anchors without deciding review status.
+- `Edit Mermaid`: source editor for a Mermaid fenced code block. It replaces only that fenced block and refreshes overlapping thread anchors without deciding review status.
 - `Rewrite block`: manual rewrite path that uses the same review-aware edit pipeline reserved for future AI rewrite integration.
 - `Accept`: agree with the feedback or recommendation and close the thread as an accepted decision.
 - `Resolve`: close because the underlying issue has been handled, superseded, or no longer applies.
@@ -60,6 +62,14 @@ This extension is built around repeated document-review loops between human auth
 3. The extension replaces only the source-mapped Markdown lines for that block.
 4. Overlapping open threads receive refreshed anchor text, line hints, hash, context snippets, and an edit outcome reply.
 5. Ordinary source edits outside this pipeline still use debounced re-anchor fallback and only persist high-confidence locations.
+
+### Mermaid Source Edit
+
+1. A Mermaid diagram has source feedback or needs a quick syntax/content correction.
+2. The author clicks `Edit` on the diagram card.
+3. The extension opens a source editor for the Mermaid fenced block.
+4. Saving replaces only that fenced block, keeps following Markdown intact, and refreshes overlapping review anchors.
+5. The preview re-renders the diagram and shows Mermaid render errors inline if the new source is invalid.
 
 ### Objection Before Decision
 
