@@ -1027,7 +1027,7 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
         element.dataset.threadId = thread.id;
         element.title = 'Jump to commented content';
         element.innerHTML = [
-          '<header><span class="thread-meta">' + renderSourceChip(thread) + '<span class="meta-chip">' + escapeHtml(thread.type) + '</span><span class="anchor-state-chip" data-anchor-state>Locating</span></span><span class="meta-chip">' + escapeHtml(thread.severity) + '</span></header>',
+          '<header><span class="thread-meta">' + renderSourceChip(thread) + renderMetaChip('Type', thread.type) + '<span class="anchor-state-chip" data-anchor-state>Locating</span></span>' + renderMetaChip('Severity', thread.severity) + '</header>',
           '<blockquote>' + escapeHtml(thread.anchor.text || 'Document') + '</blockquote>',
           '<p>' + escapeHtml(thread.comment) + '</p>',
           renderReplies(thread),
@@ -1611,6 +1611,16 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
       return '<span class="source-chip ' + sourceClass(thread) + '">' + escapeHtml(sourceLabel(thread)) + '</span>';
     }
 
+    function renderMetaChip(label, value) {
+      return '<span class="meta-chip">' + escapeHtml(label) + ': ' + escapeHtml(formatMetaValue(value)) + '</span>';
+    }
+
+    function formatMetaValue(value) {
+      return String(value || '')
+        .replace(/[-_]+/g, ' ')
+        .replace(/\b\w/g, (character) => character.toUpperCase());
+    }
+
     function replyRoleKind(reply) {
       return String(reply?.role || 'user') === 'assistant' ? 'ai' : 'human';
     }
@@ -1666,9 +1676,9 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
         '<section class="comment-overlay-item ' + sourceClass(thread) + '">',
         '<div class="comment-overlay-meta">',
         renderSourceChip(thread),
-        '<span class="meta-chip">' + escapeHtml(thread.type || 'note') + '</span>',
-        '<span class="meta-chip">' + escapeHtml(thread.severity || 'medium') + '</span>',
-        '<span class="meta-chip">' + escapeHtml(thread.status || 'open') + '</span>',
+        renderMetaChip('Type', thread.type || 'note'),
+        renderMetaChip('Severity', thread.severity || 'medium'),
+        renderMetaChip('Status', thread.status || 'open'),
         '</div>',
         '<p class="comment-overlay-comment">' + escapeHtml(thread.comment || '') + '</p>',
         renderReplies(thread),
