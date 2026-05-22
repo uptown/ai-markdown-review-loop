@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.0.4
+
+- Adds a custom editor title toolbar icon for opening AI Review.
+- Keeps the toolbar shortcut visible even when VS Code does not expose Markdown resource context.
+
 ## 0.0.3
 
 - Adds top-of-file CodeLens shortcuts for Markdown files.
