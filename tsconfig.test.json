@@ -8,6 +8,7 @@
   "include": [
     "src/anchorText.ts",
     "src/exportFeedback.ts",
+    "src/htmlToMarkdown.ts",
     "src/inlineMarkerPayloads.ts",
     "src/reviewAwareEdits.ts",
     "src/suggestedPatches.ts",

@@ -3,6 +3,7 @@ import MarkdownIt from 'markdown-it';
 import { randomUUID } from 'crypto';
 import { AnchorMaintenanceController } from './anchorMaintenance';
 import { createAnchor } from './anchors';
+import { htmlBlockToMarkdown } from './htmlToMarkdown';
 import {
   appendClosedReviewLog,
   findStaleInlineAnchorMarkers,
@@ -242,7 +243,7 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
         if (message?.type === 'editMarkdownBlock') {
           const lineStart = parseSourceLine(message.lineStart);
           const lineEnd = parseSourceLine(message.lineEnd);
-          const replacement = String(message.markdown ?? '');
+          const replacement = htmlBlockToMarkdown(String(message.html ?? ''));
           const intent = parseReviewAwareEditIntent(message.intent);
 
           if (!lineStart || !lineEnd || lineEnd < lineStart || !intent) {
@@ -1155,13 +1156,11 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
         return;
       }
 
-      const markdown = serializeEditedBlock();
-
       vscode.postMessage({
         type: 'editMarkdownBlock',
         lineStart: activeBlockEdit.lineStart,
         lineEnd: activeBlockEdit.lineEnd,
-        markdown,
+        html: blockEditorSurface.innerHTML,
         intent: activeBlockEdit.intent
       });
       hideBlockEditor();
@@ -1569,97 +1568,6 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
       } else {
         document.execCommand('formatBlock', false, 'p');
       }
-    }
-
-    function serializeEditedBlock() {
-      const blockElements = Array.from(blockEditorSurface.childNodes)
-        .filter((node) => node.nodeType === Node.ELEMENT_NODE && isMarkdownBlockElement(node));
-
-      if (blockElements.length > 0) {
-        return blockElements
-          .map((node) => serializeBlockNode(node))
-          .filter(Boolean)
-          .join('\\n\\n');
-      }
-
-      return serializeInlineChildren(blockEditorSurface).trim();
-    }
-
-    function serializeBlockNode(node) {
-      const tag = node.tagName?.toLowerCase?.() || '';
-      const text = serializeInlineChildren(node).trim();
-
-      if (!text) {
-        return '';
-      }
-
-      if (/^h[1-6]$/.test(tag)) {
-        return '#'.repeat(Number(tag.slice(1))) + ' ' + text;
-      }
-
-      if (tag === 'li') {
-        return '- ' + text;
-      }
-
-      if (tag === 'blockquote') {
-        return text.split(/\\r?\\n/).map((line) => '> ' + line).join('\\n');
-      }
-
-      return text;
-    }
-
-    function serializeInlineChildren(parent) {
-      return Array.from(parent.childNodes).map(serializeInlineNode).join('');
-    }
-
-    function serializeInlineNode(node) {
-      if (node.nodeType === Node.TEXT_NODE) {
-        return String(node.textContent || '').replace(/\\u00a0/g, ' ');
-      }
-
-      if (node.nodeType !== Node.ELEMENT_NODE) {
-        return '';
-      }
-
-      const element = node;
-      const tag = element.tagName.toLowerCase();
-      const children = serializeInlineChildren(element);
-
-      if (tag === 'br') {
-        return '\\n';
-      }
-
-      if (tag === 'strong' || tag === 'b') {
-        return '**' + children + '**';
-      }
-
-      if (tag === 'em' || tag === 'i') {
-        return '*' + children + '*';
-      }
-
-      if (tag === 'code' || element.getAttribute('face') === 'monospace') {
-        const backtick = String.fromCharCode(96);
-        return backtick + String(element.textContent || '').replace(new RegExp(backtick, 'g'), '\\\\' + backtick) + backtick;
-      }
-
-      if (tag === 'a') {
-        const href = element.getAttribute('href') || '';
-        return href ? '[' + children + '](' + href + ')' : children;
-      }
-
-      if (isMarkdownBlockElement(element)) {
-        return serializeBlockNode(element);
-      }
-
-      return children;
-    }
-
-    function isMarkdownBlockElement(node) {
-      if (!(node instanceof HTMLElement)) {
-        return false;
-      }
-
-      return /^(p|div|h[1-6]|li|blockquote)$/.test(node.tagName.toLowerCase());
     }
 
     function hideBlockEditor() {

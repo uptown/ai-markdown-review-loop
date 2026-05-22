@@ -14,6 +14,7 @@ Generated from installed production npm dependency metadata with `license-checke
 | @iconify/types@2.0.0 | MIT | https://github.com/iconify/iconify | node_modules/@iconify/types/license.txt |
 | @iconify/utils@3.1.3 | MIT | https://github.com/iconify/iconify | node_modules/@iconify/utils/license.txt |
 | @mermaid-js/parser@1.1.1 | MIT | https://github.com/mermaid-js/mermaid | node_modules/@mermaid-js/parser/LICENSE |
+| @mixmark-io/domino@2.2.0 | BSD-2-Clause | https://github.com/mixmark-io/domino | node_modules/@mixmark-io/domino/LICENSE |
 | @types/d3-array@3.2.2 | MIT | https://github.com/DefinitelyTyped/DefinitelyTyped | node_modules/@types/d3-array/LICENSE |
 | @types/d3-axis@3.0.6 | MIT | https://github.com/DefinitelyTyped/DefinitelyTyped | node_modules/@types/d3-axis/LICENSE |
 | @types/d3-brush@3.0.6 | MIT | https://github.com/DefinitelyTyped/DefinitelyTyped | node_modules/@types/d3-brush/LICENSE |
@@ -48,7 +49,7 @@ Generated from installed production npm dependency metadata with `license-checke
 | @types/geojson@7946.0.16 | MIT | https://github.com/DefinitelyTyped/DefinitelyTyped | node_modules/@types/geojson/LICENSE |
 | @types/trusted-types@2.0.7 | MIT | https://github.com/DefinitelyTyped/DefinitelyTyped | node_modules/@types/trusted-types/LICENSE |
 | @upsetjs/venn.js@2.0.0 | MIT | https://github.com/upsetjs/venn.js | node_modules/@upsetjs/venn.js/LICENSE |
-| ai-markdown-review-loop@0.0.7 | MIT | https://github.com/uptown/ai-markdown-review-loop | LICENSE |
+| ai-markdown-review-loop@0.0.8 | MIT | https://github.com/uptown/ai-markdown-review-loop | LICENSE |
 | argparse@2.0.1 | Python-2.0 | https://github.com/nodeca/argparse | node_modules/argparse/LICENSE |
 | commander@7.2.0 | MIT | https://github.com/tj/commander.js | node_modules/d3-dsv/node_modules/commander/LICENSE |
 | commander@8.3.0 | MIT | https://github.com/tj/commander.js | node_modules/katex/node_modules/commander/LICENSE |
@@ -125,6 +126,7 @@ Generated from installed production npm dependency metadata with `license-checke
 | stylis@4.4.0 | MIT | https://github.com/thysultan/stylis.js | node_modules/stylis/LICENSE |
 | tinyexec@1.1.2 | MIT | https://github.com/tinylibs/tinyexec | node_modules/tinyexec/LICENSE |
 | ts-dedent@2.2.0 | MIT | https://github.com/tamino-martinius/node-ts-dedent | node_modules/ts-dedent/LICENSE |
+| turndown@7.2.4 | MIT | https://github.com/mixmark-io/turndown | node_modules/turndown/LICENSE |
 | uc.micro@2.1.0 | MIT | https://github.com/markdown-it/uc.micro | node_modules/uc.micro/LICENSE.txt |
 | uuid@14.0.0 | MIT | https://github.com/uuidjs/uuid | node_modules/uuid/LICENSE.md |
 
@@ -2329,4 +2331,64 @@ Permission is hereby granted, free of charge, to any person obtaining a copy of 
 The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
 
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+```
+
+### License Text 62
+
+Packages: @mixmark-io/domino@2.2.0
+
+```text
+Copyright (c) 2011 The Mozilla Foundation.
+All rights reserved.
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are
+met:
+
+    Redistributions of source code must retain the above copyright
+    notice, this list of conditions and the following disclaimer.
+
+    Redistributions in binary form must reproduce the above copyright
+    notice, this list of conditions and the following disclaimer in the
+    documentation and/or other materials provided with the distribution.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS
+IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
+TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A
+PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
+HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED
+TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
+PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF
+LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING
+NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
+SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+```
+
+### License Text 63
+
+Packages: turndown@7.2.4
+
+```text
+MIT License
+
+Copyright (c) 2017 Dom Christie
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
 ```
