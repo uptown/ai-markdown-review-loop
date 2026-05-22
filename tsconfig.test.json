@@ -1,0 +1,14 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "rootDir": ".",
+    "outDir": ".test-out",
+    "sourceMap": false
+  },
+  "include": [
+    "src/exportFeedback.ts",
+    "src/suggestedPatches.ts",
+    "src/types.ts",
+    "test/**/*.ts"
+  ]
+}

@@ -10,6 +10,7 @@ The first MVP focuses on a local workflow:
 - Open the review preview from a Markdown editor title shortcut.
 - Use the green AI Review icon in the VS Code editor title toolbar.
 - Drag-select rendered text and attach feedback from an inline comment popover.
+- Submit comments and replies with `Enter`, while `Shift+Enter` keeps a newline.
 - See saved comments as highlights and small badges in the rendered document.
 - Click a highlighted region or badge to inspect, accept, resolve, or reject saved comments.
 - Reply under review comments with clear `You`/`AI` attribution for future AI handoff.
@@ -28,6 +29,7 @@ The first MVP focuses on a local workflow:
 ```bash
 nvm use
 npm install
+npm run check
 npm run compile
 ```
 
@@ -123,6 +125,7 @@ Suggested replacement patches are treated as document edits, not just review dec
 ## Packaging
 
 ```bash
+npm run check
 npm run package
 ```
 

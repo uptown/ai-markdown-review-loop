@@ -2,12 +2,15 @@
 .github/**
 .agent/**
 .ai-markdown-review/**
+.test-out/**
 .vscode/**
 src/**
 scripts/**
+test/**
 node_modules/**
 *.vsix
 tsconfig.json
+tsconfig.test.json
 package-lock.json
 .gitignore
 .nvmrc

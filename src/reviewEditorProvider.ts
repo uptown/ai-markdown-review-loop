@@ -12,17 +12,10 @@ import {
   stripInlineAnchorMarkers
 } from './inlineMarkers';
 import { ReviewStore } from './reviewStore';
+import { ApplyPatchResult, selectSuggestedPatchReplacement } from './suggestedPatches';
 import { AnchorConfidence, ReviewDocument, ReviewStatus, ReviewThread } from './types';
 
 const viewType = 'aiMarkdownReviewLoop.reviewEditor';
-
-type ApplyPatchResult =
-  | 'applied'
-  | 'ambiguous'
-  | 'failed'
-  | 'lowConfidenceAnchor'
-  | 'missingPatch'
-  | 'originalNotFound';
 
 export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vscode.Disposable {
   private readonly markdown = new MarkdownIt({
@@ -363,39 +356,24 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
     document: vscode.TextDocument,
     thread: ReviewThread
   ): Promise<ApplyPatchResult> {
-    const patch = thread.suggestedPatch;
+    const selection = selectSuggestedPatchReplacement(
+      document.getText(),
+      thread.suggestedPatch,
+      thread.anchor
+    );
 
-    if (!patch || patch.mode !== 'replace' || patch.original.length === 0) {
-      return 'missingPatch';
-    }
-
-    if (thread.anchor.confidence === 'approximate'
-      || thread.anchor.confidence === 'missing'
-      || thread.anchor.confidence === 'ambiguous') {
-      return 'lowConfidenceAnchor';
-    }
-
-    const text = document.getText();
-    const matches = findAllPatchMatches(text, patch.original);
-
-    if (matches.length === 0) {
-      return 'originalNotFound';
-    }
-
-    const match = selectPatchMatch(document, thread, matches);
-
-    if (!match) {
-      return 'ambiguous';
+    if (selection.result !== 'applied') {
+      return selection.result;
     }
 
     const edit = new vscode.WorkspaceEdit();
     edit.replace(
       document.uri,
       new vscode.Range(
-        document.positionAt(match.index),
-        document.positionAt(match.index + patch.original.length)
+        document.positionAt(selection.start),
+        document.positionAt(selection.end)
       ),
-      patch.replacement
+      selection.replacement
     );
 
     return await vscode.workspace.applyEdit(edit) ? 'applied' : 'failed';
@@ -989,6 +967,19 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
       if (event.key === 'Escape') {
         hideCommentOverlay();
         hideSelectionPopover();
+      }
+
+      if (event.key === 'Enter'
+        && !event.shiftKey
+        && !event.isComposing
+        && event.target instanceof HTMLTextAreaElement) {
+        const form = event.target.closest('form');
+
+        if (form === commentComposer || form?.matches('[data-reply-form]')) {
+          event.preventDefault();
+          form.requestSubmit();
+          return;
+        }
       }
 
       if ((event.metaKey || event.ctrlKey) && event.key === 'Enter' && commentComposer.style.display === 'block') {
@@ -2313,44 +2304,6 @@ function parseReviewStatus(value: unknown): ReviewStatus | undefined {
   }
 
   return undefined;
-}
-
-function findAllPatchMatches(text: string, original: string): Array<{ index: number }> {
-  const matches: Array<{ index: number }> = [];
-  let index = text.indexOf(original);
-
-  while (index >= 0) {
-    matches.push({ index });
-    index = text.indexOf(original, index + Math.max(1, original.length));
-  }
-
-  return matches;
-}
-
-function selectPatchMatch(
-  document: vscode.TextDocument,
-  thread: ReviewThread,
-  matches: Array<{ index: number }>
-): { index: number } | undefined {
-  if (matches.length === 1) {
-    return matches[0];
-  }
-
-  const lineHint = thread.anchor.lastLocatedLine ?? thread.anchor.lineStart;
-
-  if (!lineHint) {
-    return undefined;
-  }
-
-  const lineStart = Math.max(1, lineHint);
-  const lineEnd = Math.max(lineStart, thread.anchor.lineEnd ?? lineStart);
-  const matchingLineMatches = matches.filter(match => {
-    const startLine = document.positionAt(match.index).line + 1;
-    const endLine = document.positionAt(match.index + (thread.suggestedPatch?.original.length ?? 0)).line + 1;
-    return startLine <= lineEnd && endLine >= lineStart;
-  });
-
-  return matchingLineMatches.length === 1 ? matchingLineMatches[0] : undefined;
 }
 
 function formatApplyPatchResult(result: ApplyPatchResult): string {

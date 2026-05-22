@@ -28,6 +28,12 @@ Development-only dependencies do not need prominent Marketplace README
 treatment, but their licenses must remain acceptable for repository development
 and build tooling.
 
+Test tooling follows the same rule. Prefer built-in platform tools, such as
+Node's `node:test`, before adding new test dependencies. If a new library is
+added for tests, agent integration, webview UI, or packaging, review its license,
+notice requirements, bundle impact, and transitive dependency tree before
+committing it.
+
 ## Marketplace Expectations
 
 - Keep the root `LICENSE` file in the VSIX package.

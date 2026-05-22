@@ -180,7 +180,9 @@
   "scripts": {
     "compile": "tsc -p ./ --noEmit && esbuild src/extension.ts --bundle --platform=node --format=cjs --external:vscode --sourcemap --outfile=out/extension.js && node scripts/copy-vendor.mjs",
     "watch": "tsc -watch -p ./",
-    "check": "tsc -p ./ --noEmit",
+    "check": "tsc -p ./ --noEmit && npm run test:unit",
+    "test": "npm run check",
+    "test:unit": "tsc -p tsconfig.test.json && node --test .test-out/test",
     "vscode:prepublish": "npm run compile",
     "package": "vsce package"
   },

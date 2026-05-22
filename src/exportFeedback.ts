@@ -1,4 +1,4 @@
-import { ReviewDocument } from './types';
+import type { ReviewDocument } from './types';
 
 export function renderFeedbackExport(reviewDocument: ReviewDocument): string {
   const openThreads = reviewDocument.threads.filter(thread => thread.status === 'open');
