@@ -7,6 +7,11 @@ import {
   readInlineAnchorMarkers,
   removeInlineAnchorMarkerPayloads
 } from '../src/inlineMarkerPayloads';
+import {
+  applyReviewAwareEditToMarkdown,
+  buildReviewAwareThreadUpdates,
+  createOffsetEditPlan
+} from '../src/reviewAwareEdits';
 import { selectSuggestedPatchReplacement } from '../src/suggestedPatches';
 import type { ReviewThread } from '../src/types';
 
@@ -60,11 +65,33 @@ describe('review lifecycle scenario', () => {
       patchThread.anchor
     );
     assert.equal(patchSelection.result, 'applied');
+    const editPlan = patchSelection.result === 'applied'
+      ? createOffsetEditPlan(markdown, {
+        start: patchSelection.start,
+        end: patchSelection.end,
+        replacement: patchSelection.replacement,
+        actor: 'user',
+        intent: 'apply_suggestion',
+        targetThreadId: patchThread.id,
+        closeTargetAs: 'accepted'
+      })
+      : undefined;
 
-    const nextMarkdown = patchSelection.result === 'applied'
-      ? markdown.slice(0, patchSelection.start) + patchSelection.replacement + markdown.slice(patchSelection.end)
-      : markdown;
+    assert.ok(editPlan);
+    const nextMarkdown = applyReviewAwareEditToMarkdown(markdown, editPlan);
+    const threadUpdates = buildReviewAwareThreadUpdates(
+      markdown,
+      [patchThread, followupThread],
+      editPlan,
+      '2026-05-22T00:10:00.000Z'
+    );
+
     assert.match(nextMarkdown, /^Requirement new/);
+    assert.equal(threadUpdates.length, 1);
+    assert.equal(threadUpdates[0].threadId, 'rv_patch');
+    assert.equal(threadUpdates[0].update.status, 'accepted');
+    assert.equal(threadUpdates[0].update.anchor?.text, 'Requirement new');
+    assert.match(threadUpdates[0].update.thread?.[0].text ?? '', /applied the suggested Markdown edit/);
 
     const exportText = renderFeedbackExport({
       documentUri: 'file:///workspace/spec.md',

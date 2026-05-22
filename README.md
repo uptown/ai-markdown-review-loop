@@ -14,6 +14,7 @@ The first MVP focuses on a local workflow:
 - Empty comment composers close on outside click or Escape, while typed drafts stay open.
 - See saved comments as highlights and small badges in the rendered document.
 - Click a highlighted region or badge to inspect, accept, resolve, or reject saved comments.
+- Edit or rewrite a rendered Markdown block through a constrained block editor that keeps review anchors in sync.
 - Reply under review comments with clear `You`/`AI` attribution for future AI handoff.
 - Distinguish user comments from AI-generated review comments with separate labels, badges, and highlight colors.
 - Apply suggested replacement patches from review threads when the patch still matches a reliable anchor.
@@ -121,7 +122,9 @@ Accepted, resolved, or rejected review threads move from `documents/` to `resolv
 
 Feedback exports include open thread IDs, source labels, discussion history, anchor confidence, and editing guidelines for AI agents. Agents are instructed to preserve review metadata, make localized edits, report each handled `rv_*` ID with an outcome, and avoid closing review threads unless the user explicitly asks for an `accepted`, `resolved`, or `rejected` decision.
 
-Suggested replacement patches are treated as document edits, not just review decisions. `Apply Edit` replaces the matching Markdown text and then closes the thread as `accepted`; if the original text is missing, duplicated ambiguously, or attached to a low-confidence anchor, the extension leaves the thread open.
+Suggested replacement patches are treated as document edits, not just review decisions. `Apply Edit` replaces the matching Markdown text, refreshes affected sidecar anchors and context snippets, records an edit outcome reply, and then closes the target thread as `accepted`; if the original text is missing, duplicated ambiguously, or attached to a low-confidence anchor, the extension leaves the thread open.
+
+Rendered block edits use the same review-aware edit pipeline. The MVP editor is intentionally constrained to source-mapped Markdown blocks instead of replacing the whole file with a free-form WYSIWYG surface, so open comments can stay attached to the edited range and ordinary source edits still fall back to debounced re-anchoring.
 
 ## Packaging
 
@@ -130,7 +133,7 @@ npm run check
 npm run package
 ```
 
-`npm run check` runs TypeScript type checking plus Node-based regression tests for review export, suggested patch selection, inline anchor metadata, and the review lifecycle scenario.
+`npm run check` runs TypeScript type checking plus Node-based regression tests for review export, suggested patch selection, review-aware edits, inline anchor metadata, and the review lifecycle scenario.
 
 License policy and bundled dependency notices:
 

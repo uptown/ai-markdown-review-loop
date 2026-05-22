@@ -1,6 +1,8 @@
 import * as vscode from 'vscode';
-import { createHash } from 'crypto';
-import { ReviewAnchor } from './types';
+import { hashAnchor, normalizeAnchorText } from './anchorText';
+import type { ReviewAnchor } from './types';
+
+export { hashAnchor, normalizeAnchorText } from './anchorText';
 
 interface AnchorOptions {
   occurrence?: number;
@@ -57,14 +59,6 @@ export function createAnchor(
     contextBefore: context.contextBefore,
     contextAfter: context.contextAfter
   };
-}
-
-export function normalizeAnchorText(value: string): string {
-  return value.replace(/\s+/g, ' ').trim();
-}
-
-export function hashAnchor(value: string): string {
-  return `sha256:${createHash('sha256').update(value).digest('hex').slice(0, 16)}`;
 }
 
 function normalizeOccurrence(value: number | undefined): number {

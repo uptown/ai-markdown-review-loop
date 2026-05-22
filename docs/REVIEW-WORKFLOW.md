@@ -10,12 +10,15 @@ This extension is built around repeated document-review loops between human auth
 - As an author, I want `Accept`, `Resolve`, and `Reject` to mean different things so I can close feedback without implying the document was automatically edited.
 - As an AI-agent user, I want open feedback exported with thread IDs, source labels, discussion history, anchor confidence, and suggested patches so an agent can work from the review queue.
 - As a collaborator, I want comments to remain visible after nearby edits so feedback does not silently disappear when wording changes.
+- As an author, I want rendered-block edits and suggested patch application to use the same review-aware pipeline so sidecar anchors, context, and edit outcomes stay current.
 
 ## Action Vocabulary
 
 - `Reply`: add context, clarification, or objection without changing status.
 - `Apply edit`: change the Markdown manually or through an agent patch. This does not close a thread by itself.
 - `Apply Edit`: extension action for a suggested replacement patch. It mutates the Markdown and closes the thread as `accepted` only when the original text has one reliable target.
+- `Edit block`: constrained rendered-preview Markdown editing for a source-mapped block. It mutates Markdown and refreshes overlapping thread anchors without deciding review status.
+- `Rewrite block`: manual rewrite path that uses the same review-aware edit pipeline reserved for future AI rewrite integration.
 - `Accept`: agree with the feedback or recommendation and close the thread as an accepted decision.
 - `Resolve`: close because the underlying issue has been handled, superseded, or no longer applies.
 - `Reject`: close because the recommendation is intentionally declined.
@@ -45,8 +48,16 @@ This extension is built around repeated document-review loops between human auth
 2. The author opens the thread and reviews the diff.
 3. The extension checks that the original text still exists at a reliable anchor.
 4. The author clicks `Apply Edit`.
-5. The extension replaces the Markdown text, removes the open anchor, archives the thread as `accepted`, and leaves an audit log pointer.
+5. The extension replaces the Markdown text, refreshes affected sidecar anchors and context snippets, records edit outcome replies, removes the open target anchor, archives the target thread as `accepted`, and leaves an audit log pointer.
 6. If the text is missing, duplicated ambiguously, or attached to a low-confidence anchor, the thread remains open for reply, re-anchor, or manual editing.
+
+### Rendered Block Edit
+
+1. A paragraph has one or more open comments attached.
+2. The author opens the block editor from the rendered preview.
+3. The extension replaces only the source-mapped Markdown lines for that block.
+4. Overlapping open threads receive refreshed anchor text, line hints, hash, context snippets, and an edit outcome reply.
+5. Ordinary source edits outside this pipeline still use debounced re-anchor fallback and only persist high-confidence locations.
 
 ### Objection Before Decision
 
@@ -65,3 +76,5 @@ This extension is built around repeated document-review loops between human auth
 ## Agent Behavior
 
 Agents should treat review sidecar data and inline review metadata as part of the document state. They should preserve review anchors and logs, prefer localized edits, keep nearby context stable where possible, and report every handled `rv_*` ID with an outcome. Agents should not close threads as `accepted`, `resolved`, or `rejected` unless the user explicitly asks them to make that review decision.
+
+When an AI rewrite provider is added, it should emit a review-aware edit plan instead of rewriting Markdown directly. The plan should identify the selected range, actor, intent, target thread when applicable, and whether a user explicitly requested a status decision.
