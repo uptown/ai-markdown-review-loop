@@ -63,16 +63,13 @@
       "editor/title": [
         {
           "command": "aiMarkdownReviewLoop.openReviewBeside",
+          "when": "resourceExtname == .md || resourceLangId == markdown || activeEditor == aiMarkdownReviewLoop.reviewEditor",
           "group": "navigation@-11"
         },
         {
           "command": "aiMarkdownReviewLoop.openReviewPreview",
-          "group": "navigation@-10"
-        },
-        {
-          "command": "aiMarkdownReviewLoop.reviewDocument",
           "when": "resourceExtname == .md || resourceLangId == markdown || activeEditor == aiMarkdownReviewLoop.reviewEditor",
-          "group": "navigation@2"
+          "group": "navigation@-10"
         }
       ],
       "editor/title/context": [
@@ -85,9 +82,14 @@
           "group": "navigation@0"
         },
         {
-          "command": "aiMarkdownReviewLoop.exportFeedback",
+          "command": "aiMarkdownReviewLoop.reviewDocument",
           "when": "resourceExtname == .md || resourceLangId == markdown || activeEditor == aiMarkdownReviewLoop.reviewEditor",
           "group": "navigation@1"
+        },
+        {
+          "command": "aiMarkdownReviewLoop.exportFeedback",
+          "when": "resourceExtname == .md || resourceLangId == markdown || activeEditor == aiMarkdownReviewLoop.reviewEditor",
+          "group": "navigation@2"
         }
       ],
       "editor/context": [
@@ -102,9 +104,14 @@
           "group": "navigation@1"
         },
         {
-          "command": "aiMarkdownReviewLoop.exportFeedback",
+          "command": "aiMarkdownReviewLoop.reviewDocument",
           "when": "resourceExtname == .md || resourceLangId == markdown",
           "group": "navigation@2"
+        },
+        {
+          "command": "aiMarkdownReviewLoop.exportFeedback",
+          "when": "resourceExtname == .md || resourceLangId == markdown",
+          "group": "navigation@3"
         }
       ],
       "explorer/context": [
@@ -119,9 +126,14 @@
           "group": "navigation@1"
         },
         {
-          "command": "aiMarkdownReviewLoop.exportFeedback",
+          "command": "aiMarkdownReviewLoop.reviewDocument",
           "when": "resourceExtname == .md",
           "group": "navigation@2"
+        },
+        {
+          "command": "aiMarkdownReviewLoop.exportFeedback",
+          "when": "resourceExtname == .md",
+          "group": "navigation@3"
         }
       ]
     },

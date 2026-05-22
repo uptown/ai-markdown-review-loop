@@ -53,7 +53,7 @@ Installed usage:
 
 - Green editor title toolbar icon: open review preview.
 - Split-review editor title toolbar icon: open Markdown source and review preview side by side.
-- Editor context menu on Markdown files: open review preview or export feedback.
+- Editor context menu on Markdown files: open review preview, run local review, or export feedback.
 - Keyboard shortcut: `Cmd+Alt+R` on macOS, `Ctrl+Alt+R` elsewhere.
 - Split keyboard shortcut: `Cmd+Alt+Shift+R` on macOS, `Ctrl+Alt+Shift+R` elsewhere.
 
