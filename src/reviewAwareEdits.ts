@@ -102,6 +102,7 @@ export function buildReviewAwareThreadUpdates(
   now: string
 ): ReviewAwareThreadUpdate[] {
   const afterMarkdown = applyReviewAwareEditToMarkdown(beforeMarkdown, plan);
+  const editedRangeText = normalizeAnchorText(beforeMarkdown.slice(plan.start, plan.end));
   const replacementAnchorText = normalizeAnchorText(plan.replacement);
   const replacementStartLine = lineNumberAtOffset(afterMarkdown, plan.start);
   const replacementEndLine = plan.replacement.length > 0
@@ -119,21 +120,18 @@ export function buildReviewAwareThreadUpdates(
       continue;
     }
 
-    const nextAnchorText = replacementAnchorText || thread.anchor.text;
+    const nextAnchor = createNextAnchor(
+      thread,
+      plan,
+      editedRangeText,
+      replacementAnchorText,
+      replacementStartLine,
+      replacementEndLine,
+      context,
+      now
+    );
     const update: Partial<ReviewThread> = {
-      anchor: {
-        ...thread.anchor,
-        text: nextAnchorText,
-        lineStart: replacementStartLine,
-        lineEnd: replacementEndLine,
-        hash: hashAnchor(nextAnchorText),
-        occurrence: undefined,
-        contextBefore: context.contextBefore,
-        contextAfter: context.contextAfter,
-        confidence: replacementAnchorText ? 'exact' : 'missing',
-        lastLocatedLine: replacementStartLine,
-        lastLocatedAt: now
-      },
+      anchor: nextAnchor,
       thread: [
         ...thread.thread,
         {
@@ -172,6 +170,56 @@ export function lineNumberAtOffset(text: string, offset: number): number {
   }
 
   return line;
+}
+
+function createNextAnchor(
+  thread: ReviewThread,
+  plan: ReviewAwareEditPlan,
+  editedRangeText: string,
+  replacementAnchorText: string,
+  replacementStartLine: number,
+  replacementEndLine: number,
+  context: Pick<ReviewThread['anchor'], 'contextBefore' | 'contextAfter'>,
+  now: string
+): ReviewThread['anchor'] {
+  const existingAnchorText = normalizeAnchorText(thread.anchor.text);
+  const anchorCoveredWholeEditedRange = Boolean(existingAnchorText)
+    && existingAnchorText === editedRangeText;
+
+  if ((thread.id === plan.targetThreadId || anchorCoveredWholeEditedRange) && replacementAnchorText) {
+    return {
+      ...thread.anchor,
+      text: replacementAnchorText,
+      lineStart: replacementStartLine,
+      lineEnd: replacementEndLine,
+      hash: hashAnchor(replacementAnchorText),
+      occurrence: undefined,
+      contextBefore: context.contextBefore,
+      contextAfter: context.contextAfter,
+      confidence: 'exact',
+      lastLocatedLine: replacementStartLine,
+      lastLocatedAt: now
+    };
+  }
+
+  const normalizedReplacement = normalizeAnchorText(plan.replacement);
+  const stillExistsInEditedRange = Boolean(existingAnchorText)
+    && normalizedReplacement.includes(existingAnchorText);
+  const nextAnchorText = thread.anchor.text;
+
+  return {
+    ...thread.anchor,
+    text: nextAnchorText,
+    lineStart: replacementStartLine,
+    lineEnd: stillExistsInEditedRange ? replacementEndLine : replacementStartLine,
+    hash: hashAnchor(nextAnchorText),
+    occurrence: undefined,
+    contextBefore: context.contextBefore,
+    contextAfter: context.contextAfter,
+    confidence: stillExistsInEditedRange ? 'exact' : 'missing',
+    lastLocatedLine: replacementStartLine,
+    lastLocatedAt: now
+  };
 }
 
 function isAffectedThread(thread: ReviewThread, plan: ReviewAwareEditPlan): boolean {

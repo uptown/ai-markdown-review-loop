@@ -28,6 +28,7 @@
 - Shows accepted, resolved, and rejected review history with linked/outdated anchor state and a Restore action.
 - Dismisses an empty selected-text comment composer on outside click or Escape while preserving typed drafts.
 - Hides compact `ai-review-log` audit comments from the rendered Markdown review preview.
+- Fixes rendered-block edits so excluded following blocks are not accidentally deleted and partial comment anchors do not expand to the whole edited block.
 - Adds Node unit and scenario tests for suggested patch selection, review-aware edits, inline anchor metadata, review lifecycle flow, and agent feedback export guardrails.
 - Extends license policy guidance to cover test tooling and future dependencies.
 - Adds agent editing guidelines and workflow documentation for iterative human/AI review handoff.

@@ -64,9 +64,14 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
       this.markdown.renderer.rules[ruleName] = (tokens, index, options, env, self) => {
         const token = tokens[index];
         const sourceLine = token.map?.[0];
+        const sourceLineEnd = token.map?.[1];
 
         if (typeof sourceLine === 'number') {
           token.attrSet('data-source-line', String(sourceLine + 1));
+        }
+
+        if (typeof sourceLineEnd === 'number') {
+          token.attrSet('data-source-line-end', String(sourceLineEnd));
         }
 
         if (defaultRule) {
@@ -82,7 +87,7 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
       const language = token.info.trim().split(/\s+/)[0]?.toLowerCase();
 
       if (language === 'mermaid') {
-        return this.renderMermaidFence(token.content, token.map?.[0]);
+        return this.renderMermaidFence(token.content, token.map?.[0], token.map?.[1]);
       }
 
       if (defaultFence) {
@@ -329,13 +334,20 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
     await render();
   }
 
-  private renderMermaidFence(source: string, zeroBasedSourceLine?: number): string {
+  private renderMermaidFence(
+    source: string,
+    zeroBasedSourceLine?: number,
+    zeroBasedEndLine?: number
+  ): string {
     const escapedSource = escapeHtml(source.trim());
     const sourceLine = typeof zeroBasedSourceLine === 'number'
       ? ` data-source-line="${zeroBasedSourceLine + 1}"`
       : '';
+    const sourceLineEnd = typeof zeroBasedEndLine === 'number'
+      ? ` data-source-line-end="${zeroBasedEndLine}"`
+      : '';
 
-    return `<figure class="mermaid-figure" data-mermaid-diagram${sourceLine}>
+    return `<figure class="mermaid-figure" data-mermaid-diagram${sourceLine}${sourceLineEnd}>
   <div class="mermaid-toolbar">
     <span>Mermaid</span>
     <div class="mermaid-actions">
@@ -541,7 +553,6 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
       historyAnchorStates,
       markerLineHints,
       documentVersion: document.version,
-      sourceLineCount: countMarkdownLines(previewMarkdown),
       restoreState: restoreState ?? {}
     }).replace(/</g, '\\u003c');
 
@@ -1194,7 +1205,6 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
     const state = ${state};
     const markerLineHints = state.markerLineHints || {};
     const documentVersion = Number(state.documentVersion);
-    const sourceLineCount = Number(state.sourceLineCount) || 1;
     const restoreState = state.restoreState || {};
     const markdownBody = document.getElementById('markdown-body');
     const selectionPopover = document.getElementById('selection-popover');
@@ -1602,6 +1612,12 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
       return Number.isFinite(sourceLine) && sourceLine > 0 ? Math.floor(sourceLine) : undefined;
     }
 
+    function getSourceLineEnd(element) {
+      const sourceElement = element?.closest?.('[data-source-line-end]');
+      const sourceLineEnd = Number(sourceElement?.getAttribute('data-source-line-end'));
+      return Number.isFinite(sourceLineEnd) && sourceLineEnd > 0 ? Math.floor(sourceLineEnd) : undefined;
+    }
+
     function decorateEditableMarkdownBlocks() {
       const blocks = getEditableBlocks();
 
@@ -1695,11 +1711,17 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
         return undefined;
       }
 
+      const sourceLineEnd = getSourceLineEnd(block);
+
+      if (sourceLineEnd) {
+        return { lineStart, lineEnd: Math.max(lineStart, sourceLineEnd) };
+      }
+
       const nextLine = getEditableBlocks()
         .map(getSourceLine)
         .filter((line) => Number.isFinite(line) && line > lineStart)
         .sort((left, right) => left - right)[0];
-      const lineEnd = Math.max(lineStart, (nextLine || sourceLineCount + 1) - 1);
+      const lineEnd = Math.max(lineStart, nextLine ? nextLine - 1 : lineStart);
       return { lineStart, lineEnd };
     }
 
@@ -2967,14 +2989,6 @@ function parseThreadIds(value: unknown, fallbackThreadId: string): string[] {
   }
 
   return fallbackThreadId ? [fallbackThreadId] : [];
-}
-
-function countMarkdownLines(value: string): number {
-  if (value.length === 0) {
-    return 1;
-  }
-
-  return value.split(/\r\n|\r|\n/).length;
 }
 
 function parseReviewAwareEditIntent(value: unknown): ReviewAwareEditIntent | undefined {

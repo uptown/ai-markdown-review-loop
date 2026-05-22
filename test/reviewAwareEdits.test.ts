@@ -58,6 +58,61 @@ describe('review-aware edits', () => {
     assert.match(updates[0].update.thread?.[0].text ?? '', /review-aware edit pipeline/);
   });
 
+  it('keeps partial comment anchors narrow when an edited block still contains them', () => {
+    const markdown = [
+      'Intro context',
+      'The owner must document rollback steps.',
+      'Outro context'
+    ].join('\n');
+    const plan = createLineRangeEditPlan(markdown, {
+      lineStart: 2,
+      lineEnd: 2,
+      replacement: 'The owner must document rollback steps before launch.',
+      actor: 'user',
+      intent: 'manual_block_edit'
+    });
+    const updates = buildReviewAwareThreadUpdates(markdown, [
+      thread('rv_partial', {
+        anchorText: 'rollback steps',
+        lineStart: 2
+      })
+    ], plan, now);
+
+    assert.equal(updates.length, 1);
+    assert.equal(updates[0].update.anchor?.text, 'rollback steps');
+    assert.equal(updates[0].update.anchor?.confidence, 'exact');
+    assert.notEqual(
+      updates[0].update.anchor?.text,
+      'The owner must document rollback steps before launch.'
+    );
+  });
+
+  it('marks partial comment anchors missing instead of expanding them to a rewritten block', () => {
+    const markdown = [
+      'Intro context',
+      'The owner must document rollback steps.',
+      'Outro context'
+    ].join('\n');
+    const plan = createLineRangeEditPlan(markdown, {
+      lineStart: 2,
+      lineEnd: 2,
+      replacement: 'The owner must document release steps.',
+      actor: 'user',
+      intent: 'manual_block_edit'
+    });
+    const updates = buildReviewAwareThreadUpdates(markdown, [
+      thread('rv_partial', {
+        anchorText: 'rollback steps',
+        lineStart: 2
+      })
+    ], plan, now);
+
+    assert.equal(updates.length, 1);
+    assert.equal(updates[0].update.anchor?.text, 'rollback steps');
+    assert.equal(updates[0].update.anchor?.confidence, 'missing');
+    assert.notEqual(updates[0].update.anchor?.text, 'The owner must document release steps.');
+  });
+
   it('marks the target suggested edit accepted while preserving its outcome reply', () => {
     const markdown = 'Old sentence';
     const plan = createOffsetEditPlan(markdown, {
