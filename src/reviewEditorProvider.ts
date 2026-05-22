@@ -19,7 +19,24 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider {
   constructor(
     private readonly context: vscode.ExtensionContext,
     private readonly store: ReviewStore
-  ) {}
+  ) {
+    const defaultFence = this.markdown.renderer.rules.fence;
+
+    this.markdown.renderer.rules.fence = (tokens, index, options, env, self) => {
+      const token = tokens[index];
+      const language = token.info.trim().split(/\s+/)[0]?.toLowerCase();
+
+      if (language === 'mermaid') {
+        return this.renderMermaidFence(token.content);
+      }
+
+      if (defaultFence) {
+        return defaultFence(tokens, index, options, env, self);
+      }
+
+      return self.renderToken(tokens, index, options);
+    };
+  }
 
   getCurrentDocumentUri(): vscode.Uri | undefined {
     return this.currentDocumentUri;
@@ -32,7 +49,8 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider {
   ): Promise<void> {
     this.currentDocumentUri = document.uri;
     webviewPanel.webview.options = {
-      enableScripts: true
+      enableScripts: true,
+      localResourceRoots: [this.context.extensionUri]
     };
 
     const render = async () => {
@@ -64,9 +82,33 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider {
         );
         await render();
       }
+
+      if (message?.type === 'copyText') {
+        await vscode.env.clipboard.writeText(String(message.text ?? ''));
+        vscode.window.showInformationMessage('Copied Mermaid source.');
+      }
     });
 
     await render();
+  }
+
+  private renderMermaidFence(source: string): string {
+    const escapedSource = escapeHtml(source.trim());
+
+    return `<figure class="mermaid-figure" data-mermaid-diagram>
+  <div class="mermaid-toolbar">
+    <span>Mermaid</span>
+    <div class="mermaid-actions">
+      <button type="button" class="secondary compact" data-mermaid-feedback>Feedback</button>
+      <button type="button" class="secondary compact" data-mermaid-copy>Copy</button>
+    </div>
+  </div>
+  <div class="mermaid-render" data-mermaid-render>${escapedSource}</div>
+  <details class="mermaid-source">
+    <summary>Source</summary>
+    <pre><code>${escapedSource}</code></pre>
+  </details>
+</figure>`;
   }
 
   private async addComment(document: vscode.TextDocument, selectedText: string): Promise<void> {
@@ -112,6 +154,9 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider {
   ): string {
     const nonce = randomUUID();
     const renderedMarkdown = this.markdown.render(document.getText());
+    const mermaidScriptUri = webview.asWebviewUri(
+      vscode.Uri.joinPath(this.context.extensionUri, 'out', 'vendor', 'mermaid.min.js')
+    );
     const state = JSON.stringify({
       threads: reviewDocument.threads
     }).replace(/</g, '\\u003c');
@@ -120,7 +165,7 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider {
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource} 'unsafe-inline'; script-src 'nonce-${nonce}';">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src ${webview.cspSource} data:; style-src ${webview.cspSource} 'unsafe-inline'; script-src 'nonce-${nonce}' ${webview.cspSource};">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>AI Markdown Review</title>
   <style>
@@ -191,6 +236,10 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider {
       color: var(--vscode-button-secondaryForeground);
       background: var(--vscode-button-secondaryBackground);
     }
+    button.compact {
+      padding: 4px 8px;
+      font-size: 12px;
+    }
     .hint {
       color: var(--muted);
       font-size: 12px;
@@ -226,6 +275,61 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider {
       color: var(--muted);
       font-size: 13px;
     }
+    .mermaid-figure {
+      margin: 20px 0;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      overflow: hidden;
+      background: var(--vscode-editor-background);
+    }
+    .mermaid-toolbar {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+      padding: 8px 10px;
+      border-bottom: 1px solid var(--border);
+      color: var(--muted);
+      background: var(--vscode-editorWidget-background);
+      font-size: 12px;
+    }
+    .mermaid-actions {
+      display: flex;
+      gap: 6px;
+    }
+    .mermaid-render {
+      min-height: 80px;
+      overflow: auto;
+      padding: 18px;
+      text-align: center;
+    }
+    .mermaid-render svg {
+      display: block;
+      max-width: 100%;
+      height: auto;
+      margin: 0 auto;
+    }
+    .mermaid-render.is-error {
+      text-align: left;
+      color: var(--vscode-errorForeground);
+      background: var(--vscode-inputValidation-errorBackground);
+    }
+    .mermaid-render.is-error pre {
+      white-space: pre-wrap;
+      margin-bottom: 0;
+    }
+    .mermaid-source {
+      border-top: 1px solid var(--border);
+      padding: 8px 10px;
+    }
+    .mermaid-source summary {
+      cursor: pointer;
+      color: var(--muted);
+      font-size: 12px;
+    }
+    .mermaid-source pre {
+      margin: 8px 0 0;
+    }
     @media (max-width: 900px) {
       .layout {
         grid-template-columns: 1fr;
@@ -254,13 +358,40 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider {
       <div id="threads"></div>
     </aside>
   </div>
+  <script nonce="${nonce}" src="${mermaidScriptUri}"></script>
   <script nonce="${nonce}">
     const vscode = acquireVsCodeApi();
     const state = ${state};
 
+    renderMermaidDiagrams();
+
     document.getElementById('add-comment').addEventListener('click', () => {
       const selection = String(window.getSelection() || '').trim();
       vscode.postMessage({ type: 'addComment', anchorText: selection });
+    });
+
+    document.addEventListener('click', (event) => {
+      const target = event.target;
+
+      if (!(target instanceof HTMLElement)) {
+        return;
+      }
+
+      const figure = target.closest('[data-mermaid-diagram]');
+
+      if (!figure) {
+        return;
+      }
+
+      const source = getMermaidSource(figure);
+
+      if (target.matches('[data-mermaid-feedback]')) {
+        vscode.postMessage({ type: 'addComment', anchorText: source });
+      }
+
+      if (target.matches('[data-mermaid-copy]')) {
+        vscode.postMessage({ type: 'copyText', text: source });
+      }
     });
 
     const threadsContainer = document.getElementById('threads');
@@ -304,6 +435,72 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider {
         .replace(/"/g, '&quot;')
         .replace(/'/g, '&#039;');
     }
+
+    function getMermaidSource(figure) {
+      const sourceElement = figure.querySelector('.mermaid-source code');
+      return String(sourceElement?.textContent || '').trim();
+    }
+
+    async function renderMermaidDiagrams() {
+      const mermaidApi = window.mermaid;
+      const containers = Array.from(document.querySelectorAll('[data-mermaid-render]'));
+
+      if (containers.length === 0) {
+        return;
+      }
+
+      if (!mermaidApi) {
+        for (const container of containers) {
+          showMermaidError(container, 'Mermaid runtime did not load.', container.textContent || '');
+        }
+        return;
+      }
+
+      const isDark = document.body.classList.contains('vscode-dark')
+        || document.body.classList.contains('vscode-high-contrast');
+
+      mermaidApi.initialize({
+        startOnLoad: false,
+        securityLevel: 'strict',
+        theme: isDark ? 'dark' : 'default',
+        flowchart: {
+          htmlLabels: false,
+          useMaxWidth: true
+        },
+        sequence: {
+          useMaxWidth: true
+        },
+        gantt: {
+          useMaxWidth: true
+        }
+      });
+
+      for (const [index, container] of containers.entries()) {
+        const source = String(container.textContent || '').trim();
+
+        try {
+          const id = 'amrl-mermaid-' + index + '-' + Date.now();
+          const result = await mermaidApi.render(id, source);
+          container.classList.remove('is-error');
+          container.innerHTML = result.svg;
+          result.bindFunctions?.(container);
+        } catch (error) {
+          showMermaidError(container, error?.message || String(error), source);
+        }
+      }
+    }
+
+    function showMermaidError(container, message, source) {
+      container.classList.add('is-error');
+      container.innerHTML = [
+        '<strong>Mermaid render error</strong>',
+        '<pre>' + escapeHtml(message) + '</pre>',
+        '<details open>',
+        '<summary>Diagram source</summary>',
+        '<pre><code>' + escapeHtml(source) + '</code></pre>',
+        '</details>'
+      ].join('');
+    }
   </script>
 </body>
 </html>`;
@@ -311,3 +508,12 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider {
 }
 
 export { viewType as reviewEditorViewType };
+
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+}

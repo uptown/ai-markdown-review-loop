@@ -5,7 +5,9 @@ AI Markdown Review Loop is a VS Code extension for reviewing Markdown documents 
 The first MVP focuses on a local workflow:
 
 - Open a rendered Markdown review preview.
+- Render Mermaid diagrams from fenced `mermaid` code blocks.
 - Select rendered text and attach feedback.
+- Attach feedback directly to a Mermaid diagram source block.
 - Store review threads in a workspace-local sidecar file.
 - Export unresolved feedback as Markdown for an AI coding agent.
 - Run a local heuristic document review to seed obvious feedback items.
@@ -30,6 +32,28 @@ To run inside VS Code:
 - `AI Markdown Review: Open Review Preview`
 - `AI Markdown Review: Review Document`
 - `AI Markdown Review: Export Feedback for Agent`
+
+## Mermaid
+
+Mermaid diagrams render directly inside the review preview:
+
+````md
+```mermaid
+flowchart TD
+  A[Draft PRD] --> B[AI review]
+  B --> C{User decision}
+  C -->|Accept| D[Patch document]
+  C -->|Reject| E[Close thread]
+  C -->|Reply| B
+```
+````
+
+Each diagram card includes:
+
+- `Feedback` to attach review feedback to the diagram source.
+- `Copy` to copy the Mermaid source.
+- A collapsible `Source` view.
+- Inline render errors with the original diagram source.
 
 ## Storage
 

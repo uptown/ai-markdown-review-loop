@@ -3,9 +3,16 @@ import { createHash } from 'crypto';
 import { ReviewAnchor } from './types';
 
 export function createAnchor(document: vscode.TextDocument, selectedText: string): ReviewAnchor {
+  const exact = selectedText.trim();
   const normalized = normalizeAnchorText(selectedText);
   const fullText = document.getText();
-  const index = normalized.length > 0 ? fullText.indexOf(normalized) : -1;
+  let index = exact.length > 0 ? fullText.indexOf(exact) : -1;
+  let matchLength = exact.length;
+
+  if (index < 0) {
+    index = normalized.length > 0 ? fullText.indexOf(normalized) : -1;
+    matchLength = normalized.length;
+  }
 
   if (index < 0) {
     return {
@@ -15,7 +22,7 @@ export function createAnchor(document: vscode.TextDocument, selectedText: string
   }
 
   const start = document.positionAt(index);
-  const end = document.positionAt(index + normalized.length);
+  const end = document.positionAt(index + matchLength);
 
   return {
     text: normalized,
