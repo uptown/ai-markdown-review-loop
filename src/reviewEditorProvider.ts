@@ -702,7 +702,7 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider {
           event.stopPropagation();
           const sourceElement = target.closest('.review-badge') || commentTarget;
           openCommentOverlay(threadIds, sourceElement);
-          focusThread(threadIds[0]);
+          focusThread(threadIds[0], false);
           return;
         }
       }
@@ -1010,11 +1010,15 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider {
       commentOverlay.innerHTML = '';
     }
 
-    function focusThread(threadId) {
+    function focusThread(threadId, shouldScroll) {
       document.querySelectorAll('.is-active').forEach((element) => element.classList.remove('is-active'));
       document.querySelectorAll('[data-thread-id="' + cssEscape(threadId) + '"]').forEach((element) => {
         element.classList.add('is-active');
       });
+
+      if (!shouldScroll) {
+        return;
+      }
 
       const threadCard = document.querySelector('.thread[data-thread-id="' + cssEscape(threadId) + '"]');
       threadCard?.scrollIntoView({ behavior: 'smooth', block: 'center' });
