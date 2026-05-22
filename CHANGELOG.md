@@ -14,6 +14,7 @@
 - Rewrites Markdown review anchors as one document-level `ai-review-anchors` index per document and uses sidecar line hints for changed text.
 - Stores sidecar context snippets around new comments, uses them to relocate comments after text edits, and refreshes line hints from the preview.
 - Differentiates user and AI review comments with source labels, badge colors, and highlight colors.
+- Shows anchor confidence states for review threads, including recovered, approximate, and needs re-anchor when edited text can no longer be located.
 
 ## 0.0.8
 

@@ -101,7 +101,7 @@ One compact document-level anchor index is also inserted into the Markdown sourc
 
 The custom preview hides these anchors, but AI agents that read the Markdown can use them to connect document locations with sidecar review data.
 
-If the commented text changes and the original text snippet no longer matches, the preview falls back to sidecar context snippets and line hints so the review thread still appears near the edited block. When the preview finds the comment in a new location, it refreshes the sidecar line hint for the next render.
+If the commented text changes and the original text snippet no longer matches, the preview falls back to sidecar context snippets and line hints so the review thread still appears near the edited block. When the preview finds the comment in a new location, it refreshes the sidecar line hint for the next render. Thread cards show whether the anchor is `Located`, `Recovered`, `Approximate`, or `Needs re-anchor` so lost comments remain visible instead of silently disappearing.
 
 If the sidecar JSON is deleted or no longer contains matching thread data, the review preview and feedback export warn that inline anchors are stale. The original comment text cannot be rebuilt from the inline anchors alone; restore the sidecar JSON from backup/source control or use `Clean stale anchors` in the preview warning if the comments are no longer needed.
 

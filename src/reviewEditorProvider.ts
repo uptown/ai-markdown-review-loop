@@ -437,6 +437,16 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider {
     .thread.source-mixed {
       border-left: 3px solid #d7a100;
     }
+    .thread.anchor-recovered {
+      box-shadow: inset 0 0 0 1px rgba(215, 161, 0, 0.24);
+    }
+    .thread.anchor-approximate {
+      box-shadow: inset 0 0 0 1px rgba(215, 161, 0, 0.42);
+    }
+    .thread.anchor-missing {
+      border-style: dashed;
+      border-color: var(--vscode-inputValidation-warningBorder, #cca700);
+    }
     .thread header {
       display: flex;
       justify-content: space-between;
@@ -454,7 +464,8 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider {
       gap: 6px;
     }
     .source-chip,
-    .meta-chip {
+    .meta-chip,
+    .anchor-state-chip {
       display: inline-flex;
       align-items: center;
       min-height: 18px;
@@ -483,6 +494,21 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider {
       border-color: rgba(215, 161, 0, 0.72);
       color: #ffe9a3;
       background: rgba(215, 161, 0, 0.22);
+    }
+    .anchor-state-chip {
+      border-color: rgba(138, 216, 63, 0.42);
+      color: var(--muted);
+    }
+    .anchor-state-chip.anchor-recovered,
+    .anchor-state-chip.anchor-approximate {
+      border-color: rgba(215, 161, 0, 0.72);
+      color: #ffe9a3;
+      background: rgba(215, 161, 0, 0.18);
+    }
+    .anchor-state-chip.anchor-missing {
+      border-color: var(--vscode-inputValidation-warningBorder, #cca700);
+      color: var(--vscode-editorWarning-foreground, #ffe9a3);
+      background: var(--vscode-inputValidation-warningBackground, rgba(204, 167, 0, 0.16));
     }
     .thread blockquote {
       margin: 8px 0;
@@ -691,6 +717,16 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider {
       background: rgba(255, 203, 64, 0.14);
       outline-color: rgba(215, 161, 0, 0.65);
       box-shadow: inset 0 -2px 0 rgba(215, 161, 0, 0.9);
+    }
+    .review-anchor.anchor-recovered,
+    .review-anchor-block.anchor-recovered {
+      outline-style: solid;
+      outline-width: 2px;
+    }
+    .review-anchor.anchor-approximate,
+    .review-anchor-block.anchor-approximate {
+      outline-style: dashed;
+      outline-width: 2px;
     }
     .review-anchor-block {
       position: relative;
@@ -966,7 +1002,7 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider {
         element.dataset.threadId = thread.id;
         element.title = 'Jump to commented content';
         element.innerHTML = [
-          '<header><span class="thread-meta">' + renderSourceChip(thread) + '<span class="meta-chip">' + escapeHtml(thread.type) + '</span></span><span class="meta-chip">' + escapeHtml(thread.severity) + '</span></header>',
+          '<header><span class="thread-meta">' + renderSourceChip(thread) + '<span class="meta-chip">' + escapeHtml(thread.type) + '</span><span class="anchor-state-chip" data-anchor-state>Locating</span></span><span class="meta-chip">' + escapeHtml(thread.severity) + '</span></header>',
           '<blockquote>' + escapeHtml(thread.anchor.text || 'Document') + '</blockquote>',
           '<p>' + escapeHtml(thread.comment) + '</p>',
           renderReplies(thread),
@@ -1002,6 +1038,7 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider {
     decorateReviewAnchors(openThreads);
     decorateMermaidReviewBadges(openThreads);
     attachRelatedThreadIds(openThreads);
+    markMissingAnchors(openThreads);
     renderMermaidDiagrams();
 
     function escapeHtml(value) {
@@ -1032,11 +1069,10 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider {
           continue;
         }
 
-        if (!highlightTextNode(thread, anchorText)
-          && !highlightContainingBlock(thread, anchorText)
-          && !highlightContextBlock(thread, anchorText)) {
-          highlightMarkerBlock(thread);
-        }
+        highlightTextNode(thread, anchorText)
+          || highlightContainingBlock(thread, anchorText)
+          || highlightContextBlock(thread, anchorText)
+          || highlightMarkerBlock(thread);
       }
     }
 
@@ -1095,6 +1131,7 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider {
           matchNode.parentNode?.insertBefore(marker, matchNode);
           matchNode.remove();
           afterNode.parentElement?.normalize();
+          setAnchorState(thread, 'exact', marker);
           return true;
         }
 
@@ -1127,7 +1164,7 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider {
         return false;
       }
 
-      attachThreadToAnchorElement(target, thread, 'review-block-badge');
+      attachThreadToAnchorElement(target, thread, 'review-block-badge', 'exact');
       return true;
     }
 
@@ -1153,7 +1190,7 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider {
         return false;
       }
 
-      attachThreadToAnchorElement(best, thread, 'review-block-badge');
+      attachThreadToAnchorElement(best, thread, 'review-block-badge', 'recovered');
       return true;
     }
 
@@ -1263,11 +1300,11 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider {
         return false;
       }
 
-      attachThreadToAnchorElement(target, thread, 'review-block-badge');
+      attachThreadToAnchorElement(target, thread, 'review-block-badge', 'approximate');
       return true;
     }
 
-    function attachThreadToAnchorElement(element, thread, badgeClass) {
+    function attachThreadToAnchorElement(element, thread, badgeClass, anchorState) {
       element.classList.add('review-anchor-block');
       element.title = sourceLabel(thread) + ' comment';
 
@@ -1286,6 +1323,7 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider {
       badge.dataset.threadId = nextIds[0];
       badge.dataset.threadIds = element.dataset.threadIds;
       syncSourceClasses(element, badge, nextIds);
+      setAnchorState(thread, anchorState, element);
       reportLocatedAnchor(element, thread);
     }
 
@@ -1324,6 +1362,9 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider {
         const badge = createReviewBadge(matches[0], 'mermaid-review-badge', matches.length === 1 ? sourceBadgeLabel(matches[0]) : String(matches.length));
         syncSourceClasses(figure, badge, matches.map((thread) => thread.id));
         actions?.prepend(badge);
+        for (const thread of matches) {
+          setAnchorState(thread, 'exact', figure);
+        }
       }
     }
 
@@ -1376,6 +1417,83 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider {
         const anchorText = normalizeInline(thread.anchor?.text || '');
         return anchorText && anchorText === baseText;
       });
+    }
+
+    function setAnchorState(thread, state, anchorElement) {
+      const threadCard = document.querySelector('.thread[data-thread-id="' + cssEscape(thread.id) + '"]');
+
+      if (!threadCard) {
+        return;
+      }
+
+      const current = threadCard.dataset.anchorState || '';
+
+      if (anchorStateRank(current) >= anchorStateRank(state)) {
+        return;
+      }
+
+      const classNames = ['anchor-exact', 'anchor-recovered', 'anchor-approximate', 'anchor-missing'];
+      threadCard.dataset.anchorState = state;
+      threadCard.classList.remove(...classNames);
+      threadCard.classList.add('anchor-' + state);
+      const label = threadCard.querySelector('[data-anchor-state]');
+
+      if (label) {
+        label.classList.remove(...classNames);
+        label.classList.add('anchor-' + state);
+        label.textContent = anchorStateLabel(state);
+      }
+
+      if (anchorElement) {
+        anchorElement.classList.remove(...classNames);
+        anchorElement.classList.add('anchor-' + state);
+      }
+    }
+
+    function markMissingAnchors(threads) {
+      for (const thread of threads) {
+        const threadCard = document.querySelector('.thread[data-thread-id="' + cssEscape(thread.id) + '"]');
+
+        if (!threadCard?.dataset.anchorState) {
+          setAnchorState(thread, 'missing');
+        }
+      }
+    }
+
+    function anchorStateRank(state) {
+      if (state === 'exact') {
+        return 4;
+      }
+
+      if (state === 'recovered') {
+        return 3;
+      }
+
+      if (state === 'approximate') {
+        return 2;
+      }
+
+      if (state === 'missing') {
+        return 1;
+      }
+
+      return 0;
+    }
+
+    function anchorStateLabel(state) {
+      if (state === 'exact') {
+        return 'Located';
+      }
+
+      if (state === 'recovered') {
+        return 'Recovered';
+      }
+
+      if (state === 'approximate') {
+        return 'Approximate';
+      }
+
+      return 'Needs re-anchor';
     }
 
     function syncSourceClasses(anchor, badge, threadIds) {
@@ -1556,7 +1674,14 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider {
       });
 
       const anchor = markdownBody.querySelector('[data-thread-id="' + cssEscape(threadId) + '"]');
-      anchor?.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'nearest' });
+
+      if (anchor) {
+        anchor.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'nearest' });
+        return;
+      }
+
+      const threadCard = document.querySelector('.thread[data-thread-id="' + cssEscape(threadId) + '"]');
+      threadCard?.scrollIntoView({ behavior: 'smooth', block: 'center' });
     }
 
     function shouldSkipHighlightParent(element) {
