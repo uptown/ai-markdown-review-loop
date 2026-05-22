@@ -14,14 +14,14 @@ Repeat target two: the policy owner must approve the rollout.
 
 ## Decision Table
 
-This table is intentionally complex enough to expose table editing gaps. Today, rendered table cells are reviewable but not editable through the rendered block editor.
+This table is intentionally complex enough to exercise rendered table editing. Rendered table cells are reviewable, and the table-level Edit Table action should open a grid editor without dropping following Markdown.
 
 | Area | Current decision | Risk | Owner | Status |
 | --- | --- | --- | --- | --- |
 | Auth | Use existing workspace identity | Token refresh behavior is not specified | Platform | Open |
 | Review data | Sidecar JSON plus compact inline anchor index | Deleted sidecar leaves anchors without comment text | Extension | Mitigated |
 | Mermaid | Render and source-edit fenced diagrams | Invalid syntax should show inline errors | Extension | Open |
-| Tables | Reviewable rendered table, source edit only | Rendered table editing is not implemented | Extension | Gap |
+| Tables | Reviewable rendered table with grid editing | Grid edits should preserve comments and following blocks | Extension | Open |
 | Export | Open feedback only | Closed history may still be needed for audit | Product | Watching |
 
 | Check | Expected result | Notes |
@@ -83,7 +83,7 @@ This paragraph is deliberately long so selection popovers, overlays, and anchor 
 
 ## Task List
 
-- [ ] Add a rendered table source editor.
+- [ ] Verify rendered table grid edits preserve comments and following blocks.
 - [ ] Verify stale anchors can be cleaned safely.
 - [ ] Confirm closed history can restore an outdated thread.
 - [ ] Confirm Mermaid source edits do not delete the following paragraph.

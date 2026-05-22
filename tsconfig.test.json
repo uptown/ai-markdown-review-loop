@@ -15,6 +15,7 @@
     "src/reviewDocumentUpdates.ts",
     "src/reviewHistory.ts",
     "src/suggestedPatches.ts",
+    "src/tableEdits.ts",
     "src/types.ts",
     "test/**/*.ts"
   ]

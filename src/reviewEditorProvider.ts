@@ -32,6 +32,10 @@ import {
 import { createRestoredReviewThread, getReviewHistoryAnchorStates } from './reviewHistory';
 import { ReviewUndoController } from './reviewUndo';
 import { ApplyPatchResult, selectSuggestedPatchReplacement } from './suggestedPatches';
+import {
+  collectMarkdownTables,
+  createMarkdownTableReplacement
+} from './tableEdits';
 import { AnchorConfidence, ReviewDocument, ReviewStatus, ReviewThread } from './types';
 
 const viewType = 'aiMarkdownReviewLoop.reviewEditor';
@@ -355,6 +359,38 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
           }
 
           vscode.window.showInformationMessage('Updated Mermaid source and refreshed affected review anchors.');
+          await render();
+        }
+
+        if (message?.type === 'editMarkdownTable') {
+          const lineStart = parseSourceLine(message.lineStart);
+          const lineEnd = parseSourceLine(message.lineEnd);
+
+          if (!lineStart || !lineEnd || lineEnd < lineStart) {
+            vscode.window.showWarningMessage('Ignored invalid Markdown table edit.');
+            return;
+          }
+
+          await this.anchorMaintenance.flush(document);
+          const plan = createLineRangeEditPlan(document.getText(), {
+            lineStart,
+            lineEnd,
+            replacement: createMarkdownTableReplacement({
+              headers: message.headers,
+              alignments: message.alignments,
+              rows: message.rows
+            }),
+            actor: 'user',
+            intent: 'manual_table_edit'
+          });
+          const applied = await this.applyReviewAwareEdit(document, plan);
+
+          if (!applied) {
+            vscode.window.showWarningMessage('Markdown table edit could not be applied.');
+            return;
+          }
+
+          vscode.window.showInformationMessage('Updated Markdown table and refreshed affected review anchors.');
           await render();
         }
 
@@ -684,6 +720,7 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
     const documentText = document.getText();
     const previewMarkdown = stripInlineAnchorMarkers(documentText);
     const renderedMarkdown = this.markdown.render(previewMarkdown);
+    const tables = collectMarkdownTables(previewMarkdown);
     const storageWarning = this.renderStorageWarning(documentText, reviewDocument);
     const markerLineHints = this.getMarkerLineHints(reviewDocument);
     const historyAnchorStates = getReviewHistoryAnchorStates(
@@ -698,6 +735,7 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
       resolvedThreads: resolvedReviewDocument.threads,
       historyAnchorStates,
       markerLineHints,
+      tables,
       documentVersion: document.version,
       restoreState: restoreState ?? {}
     }).replace(/</g, '\\u003c');
@@ -1019,7 +1057,8 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
     .comment-composer,
     .comment-overlay,
     .block-editor,
-    .mermaid-editor {
+    .mermaid-editor,
+    .table-editor {
       position: fixed;
       z-index: 20;
       display: none;
@@ -1057,24 +1096,36 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
       max-width: min(680px, calc(100vw - 24px));
       padding: 0;
     }
+    .table-editor {
+      box-sizing: border-box;
+      z-index: 30;
+      width: min(920px, calc(100vw - 24px));
+      max-width: min(920px, calc(100vw - 24px));
+      padding: 0;
+    }
     .block-editor-header,
     .block-editor-toolbar,
     .block-editor-actions,
     .mermaid-editor-header,
-    .mermaid-editor-actions {
+    .mermaid-editor-actions,
+    .table-editor-header,
+    .table-editor-toolbar,
+    .table-editor-actions {
       display: flex;
       align-items: center;
       gap: 6px;
       padding: 8px 10px;
     }
     .block-editor-header,
-    .mermaid-editor-header {
+    .mermaid-editor-header,
+    .table-editor-header {
       justify-content: space-between;
       border-bottom: 1px solid var(--border);
       color: var(--muted);
       font-size: 12px;
     }
-    .block-editor-toolbar {
+    .block-editor-toolbar,
+    .table-editor-toolbar {
       flex-wrap: wrap;
       border-bottom: 1px solid var(--border);
     }
@@ -1110,12 +1161,70 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
       box-shadow: inset 0 0 0 1px var(--vscode-focusBorder);
     }
     .block-editor-actions,
-    .mermaid-editor-actions {
+    .mermaid-editor-actions,
+    .table-editor-actions {
       justify-content: flex-end;
       border-top: 1px solid var(--border);
     }
+    .table-editor-grid {
+      box-sizing: border-box;
+      max-height: min(520px, calc(100vh - 220px));
+      overflow: auto;
+      padding: 10px;
+      background: var(--vscode-input-background);
+    }
+    .table-editor-grid table {
+      width: 100%;
+      border-collapse: collapse;
+      table-layout: fixed;
+    }
+    .table-editor-grid th,
+    .table-editor-grid td {
+      min-width: 120px;
+      border: 1px solid var(--border);
+      padding: 4px;
+      vertical-align: top;
+    }
+    .table-editor-grid th:first-child,
+    .table-editor-grid td:first-child {
+      width: 44px;
+      min-width: 44px;
+      text-align: center;
+      color: var(--muted);
+      background: var(--vscode-editorWidget-background);
+    }
+    .table-editor-grid input,
+    .table-editor-grid select {
+      box-sizing: border-box;
+      width: 100%;
+      border: 1px solid transparent;
+      border-radius: 3px;
+      padding: 5px 6px;
+      color: var(--vscode-input-foreground);
+      background: var(--vscode-input-background);
+      font: inherit;
+    }
+    .table-editor-grid input:focus,
+    .table-editor-grid select:focus {
+      border-color: var(--vscode-focusBorder);
+      outline: none;
+    }
+    .table-cell-tools {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 4px;
+      margin-top: 4px;
+    }
     .editable-markdown-block {
       position: relative;
+    }
+    .editable-markdown-table {
+      position: relative;
+      overflow-x: auto;
+      margin: 1em 0;
+    }
+    .editable-markdown-table > table {
+      margin: 0;
     }
     .block-edit-actions {
       position: absolute;
@@ -1128,6 +1237,7 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
       z-index: 5;
     }
     .editable-markdown-block:hover > .block-edit-actions,
+    .editable-markdown-table:hover > .block-edit-actions,
     .block-edit-actions:focus-within {
       opacity: 1;
     }
@@ -1385,11 +1495,27 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
       <button type="submit" class="compact">Save</button>
     </div>
   </form>
+  <form id="table-editor" class="table-editor" aria-label="Markdown table editor">
+    <div class="table-editor-header">
+      <strong>Edit Markdown table</strong>
+      <span id="table-editor-lines"></span>
+    </div>
+    <div class="table-editor-toolbar">
+      <button type="button" class="secondary compact" id="table-editor-add-row">Add Row</button>
+      <button type="button" class="secondary compact" id="table-editor-add-column">Add Column</button>
+    </div>
+    <div id="table-editor-grid" class="table-editor-grid"></div>
+    <div class="table-editor-actions">
+      <button type="button" id="table-editor-cancel" class="secondary compact">Cancel</button>
+      <button type="submit" class="compact">Save</button>
+    </div>
+  </form>
   <script nonce="${nonce}" src="${mermaidScriptUri}"></script>
   <script nonce="${nonce}">
     const vscode = acquireVsCodeApi();
     const state = ${state};
     const markerLineHints = state.markerLineHints || {};
+    const markdownTables = Array.isArray(state.tables) ? state.tables : [];
     const documentVersion = Number(state.documentVersion);
     const restoreState = state.restoreState || {};
     const markdownBody = document.getElementById('markdown-body');
@@ -1408,6 +1534,12 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
     const mermaidEditorLines = document.getElementById('mermaid-editor-lines');
     const mermaidEditorSource = document.getElementById('mermaid-editor-source');
     const mermaidEditorCancel = document.getElementById('mermaid-editor-cancel');
+    const tableEditor = document.getElementById('table-editor');
+    const tableEditorLines = document.getElementById('table-editor-lines');
+    const tableEditorGrid = document.getElementById('table-editor-grid');
+    const tableEditorCancel = document.getElementById('table-editor-cancel');
+    const tableEditorAddRow = document.getElementById('table-editor-add-row');
+    const tableEditorAddColumn = document.getElementById('table-editor-add-column');
     let activeSelectionText = '';
     let activeSelectionOccurrence = 0;
     let activeSourceLine = undefined;
@@ -1415,6 +1547,7 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
     let selectionTimer = undefined;
     let activeBlockEdit = undefined;
     let activeMermaidEdit = undefined;
+    let activeTableEdit = undefined;
 
     document.addEventListener('selectionchange', () => {
       scheduleSelectionComposer(false);
@@ -1442,6 +1575,62 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
 
     mermaidEditorCancel.addEventListener('click', () => {
       hideMermaidEditor();
+    });
+
+    tableEditorCancel.addEventListener('click', () => {
+      hideTableEditor();
+    });
+
+    tableEditorAddRow.addEventListener('click', () => {
+      const table = readTableEditorData();
+      table.rows.push(Array.from({ length: table.headers.length }, () => ''));
+      renderTableEditorGrid(table);
+      focusTableCell(table.rows.length, 0);
+    });
+
+    tableEditorAddColumn.addEventListener('click', () => {
+      const table = readTableEditorData();
+      table.headers.push('Column ' + (table.headers.length + 1));
+      table.alignments.push('none');
+      table.rows = table.rows.map((row) => [...row, '']);
+      renderTableEditorGrid(table);
+      focusTableCell(0, table.headers.length - 1);
+    });
+
+    tableEditorGrid.addEventListener('click', (event) => {
+      const target = event.target;
+
+      if (!(target instanceof HTMLElement)) {
+        return;
+      }
+
+      const removeColumnButton = target.closest('[data-remove-table-column]');
+
+      if (removeColumnButton) {
+        const columnIndex = Number(removeColumnButton.getAttribute('data-column'));
+        const table = readTableEditorData();
+
+        if (table.headers.length > 1 && Number.isFinite(columnIndex)) {
+          table.headers.splice(columnIndex, 1);
+          table.alignments.splice(columnIndex, 1);
+          table.rows = table.rows.map((row) => row.filter((_, index) => index !== columnIndex));
+          renderTableEditorGrid(table);
+        }
+
+        return;
+      }
+
+      const removeRowButton = target.closest('[data-remove-table-row]');
+
+      if (removeRowButton) {
+        const rowIndex = Number(removeRowButton.getAttribute('data-row'));
+        const table = readTableEditorData();
+
+        if (Number.isFinite(rowIndex)) {
+          table.rows.splice(rowIndex, 1);
+          renderTableEditorGrid(table);
+        }
+      }
     });
 
     blockEditor.addEventListener('submit', (event) => {
@@ -1477,6 +1666,25 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
       hideMermaidEditor();
     });
 
+    tableEditor.addEventListener('submit', (event) => {
+      event.preventDefault();
+
+      if (!activeTableEdit) {
+        return;
+      }
+
+      const table = readTableEditorData();
+      vscode.postMessage({
+        type: 'editMarkdownTable',
+        lineStart: activeTableEdit.lineStart,
+        lineEnd: activeTableEdit.lineEnd,
+        headers: table.headers,
+        alignments: table.alignments,
+        rows: table.rows
+      });
+      hideTableEditor();
+    });
+
     blockEditor.addEventListener('click', (event) => {
       const target = event.target;
 
@@ -1508,6 +1716,7 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
         hideComposerIfEmpty();
         hideBlockEditorIfClean();
         hideMermaidEditorIfClean();
+        hideTableEditorIfClean();
       }
 
       if (event.key === 'Enter'
@@ -1593,6 +1802,27 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
       }
 
       hideMermaidEditorIfClean();
+
+      if (target.closest('#table-editor')) {
+        return;
+      }
+
+      hideTableEditorIfClean();
+
+      const tableEditButton = target.closest('[data-edit-markdown-table]');
+
+      if (tableEditButton) {
+        event.preventDefault();
+        event.stopPropagation();
+        const wrapper = tableEditButton.closest('[data-table-edit-wrapper]');
+        const table = wrapper?.querySelector('table[data-source-line]');
+
+        if (table) {
+          openTableEditor(table);
+        }
+
+        return;
+      }
 
       const blockEditButton = target.closest('[data-edit-markdown-block], [data-rewrite-markdown-block]');
 
@@ -1772,6 +2002,7 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
     attachRelatedThreadIds(openThreads);
     markMissingAnchors(openThreads);
     decorateEditableMarkdownBlocks();
+    decorateEditableMarkdownTables();
     restorePreviewState();
     renderMermaidDiagrams();
 
@@ -1867,6 +2098,27 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
         .filter((element) => !element.closest('pre, code, table, .mermaid-source, [data-mermaid-diagram]'));
     }
 
+    function decorateEditableMarkdownTables() {
+      const tables = Array.from(markdownBody.querySelectorAll('table[data-source-line]'));
+
+      for (const table of tables) {
+        if (table.closest('[data-table-edit-wrapper]')) {
+          continue;
+        }
+
+        const wrapper = document.createElement('div');
+        wrapper.className = 'editable-markdown-table';
+        wrapper.dataset.tableEditWrapper = 'true';
+        table.parentNode?.insertBefore(wrapper, table);
+        wrapper.appendChild(table);
+
+        const actions = document.createElement('span');
+        actions.className = 'block-edit-actions';
+        actions.innerHTML = '<button type="button" class="secondary compact" title="Edit this Markdown table as a grid" data-edit-markdown-table>Edit Table</button>';
+        wrapper.appendChild(actions);
+      }
+    }
+
     function openBlockEditor(block, intent) {
       const lineRange = getEditableLineRange(block);
 
@@ -1886,6 +2138,13 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
         return;
       }
 
+      if (tableEditor.style.display === 'block'
+        && activeTableEdit
+        && tableEditorSignature() !== activeTableEdit.originalSignature) {
+        focusFirstTableInput();
+        return;
+      }
+
       if (blockEditor.style.display === 'block'
         && activeBlockEdit
         && blockEditorSurface.innerHTML !== activeBlockEdit.originalHtml) {
@@ -1897,6 +2156,7 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
       hideSelectionPopover();
       hideComposerIfEmpty();
       hideMermaidEditorIfClean();
+      hideTableEditorIfClean();
       activeBlockEdit = {
         ...lineRange,
         intent,
@@ -1925,6 +2185,190 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
       blockEditorSurface.focus();
     }
 
+    function openTableEditor(tableElement) {
+      const lineRange = getEditableLineRange(tableElement);
+
+      if (!lineRange) {
+        return;
+      }
+
+      if (commentComposer.style.display === 'block' && commentBody.value.trim()) {
+        commentBody.focus();
+        return;
+      }
+
+      if (blockEditor.style.display === 'block'
+        && activeBlockEdit
+        && blockEditorSurface.innerHTML !== activeBlockEdit.originalHtml) {
+        blockEditorSurface.focus();
+        return;
+      }
+
+      if (mermaidEditor.style.display === 'block'
+        && activeMermaidEdit
+        && mermaidEditorSource.value !== activeMermaidEdit.originalSource) {
+        mermaidEditorSource.focus();
+        return;
+      }
+
+      if (tableEditor.style.display === 'block'
+        && activeTableEdit
+        && tableEditorSignature() !== activeTableEdit.originalSignature) {
+        focusFirstTableInput();
+        return;
+      }
+
+      const table = findTableEditData(lineRange) || readTableDataFromDom(tableElement);
+      hideCommentOverlay();
+      hideSelectionPopover();
+      hideComposerIfEmpty();
+      hideBlockEditorIfClean();
+      hideMermaidEditorIfClean();
+      activeTableEdit = {
+        ...lineRange,
+        originalSignature: ''
+      };
+      renderTableEditorGrid(table);
+      activeTableEdit.originalSignature = tableEditorSignature();
+      tableEditorLines.textContent = 'Lines ' + lineRange.lineStart + '-' + lineRange.lineEnd;
+      const rect = tableElement.getBoundingClientRect();
+      positionFloatingElement(tableEditor, {
+        left: rect.left,
+        right: rect.right,
+        top: rect.top,
+        bottom: rect.bottom
+      }, 920);
+      tableEditor.style.display = 'block';
+      focusFirstTableInput();
+    }
+
+    function findTableEditData(lineRange) {
+      return markdownTables.find((table) => {
+        return Number(table.lineStart) === lineRange.lineStart
+          && Number(table.lineEnd) === lineRange.lineEnd;
+      });
+    }
+
+    function readTableDataFromDom(tableElement) {
+      const headers = Array.from(tableElement.querySelectorAll('thead th')).map((cell) => cell.textContent || '');
+      const bodyRows = Array.from(tableElement.querySelectorAll('tbody tr')).map((row) => {
+        return Array.from(row.querySelectorAll('td, th')).map((cell) => cell.textContent || '');
+      });
+      const fallbackRows = bodyRows.length > 0
+        ? bodyRows
+        : Array.from(tableElement.querySelectorAll('tr')).slice(1).map((row) => {
+          return Array.from(row.querySelectorAll('td, th')).map((cell) => cell.textContent || '');
+        });
+      const columnCount = Math.max(1, headers.length, ...fallbackRows.map((row) => row.length));
+      return normalizeTableData({
+        headers: padTableCells(headers.length > 0 ? headers : Array.from({ length: columnCount }, (_, index) => 'Column ' + (index + 1)), columnCount),
+        alignments: Array.from({ length: columnCount }, () => 'none'),
+        rows: fallbackRows.map((row) => padTableCells(row, columnCount))
+      });
+    }
+
+    function normalizeTableData(table) {
+      const rows = Array.isArray(table?.rows) ? table.rows.filter(Array.isArray) : [];
+      const headers = Array.isArray(table?.headers) ? table.headers.map(String) : [];
+      const alignments = Array.isArray(table?.alignments) ? table.alignments.map(normalizeAlignment) : [];
+      const columnCount = Math.max(1, headers.length, alignments.length, ...rows.map((row) => row.length));
+      return {
+        headers: padTableCells(headers, columnCount),
+        alignments: padTableAlignments(alignments, columnCount),
+        rows: rows.map((row) => padTableCells(row.map(String), columnCount))
+      };
+    }
+
+    function padTableCells(cells, columnCount) {
+      return Array.from({ length: columnCount }, (_, index) => cells[index] || '');
+    }
+
+    function padTableAlignments(alignments, columnCount) {
+      return Array.from({ length: columnCount }, (_, index) => normalizeAlignment(alignments[index]));
+    }
+
+    function normalizeAlignment(value) {
+      return value === 'left' || value === 'center' || value === 'right' ? value : 'none';
+    }
+
+    function renderTableEditorGrid(table) {
+      const normalizedTable = normalizeTableData(table);
+      tableEditorGrid.innerHTML = [
+        '<table>',
+        '<thead>',
+        '<tr>',
+        '<th></th>',
+        ...normalizedTable.headers.map((header, columnIndex) => [
+          '<th>',
+          '<input data-table-header data-column="' + columnIndex + '" value="' + escapeHtml(header) + '" aria-label="Column ' + (columnIndex + 1) + ' header">',
+          '<div class="table-cell-tools">',
+          '<select data-table-align data-column="' + columnIndex + '" aria-label="Column ' + (columnIndex + 1) + ' alignment">',
+          renderAlignmentOptions(normalizedTable.alignments[columnIndex]),
+          '</select>',
+          '<button type="button" class="secondary compact" title="Remove column" data-remove-table-column data-column="' + columnIndex + '">-</button>',
+          '</div>',
+          '</th>'
+        ].join('')),
+        '</tr>',
+        '</thead>',
+        '<tbody>',
+        ...normalizedTable.rows.map((row, rowIndex) => [
+          '<tr>',
+          '<td><button type="button" class="secondary compact" title="Remove row" data-remove-table-row data-row="' + rowIndex + '">-</button></td>',
+          ...row.map((cell, columnIndex) => [
+            '<td>',
+            '<input data-table-cell data-row="' + rowIndex + '" data-column="' + columnIndex + '" value="' + escapeHtml(cell) + '" aria-label="Row ' + (rowIndex + 1) + ', column ' + (columnIndex + 1) + '">',
+            '</td>'
+          ].join('')),
+          '</tr>'
+        ].join('')),
+        '</tbody>',
+        '</table>'
+      ].join('');
+    }
+
+    function renderAlignmentOptions(selected) {
+      return ['none', 'left', 'center', 'right'].map((alignment) => {
+        return '<option value="' + alignment + '"' + (alignment === selected ? ' selected' : '') + '>' + formatMetaValue(alignment) + '</option>';
+      }).join('');
+    }
+
+    function readTableEditorData() {
+      const headers = Array.from(tableEditorGrid.querySelectorAll('[data-table-header]'))
+        .sort(sortByColumn)
+        .map((input) => input.value);
+      const alignments = Array.from(tableEditorGrid.querySelectorAll('[data-table-align]'))
+        .sort(sortByColumn)
+        .map((select) => normalizeAlignment(select.value));
+      const rowElements = Array.from(tableEditorGrid.querySelectorAll('tbody tr'));
+      const rows = rowElements.map((row) => {
+        return Array.from(row.querySelectorAll('[data-table-cell]'))
+          .sort(sortByColumn)
+          .map((input) => input.value);
+      });
+      return normalizeTableData({ headers, alignments, rows });
+    }
+
+    function sortByColumn(left, right) {
+      return Number(left.getAttribute('data-column')) - Number(right.getAttribute('data-column'));
+    }
+
+    function tableEditorSignature() {
+      return JSON.stringify(readTableEditorData());
+    }
+
+    function focusTableCell(rowIndex, columnIndex) {
+      const selector = rowIndex === 0
+        ? '[data-table-header][data-column="' + columnIndex + '"]'
+        : '[data-table-cell][data-row="' + (rowIndex - 1) + '"][data-column="' + columnIndex + '"]';
+      const input = tableEditorGrid.querySelector(selector);
+      input?.focus();
+    }
+
+    function focusFirstTableInput() {
+      tableEditorGrid.querySelector('input, select')?.focus();
+    }
+
     function openMermaidEditor(figure, source) {
       const lineRange = getEditableLineRange(figure);
 
@@ -1951,10 +2395,18 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
         return;
       }
 
+      if (tableEditor.style.display === 'block'
+        && activeTableEdit
+        && tableEditorSignature() !== activeTableEdit.originalSignature) {
+        focusFirstTableInput();
+        return;
+      }
+
       hideCommentOverlay();
       hideSelectionPopover();
       hideComposerIfEmpty();
       hideBlockEditorIfClean();
+      hideTableEditorIfClean();
       activeMermaidEdit = {
         ...lineRange,
         originalSource: source
@@ -2055,6 +2507,24 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
       }
 
       hideMermaidEditor();
+    }
+
+    function hideTableEditor() {
+      tableEditor.style.display = 'none';
+      tableEditorGrid.innerHTML = '';
+      activeTableEdit = undefined;
+    }
+
+    function hideTableEditorIfClean() {
+      if (tableEditor.style.display !== 'block') {
+        return;
+      }
+
+      if (activeTableEdit && tableEditorSignature() !== activeTableEdit.originalSignature) {
+        return;
+      }
+
+      hideTableEditor();
     }
 
     function decorateReviewAnchors(threads) {
@@ -3323,7 +3793,10 @@ function parseThreadIds(value: unknown, fallbackThreadId: string): string[] {
 }
 
 function parseReviewAwareEditIntent(value: unknown): ReviewAwareEditIntent | undefined {
-  if (value === 'manual_block_edit' || value === 'manual_mermaid_edit' || value === 'rewrite_section') {
+  if (value === 'manual_block_edit'
+    || value === 'manual_table_edit'
+    || value === 'manual_mermaid_edit'
+    || value === 'rewrite_section') {
     return value;
   }
 

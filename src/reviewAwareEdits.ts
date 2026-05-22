@@ -7,6 +7,7 @@ export type ReviewAwareEditActor = 'user' | 'assistant';
 export type ReviewAwareEditIntent =
   | 'apply_suggestion'
   | 'manual_block_edit'
+  | 'manual_table_edit'
   | 'manual_mermaid_edit'
   | 'rewrite_section';
 export type ClosingReviewStatus = Extract<ReviewStatus, 'accepted' | 'resolved' | 'rejected'>;
@@ -333,6 +334,10 @@ function createOutcomeReplyText(thread: ReviewThread, plan: ReviewAwareEditPlan)
 
   if (plan.intent === 'manual_mermaid_edit') {
     return 'Review update: edited the Mermaid source and kept this comment attached.';
+  }
+
+  if (plan.intent === 'manual_table_edit') {
+    return 'Review update: edited the table and kept this comment attached.';
   }
 
   return 'Review update: edited the reviewed text and kept this comment attached.';
