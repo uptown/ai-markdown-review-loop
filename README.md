@@ -13,6 +13,7 @@ The first MVP focuses on a local workflow:
 - See saved comments as highlights and small badges in the rendered document.
 - Click a highlighted region or badge to inspect, resolve, or reject saved comments.
 - Reply under review comments to preserve discussion context for future AI handoff.
+- Distinguish user comments from AI-generated review comments with separate labels, badges, and highlight colors.
 - Click a thread in `Review Threads` to jump back to its highlighted content.
 - Persist compact `ai-review-anchor` metadata in the Markdown file while storing full thread data in sidecar JSON.
 - Attach feedback directly to a Mermaid diagram source block.

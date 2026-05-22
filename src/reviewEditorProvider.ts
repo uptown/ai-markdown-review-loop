@@ -428,13 +428,61 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider {
       border-color: #8ad83f;
       box-shadow: inset 3px 0 0 #8ad83f;
     }
+    .thread.source-human {
+      border-left: 3px solid #4da3ff;
+    }
+    .thread.source-ai {
+      border-left: 3px solid #c792ea;
+    }
+    .thread.source-mixed {
+      border-left: 3px solid #d7a100;
+    }
     .thread header {
       display: flex;
       justify-content: space-between;
+      align-items: center;
       gap: 8px;
       font-size: 12px;
       color: var(--muted);
       margin-bottom: 8px;
+    }
+    .thread-meta,
+    .comment-overlay-meta {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 6px;
+    }
+    .source-chip,
+    .meta-chip {
+      display: inline-flex;
+      align-items: center;
+      min-height: 18px;
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      padding: 1px 7px;
+      font-size: 11px;
+      line-height: 1.35;
+      color: var(--muted);
+      background: var(--vscode-badge-background, rgba(127, 127, 127, 0.16));
+    }
+    .source-chip.source-human,
+    .meta-chip.source-human {
+      border-color: rgba(77, 163, 255, 0.72);
+      color: #d8ecff;
+      background: rgba(77, 163, 255, 0.22);
+    }
+    .source-chip.source-ai,
+    .meta-chip.source-ai {
+      border-color: rgba(199, 146, 234, 0.72);
+      color: #f2ddff;
+      background: rgba(199, 146, 234, 0.22);
+    }
+    .source-chip.source-mixed,
+    .meta-chip.source-mixed {
+      border-color: rgba(215, 161, 0, 0.72);
+      color: #ffe9a3;
+      background: rgba(215, 161, 0, 0.22);
     }
     .thread blockquote {
       margin: 8px 0;
@@ -547,9 +595,6 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider {
       border-top: 1px solid var(--border);
     }
     .comment-overlay-meta {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 6px;
       margin-bottom: 8px;
       color: var(--muted);
       font-size: 12px;
@@ -629,6 +674,24 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider {
       background: rgba(255, 203, 64, 0.28);
       box-shadow: inset 0 -2px 0 rgba(215, 161, 0, 0.9);
     }
+    .review-anchor.source-human,
+    .review-anchor-block.source-human {
+      background: rgba(77, 163, 255, 0.13);
+      outline-color: rgba(77, 163, 255, 0.58);
+      box-shadow: inset 0 -2px 0 rgba(77, 163, 255, 0.82);
+    }
+    .review-anchor.source-ai,
+    .review-anchor-block.source-ai {
+      background: rgba(199, 146, 234, 0.14);
+      outline-color: rgba(199, 146, 234, 0.64);
+      box-shadow: inset 0 -2px 0 rgba(199, 146, 234, 0.86);
+    }
+    .review-anchor.source-mixed,
+    .review-anchor-block.source-mixed {
+      background: rgba(255, 203, 64, 0.14);
+      outline-color: rgba(215, 161, 0, 0.65);
+      box-shadow: inset 0 -2px 0 rgba(215, 161, 0, 0.9);
+    }
     .review-anchor-block {
       position: relative;
       border-radius: 4px;
@@ -659,6 +722,18 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider {
       vertical-align: text-top;
       cursor: pointer;
       user-select: none;
+    }
+    .review-badge.source-human {
+      color: #061724;
+      background: #4da3ff;
+    }
+    .review-badge.source-ai {
+      color: #1e0d2b;
+      background: #c792ea;
+    }
+    .review-badge.source-mixed {
+      color: #201700;
+      background: #d7a100;
     }
     .review-block-badge {
       position: absolute;
@@ -887,11 +962,11 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider {
     } else {
       for (const thread of openThreads) {
         const element = document.createElement('section');
-        element.className = 'thread';
+        element.className = 'thread ' + sourceClass(thread);
         element.dataset.threadId = thread.id;
         element.title = 'Jump to commented content';
         element.innerHTML = [
-          '<header><span>' + escapeHtml(thread.type) + ' · ' + escapeHtml(thread.source) + '</span><span>' + escapeHtml(thread.severity) + '</span></header>',
+          '<header><span class="thread-meta">' + renderSourceChip(thread) + '<span class="meta-chip">' + escapeHtml(thread.type) + '</span></span><span class="meta-chip">' + escapeHtml(thread.severity) + '</span></header>',
           '<blockquote>' + escapeHtml(thread.anchor.text || 'Document') + '</blockquote>',
           '<p>' + escapeHtml(thread.comment) + '</p>',
           renderReplies(thread),
@@ -1010,12 +1085,12 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider {
           const matchNode = node.splitText(rawIndex);
           const afterNode = matchNode.splitText(matchLength);
           const marker = document.createElement('span');
-          marker.className = 'review-anchor';
+          marker.className = 'review-anchor ' + sourceClass(thread);
           marker.dataset.threadId = thread.id;
-          marker.title = 'Open comment';
+          marker.title = sourceLabel(thread) + ' comment';
           marker.textContent = matchNode.nodeValue;
 
-          const badge = createReviewBadge(thread, '');
+          const badge = createReviewBadge(thread, '', sourceBadgeLabel(thread));
           marker.appendChild(badge);
           matchNode.parentNode?.insertBefore(marker, matchNode);
           matchNode.remove();
@@ -1194,7 +1269,7 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider {
 
     function attachThreadToAnchorElement(element, thread, badgeClass) {
       element.classList.add('review-anchor-block');
-      element.title = 'Open comment';
+      element.title = sourceLabel(thread) + ' comment';
 
       const existingIds = getThreadIds(element);
       const nextIds = existingIds.includes(thread.id) ? existingIds : [...existingIds, thread.id];
@@ -1210,8 +1285,7 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider {
 
       badge.dataset.threadId = nextIds[0];
       badge.dataset.threadIds = element.dataset.threadIds;
-      badge.textContent = String(nextIds.length);
-      badge.title = nextIds.length === 1 ? 'Open comment' : 'Open comments';
+      syncSourceClasses(element, badge, nextIds);
       reportLocatedAnchor(element, thread);
     }
 
@@ -1247,15 +1321,17 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider {
         figure.dataset.threadId = matches[0].id;
         figure.dataset.threadIds = matches.map((thread) => thread.id).join(',');
         const actions = figure.querySelector('.mermaid-actions');
-        actions?.prepend(createReviewBadge(matches[0], 'mermaid-review-badge', String(matches.length)));
+        const badge = createReviewBadge(matches[0], 'mermaid-review-badge', matches.length === 1 ? sourceBadgeLabel(matches[0]) : String(matches.length));
+        syncSourceClasses(figure, badge, matches.map((thread) => thread.id));
+        actions?.prepend(badge);
       }
     }
 
     function createReviewBadge(thread, extraClass, label) {
       const badge = document.createElement('button');
       badge.type = 'button';
-      badge.className = ('review-badge ' + extraClass).trim();
-      badge.title = 'Open comment';
+      badge.className = ('review-badge ' + sourceClass(thread) + ' ' + extraClass).trim();
+      badge.title = sourceLabel(thread) + ' comment';
       badge.textContent = label || '1';
       badge.dataset.threadId = thread.id;
       return badge;
@@ -1284,8 +1360,7 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider {
         if (badge) {
           badge.dataset.threadId = nextIds[0];
           badge.dataset.threadIds = anchor.dataset.threadIds;
-          badge.textContent = String(nextIds.length);
-          badge.title = nextIds.length === 1 ? 'Open comment' : 'Open comments';
+          syncSourceClasses(anchor, badge, nextIds);
         }
       }
     }
@@ -1301,6 +1376,64 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider {
         const anchorText = normalizeInline(thread.anchor?.text || '');
         return anchorText && anchorText === baseText;
       });
+    }
+
+    function syncSourceClasses(anchor, badge, threadIds) {
+      const threads = threadIds.map(findThread).filter(Boolean);
+      const source = aggregateSource(threads);
+      const classNames = ['source-human', 'source-ai', 'source-mixed'];
+
+      anchor.classList.remove(...classNames);
+      badge.classList.remove(...classNames);
+      anchor.classList.add(source.cssClass);
+      badge.classList.add(source.cssClass);
+      badge.textContent = threadIds.length === 1 ? source.label : String(threadIds.length);
+      badge.title = threadIds.length === 1
+        ? source.label + ' comment'
+        : source.label + ' comments';
+    }
+
+    function aggregateSource(threads) {
+      const sourceKinds = Array.from(new Set(threads.map(sourceKind)));
+
+      if (sourceKinds.length === 1) {
+        return sourceDisplay(sourceKinds[0]);
+      }
+
+      return sourceDisplay('mixed');
+    }
+
+    function sourceKind(thread) {
+      const source = String(thread?.source || 'human');
+      return source === 'human' ? 'human' : 'ai';
+    }
+
+    function sourceDisplay(kind) {
+      if (kind === 'human') {
+        return { label: 'You', cssClass: 'source-human' };
+      }
+
+      if (kind === 'mixed') {
+        return { label: 'Mixed', cssClass: 'source-mixed' };
+      }
+
+      return { label: 'AI', cssClass: 'source-ai' };
+    }
+
+    function sourceClass(thread) {
+      return sourceDisplay(sourceKind(thread)).cssClass;
+    }
+
+    function sourceLabel(thread) {
+      return sourceDisplay(sourceKind(thread)).label;
+    }
+
+    function sourceBadgeLabel(thread) {
+      return sourceLabel(thread);
+    }
+
+    function renderSourceChip(thread) {
+      return '<span class="source-chip ' + sourceClass(thread) + '">' + escapeHtml(sourceLabel(thread)) + '</span>';
     }
 
     function getThreadIds(element) {
@@ -1339,12 +1472,12 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider {
 
     function renderCommentOverlayItem(thread) {
       return [
-        '<section class="comment-overlay-item">',
+        '<section class="comment-overlay-item ' + sourceClass(thread) + '">',
         '<div class="comment-overlay-meta">',
-        '<span>' + escapeHtml(thread.type || 'note') + '</span>',
-        '<span>' + escapeHtml(thread.source || 'human') + '</span>',
-        '<span>' + escapeHtml(thread.severity || 'medium') + '</span>',
-        '<span>' + escapeHtml(thread.status || 'open') + '</span>',
+        renderSourceChip(thread),
+        '<span class="meta-chip">' + escapeHtml(thread.type || 'note') + '</span>',
+        '<span class="meta-chip">' + escapeHtml(thread.severity || 'medium') + '</span>',
+        '<span class="meta-chip">' + escapeHtml(thread.status || 'open') + '</span>',
         '</div>',
         '<p class="comment-overlay-comment">' + escapeHtml(thread.comment || '') + '</p>',
         renderReplies(thread),
