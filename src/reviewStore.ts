@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import { createHash } from 'crypto';
-import { ReviewDocument, ReviewReply, ReviewThread } from './types';
+import { AnchorConfidence, ReviewDocument, ReviewReply, ReviewThread } from './types';
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder('utf-8');
@@ -8,6 +8,14 @@ const decoder = new TextDecoder('utf-8');
 interface AddThreadsResult {
   reviewDocument: ReviewDocument;
   addedThreads: ReviewThread[];
+}
+
+export interface AnchorLocationUpdate {
+  threadId: string;
+  lineStart: number;
+  lineEnd: number;
+  confidence: Extract<AnchorConfidence, 'exact' | 'recovered'>;
+  locatedAt: string;
 }
 
 export class ReviewStore {
@@ -107,6 +115,54 @@ export class ReviewStore {
 
     await this.save(documentUri, reviewDocument);
     return reviewDocument;
+  }
+
+  async updateThreadAnchors(
+    documentUri: vscode.Uri,
+    updates: AnchorLocationUpdate[]
+  ): Promise<boolean> {
+    if (updates.length === 0) {
+      return false;
+    }
+
+    const reviewDocument = await this.load(documentUri);
+    const updatesById = new Map(updates.map(update => [update.threadId, update]));
+    let changed = false;
+
+    for (const thread of reviewDocument.threads) {
+      if (thread.status !== 'open') {
+        continue;
+      }
+
+      const update = updatesById.get(thread.id);
+
+      if (!update) {
+        continue;
+      }
+
+      const nextAnchor = {
+        ...thread.anchor,
+        lineStart: update.lineStart,
+        lineEnd: update.lineEnd,
+        confidence: update.confidence,
+        lastLocatedLine: update.lineStart,
+        lastLocatedAt: update.locatedAt
+      };
+
+      if (sameAnchorLocation(thread.anchor, nextAnchor)) {
+        continue;
+      }
+
+      thread.anchor = nextAnchor;
+      changed = true;
+    }
+
+    if (!changed) {
+      return false;
+    }
+
+    await this.save(documentUri, reviewDocument);
+    return true;
   }
 
   async addReply(
@@ -247,6 +303,16 @@ function isReviewThread(value: unknown): value is ReviewThread {
     && value.thread.every(isReviewReply)
     && typeof value.createdAt === 'string'
     && typeof value.updatedAt === 'string';
+}
+
+function sameAnchorLocation(
+  left: ReviewThread['anchor'],
+  right: ReviewThread['anchor']
+): boolean {
+  return left.lineStart === right.lineStart
+    && left.lineEnd === right.lineEnd
+    && left.confidence === right.confidence
+    && left.lastLocatedLine === right.lastLocatedLine;
 }
 
 function isReviewReply(value: unknown): value is ReviewReply {

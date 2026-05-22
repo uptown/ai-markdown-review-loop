@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import MarkdownIt from 'markdown-it';
 import { randomUUID } from 'crypto';
+import { AnchorMaintenanceController } from './anchorMaintenance';
 import { createAnchor } from './anchors';
 import {
   appendClosedReviewLog,
@@ -11,16 +12,17 @@ import {
   stripInlineAnchorMarkers
 } from './inlineMarkers';
 import { ReviewStore } from './reviewStore';
-import { ReviewDocument, ReviewStatus, ReviewThread } from './types';
+import { AnchorConfidence, ReviewDocument, ReviewStatus, ReviewThread } from './types';
 
 const viewType = 'aiMarkdownReviewLoop.reviewEditor';
 
-export class ReviewEditorProvider implements vscode.CustomTextEditorProvider {
+export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vscode.Disposable {
   private readonly markdown = new MarkdownIt({
     html: false,
     linkify: true,
     typographer: false
   });
+  private readonly anchorMaintenance: AnchorMaintenanceController;
 
   private currentDocumentUri: vscode.Uri | undefined;
 
@@ -28,6 +30,7 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider {
     private readonly context: vscode.ExtensionContext,
     private readonly store: ReviewStore
   ) {
+    this.anchorMaintenance = new AnchorMaintenanceController(store);
     const defaultFence = this.markdown.renderer.rules.fence;
     const sourceMappedRules = [
       'paragraph_open',
@@ -73,6 +76,10 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider {
     };
   }
 
+  dispose(): void {
+    this.anchorMaintenance.dispose();
+  }
+
   getCurrentDocumentUri(): vscode.Uri | undefined {
     return this.currentDocumentUri;
   }
@@ -102,14 +109,23 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider {
         void render();
       }
     });
+    const saveSubscription = vscode.workspace.onDidSaveTextDocument(event => {
+      if (event.uri.toString() === document.uri.toString()) {
+        void this.anchorMaintenance.flush(document);
+      }
+    });
 
     webviewPanel.onDidDispose(() => {
       changeSubscription.dispose();
+      saveSubscription.dispose();
+      void this.anchorMaintenance.flush(document);
     });
 
     webviewPanel.onDidChangeViewState(event => {
       if (event.webviewPanel.active) {
         this.currentDocumentUri = document.uri;
+      } else {
+        void this.anchorMaintenance.flush(document);
       }
     });
 
@@ -134,6 +150,7 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider {
             return;
           }
 
+          await this.anchorMaintenance.flush(document);
           await this.store.updateThread(
             document.uri,
             String(message.threadId),
@@ -187,21 +204,16 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider {
         if (message?.type === 'anchorLocated') {
           const sourceLine = parseSourceLine(message.sourceLine);
           const threadId = String(message.threadId ?? '');
+          const confidence = parseAnchorConfidence(message.confidence);
+          const documentVersion = parseDocumentVersion(message.documentVersion);
 
-          if (sourceLine && threadId) {
-            const reviewDocument = await this.store.load(document.uri);
-            const thread = reviewDocument.threads.find(candidate => candidate.id === threadId);
-
-            if (thread?.status === 'open'
-              && (thread.anchor.lineStart !== sourceLine || thread.anchor.lineEnd !== sourceLine)) {
-              await this.store.updateThread(document.uri, threadId, {
-                anchor: {
-                  ...thread.anchor,
-                  lineStart: sourceLine,
-                  lineEnd: sourceLine
-                }
-              });
-            }
+          if (sourceLine && threadId && confidence && documentVersion !== undefined) {
+            this.anchorMaintenance.observe(document, {
+              threadId,
+              sourceLine,
+              confidence,
+              documentVersion
+            });
           }
         }
 
@@ -321,7 +333,8 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider {
     );
     const state = JSON.stringify({
       threads: reviewDocument.threads,
-      markerLineHints
+      markerLineHints,
+      documentVersion: document.version
     }).replace(/</g, '\\u003c');
 
     return `<!DOCTYPE html>
@@ -833,6 +846,7 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider {
     const vscode = acquireVsCodeApi();
     const state = ${state};
     const markerLineHints = state.markerLineHints || {};
+    const documentVersion = Number(state.documentVersion);
     const markdownBody = document.getElementById('markdown-body');
     const selectionPopover = document.getElementById('selection-popover');
     const selectionCommentButton = document.getElementById('selection-comment');
@@ -1143,6 +1157,7 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider {
           matchNode.remove();
           afterNode.parentElement?.normalize();
           setAnchorState(thread, 'exact', marker);
+          reportLocatedAnchor(marker, thread, 'exact');
           return true;
         }
 
@@ -1201,7 +1216,12 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider {
         return false;
       }
 
-      attachThreadToAnchorElement(best, thread, 'review-block-badge', 'recovered');
+      attachThreadToAnchorElement(
+        best,
+        thread,
+        'review-block-badge',
+        bestScore >= 6 ? 'recovered' : 'approximate'
+      );
       return true;
     }
 
@@ -1335,11 +1355,11 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider {
       badge.dataset.threadIds = element.dataset.threadIds;
       syncSourceClasses(element, badge, nextIds);
       setAnchorState(thread, anchorState, element);
-      reportLocatedAnchor(element, thread);
+      reportLocatedAnchor(element, thread, anchorState);
     }
 
-    function reportLocatedAnchor(element, thread) {
-      const sourceLine = Number(element.getAttribute('data-source-line'));
+    function reportLocatedAnchor(element, thread, confidence) {
+      const sourceLine = getSourceLine(element);
 
       if (!Number.isFinite(sourceLine) || sourceLine < 1) {
         return;
@@ -1348,7 +1368,9 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider {
       vscode.postMessage({
         type: 'anchorLocated',
         threadId: thread.id,
-        sourceLine
+        sourceLine,
+        confidence,
+        documentVersion
       });
     }
 
@@ -1375,6 +1397,7 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider {
         actions?.prepend(badge);
         for (const thread of matches) {
           setAnchorState(thread, 'exact', figure);
+          reportLocatedAnchor(figure, thread, 'exact');
         }
       }
     }
@@ -1413,6 +1436,13 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider {
           badge.dataset.threadId = nextIds[0];
           badge.dataset.threadIds = anchor.dataset.threadIds;
           syncSourceClasses(anchor, badge, nextIds);
+        }
+
+        const anchorState = getAnchorElementState(anchor);
+
+        for (const relatedThread of relatedThreads) {
+          setAnchorState(relatedThread, anchorState, anchor);
+          reportLocatedAnchor(anchor, relatedThread, anchorState);
         }
       }
     }
@@ -1505,6 +1535,22 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider {
       }
 
       return 'Needs re-anchor';
+    }
+
+    function getAnchorElementState(element) {
+      if (element.classList.contains('anchor-exact')) {
+        return 'exact';
+      }
+
+      if (element.classList.contains('anchor-recovered')) {
+        return 'recovered';
+      }
+
+      if (element.classList.contains('anchor-approximate')) {
+        return 'approximate';
+      }
+
+      return 'missing';
     }
 
     function syncSourceClasses(anchor, badge, threadIds) {
@@ -2090,6 +2136,26 @@ function parseSourceLine(value: unknown): number | undefined {
   }
 
   return Math.floor(value);
+}
+
+function parseDocumentVersion(value: unknown): number | undefined {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) {
+    return undefined;
+  }
+
+  return Math.floor(value);
+}
+
+function parseAnchorConfidence(value: unknown): AnchorConfidence | undefined {
+  if (value === 'exact'
+    || value === 'recovered'
+    || value === 'approximate'
+    || value === 'missing'
+    || value === 'ambiguous') {
+    return value;
+  }
+
+  return undefined;
 }
 
 function parseReviewStatus(value: unknown): ReviewStatus | undefined {

@@ -10,6 +10,7 @@ export function activate(context: vscode.ExtensionContext): void {
   const provider = new ReviewEditorProvider(context, store);
 
   context.subscriptions.push(
+    provider,
     vscode.window.registerCustomEditorProvider(reviewEditorViewType, provider, {
       webviewOptions: {
         retainContextWhenHidden: true

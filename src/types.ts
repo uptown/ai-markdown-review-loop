@@ -2,6 +2,7 @@ export type ReviewStatus = 'open' | 'accepted' | 'rejected' | 'resolved';
 export type ReviewSource = 'human' | 'ai' | 'local';
 export type ReviewType = 'fix' | 'question' | 'note' | 'risk' | 'suggestion';
 export type ReviewSeverity = 'low' | 'medium' | 'high';
+export type AnchorConfidence = 'exact' | 'recovered' | 'approximate' | 'missing' | 'ambiguous';
 
 export interface ReviewAnchor {
   text: string;
@@ -11,6 +12,9 @@ export interface ReviewAnchor {
   occurrence?: number;
   contextBefore?: string;
   contextAfter?: string;
+  confidence?: AnchorConfidence;
+  lastLocatedLine?: number;
+  lastLocatedAt?: string;
 }
 
 export interface SuggestedPatch {
