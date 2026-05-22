@@ -31,6 +31,7 @@
 - Hides compact `ai-review-log` audit comments from the rendered Markdown review preview.
 - Fixes rendered-block edits so excluded following blocks are not accidentally deleted and partial comment anchors do not expand to the whole edited block.
 - Updates partial comment anchors to the edited word or phrase when a reviewed text fragment changes in place.
+- Humanizes automatic review update replies and hides older internal edit-pipeline wording in the preview.
 - Adds Node unit and scenario tests for suggested patch selection, review-aware edits, inline anchor metadata, review lifecycle flow, and agent feedback export guardrails.
 - Extends license policy guidance to cover test tooling and future dependencies.
 - Adds agent editing guidelines and workflow documentation for iterative human/AI review handoff.

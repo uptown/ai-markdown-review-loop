@@ -91,7 +91,7 @@ describe('review lifecycle scenario', () => {
     assert.equal(threadUpdates[0].threadId, 'rv_patch');
     assert.equal(threadUpdates[0].update.status, 'accepted');
     assert.equal(threadUpdates[0].update.anchor?.text, 'Requirement new');
-    assert.match(threadUpdates[0].update.thread?.[0].text ?? '', /applied the suggested Markdown edit/);
+    assert.match(threadUpdates[0].update.thread?.[0].text ?? '', /applied the suggested edit/);
 
     const exportText = renderFeedbackExport({
       documentUri: 'file:///workspace/spec.md',

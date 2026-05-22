@@ -324,18 +324,18 @@ function isAffectedThread(thread: ReviewThread, plan: ReviewAwareEditPlan): bool
 
 function createOutcomeReplyText(thread: ReviewThread, plan: ReviewAwareEditPlan): string {
   if (thread.id === plan.targetThreadId && plan.intent === 'apply_suggestion') {
-    return 'Edit outcome: applied the suggested Markdown edit and refreshed this thread anchor.';
+    return 'Review update: applied the suggested edit and kept this thread attached.';
   }
 
   if (plan.intent === 'rewrite_section') {
-    return 'Edit outcome: rewrote overlapping Markdown through the review-aware edit pipeline and refreshed this thread anchor.';
+    return 'Review update: rewrote the reviewed text and kept this comment attached.';
   }
 
   if (plan.intent === 'manual_mermaid_edit') {
-    return 'Edit outcome: edited overlapping Mermaid source through the review-aware edit pipeline and refreshed this thread anchor.';
+    return 'Review update: edited the Mermaid source and kept this comment attached.';
   }
 
-  return 'Edit outcome: edited overlapping Markdown through the review-aware edit pipeline and refreshed this thread anchor.';
+  return 'Review update: edited the reviewed text and kept this comment attached.';
 }
 
 function createOffsetContext(

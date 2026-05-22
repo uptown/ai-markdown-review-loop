@@ -55,7 +55,7 @@ describe('review-aware edits', () => {
     assert.equal(updates[0].update.anchor?.confidence, 'exact');
     assert.equal(updates[0].update.anchor?.contextBefore, 'Intro context');
     assert.equal(updates[0].update.anchor?.contextAfter, 'Outro context');
-    assert.match(updates[0].update.thread?.[0].text ?? '', /review-aware edit pipeline/);
+    assert.match(updates[0].update.thread?.[0].text ?? '', /edited the reviewed text/);
   });
 
   it('keeps partial comment anchors narrow when an edited block still contains them', () => {
@@ -187,7 +187,7 @@ describe('review-aware edits', () => {
     assert.equal(updates.length, 1);
     assert.equal(updates[0].update.status, 'accepted');
     assert.equal(updates[0].update.anchor?.text, 'New sentence');
-    assert.match(updates[0].update.thread?.[0].text ?? '', /applied the suggested Markdown edit/);
+    assert.match(updates[0].update.thread?.[0].text ?? '', /applied the suggested edit/);
   });
 
   it('keeps deleted overlapping feedback visible as a missing anchor instead of dropping it', () => {
@@ -209,7 +209,7 @@ describe('review-aware edits', () => {
     assert.equal(updates[0].update.anchor?.text, 'Delete me');
     assert.equal(updates[0].update.anchor?.confidence, 'missing');
     assert.equal(updates[0].update.thread?.[0].role, 'assistant');
-    assert.match(updates[0].update.thread?.[0].text ?? '', /rewrote overlapping Markdown/);
+    assert.match(updates[0].update.thread?.[0].text ?? '', /rewrote the reviewed text/);
   });
 
   it('reports one-based line numbers for LF and CRLF text', () => {

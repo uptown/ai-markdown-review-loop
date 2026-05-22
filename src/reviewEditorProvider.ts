@@ -1739,7 +1739,7 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
         actions.className = 'block-edit-actions';
         actions.innerHTML = [
           '<button type="button" class="secondary compact" title="Edit this rendered Markdown block" data-edit-markdown-block>Edit</button>',
-          '<button type="button" class="secondary compact" title="Rewrite this block through the review-aware edit pipeline" data-rewrite-markdown-block>Rewrite</button>'
+          '<button type="button" class="secondary compact" title="Rewrite this block and keep attached comments updated" data-rewrite-markdown-block>Rewrite</button>'
         ].join('');
         block.appendChild(actions);
       }
@@ -2485,7 +2485,38 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
         .replace(/\b\w/g, (character) => character.toUpperCase());
     }
 
+    function isReviewUpdateReply(reply) {
+      const text = String(reply?.text || '');
+      return text.startsWith('Review update:') || text.startsWith('Edit outcome:');
+    }
+
+    function formatReplyText(text) {
+      const value = String(text || '');
+
+      if (value === 'Edit outcome: applied the suggested Markdown edit and refreshed this thread anchor.') {
+        return 'Review update: applied the suggested edit and kept this thread attached.';
+      }
+
+      if (value === 'Edit outcome: rewrote overlapping Markdown through the review-aware edit pipeline and refreshed this thread anchor.') {
+        return 'Review update: rewrote the reviewed text and kept this comment attached.';
+      }
+
+      if (value === 'Edit outcome: edited overlapping Mermaid source through the review-aware edit pipeline and refreshed this thread anchor.') {
+        return 'Review update: edited the Mermaid source and kept this comment attached.';
+      }
+
+      if (value === 'Edit outcome: edited overlapping Markdown through the review-aware edit pipeline and refreshed this thread anchor.') {
+        return 'Review update: edited the reviewed text and kept this comment attached.';
+      }
+
+      return value;
+    }
+
     function replyRoleKind(reply) {
+      if (isReviewUpdateReply(reply)) {
+        return 'mixed';
+      }
+
       return String(reply?.role || 'user') === 'assistant' ? 'ai' : 'human';
     }
 
@@ -2494,6 +2525,10 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
     }
 
     function replyRoleLabel(reply) {
+      if (isReviewUpdateReply(reply)) {
+        return 'Review';
+      }
+
       return sourceDisplay(replyRoleKind(reply)).label;
     }
 
@@ -2588,7 +2623,7 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
         ...replies.map((reply) => [
           '<div class="reply-item ' + replyRoleClass(reply) + '">',
           '<div class="reply-meta">' + renderReplyRoleChip(reply) + '<span>' + escapeHtml(formatDate(reply.createdAt)) + '</span></div>',
-          '<p class="reply-text">' + escapeHtml(reply.text || '') + '</p>',
+          '<p class="reply-text">' + escapeHtml(formatReplyText(reply.text || '')) + '</p>',
           '</div>'
         ].join('')),
         '</div>'

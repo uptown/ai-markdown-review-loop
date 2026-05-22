@@ -74,7 +74,7 @@ describe('Mermaid edits', () => {
     ], plan, now);
 
     assert.equal(updates.length, 1);
-    assert.match(updates[0].update.thread?.[0].text ?? '', /edited overlapping Mermaid source/);
+    assert.match(updates[0].update.thread?.[0].text ?? '', /edited the Mermaid source/);
   });
 });
 
