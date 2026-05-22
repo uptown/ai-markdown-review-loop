@@ -5,3 +5,6 @@ out/
 .vscode-test/
 .agent/
 .ai-markdown-review/
+
+# Local planning documents
+docs/PRD.md
