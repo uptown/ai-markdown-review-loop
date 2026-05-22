@@ -17,6 +17,22 @@ export function stripInlineAnchorMarkers(markdown: string): string {
   return markdown.replace(/[ \t]*<!-- ai-review-(?:anchors?|log):.*?-->\r?\n?/g, '');
 }
 
+export function removeInlineReviewLogMarkers(
+  markdown: string,
+  threadIds: Iterable<string>
+): string {
+  const ids = new Set(threadIds);
+
+  if (ids.size === 0) {
+    return markdown;
+  }
+
+  return markdown.replace(/[ \t]*<!-- ai-review-log:(.*?)-->\r?\n?/g, (match, payload) => {
+    const id = readReviewLogId(payload);
+    return id && ids.has(id) ? '' : match;
+  });
+}
+
 export function readInlineAnchorMarkers(markdown: string): InlineAnchorMarker[] {
   const markers: InlineAnchorMarker[] = [];
   const singleAnchorPattern = /^<!-- ai-review-anchor:(.*?)-->/gm;
@@ -99,6 +115,15 @@ function parseInlineAnchorPayload(payload: string): InlineAnchorMarker[] {
   } catch {
     // Ignore malformed anchors here; invalid sidecar JSON is handled separately.
     return [];
+  }
+}
+
+function readReviewLogId(payload: string): string | undefined {
+  try {
+    const parsed = JSON.parse(payload.trim());
+    return isRecord(parsed) && typeof parsed.id === 'string' ? parsed.id : undefined;
+  } catch {
+    return undefined;
   }
 }
 

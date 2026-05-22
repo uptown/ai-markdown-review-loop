@@ -3,6 +3,7 @@ import {
   createInlineAnchorBlockPattern,
   createInlineAnchorMarker,
   dedupeInlineAnchorMarkers,
+  removeInlineReviewLogMarkers,
   readInlineAnchorMarkers,
   removeInlineAnchorMarkerPayloads,
   type InlineAnchorMarker
@@ -95,6 +96,26 @@ export async function appendClosedReviewLog(
   const prefix = lastLine.text.length > 0 ? '\n' : '';
 
   edit.insert(document.uri, lastLine.range.end, `${prefix}${marker}\n`);
+  return vscode.workspace.applyEdit(edit);
+}
+
+export async function removeClosedReviewLogMarkers(
+  document: vscode.TextDocument,
+  threadIds: Iterable<string>
+): Promise<boolean> {
+  const existingText = document.getText();
+  const nextText = removeInlineReviewLogMarkers(existingText, threadIds);
+
+  if (nextText === existingText) {
+    return true;
+  }
+
+  const edit = new vscode.WorkspaceEdit();
+  edit.replace(
+    document.uri,
+    new vscode.Range(document.positionAt(0), document.positionAt(existingText.length)),
+    nextText
+  );
   return vscode.workspace.applyEdit(edit);
 }
 

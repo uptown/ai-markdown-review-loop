@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import { createHash } from 'crypto';
+import { createRestoredReviewThread } from './reviewHistory';
 import { AnchorConfidence, ReviewDocument, ReviewReply, ReviewThread } from './types';
 
 const encoder = new TextEncoder();
@@ -188,6 +189,62 @@ export class ReviewStore {
     return reviewDocument;
   }
 
+  async loadResolved(documentUri: vscode.Uri): Promise<ReviewDocument> {
+    const reviewUri = await this.getResolvedReviewFileUri(documentUri);
+
+    let bytes: Uint8Array;
+
+    try {
+      bytes = await vscode.workspace.fs.readFile(reviewUri);
+    } catch (error) {
+      if (!isFileNotFoundError(error)) {
+        throw new Error(`Could not read resolved review sidecar: ${formatError(error)}`);
+      }
+
+      return {
+        documentUri: documentUri.toString(),
+        threads: [],
+        updatedAt: new Date().toISOString()
+      };
+    }
+
+    try {
+      return parseReviewDocument(documentUri, JSON.parse(decoder.decode(bytes)));
+    } catch (error) {
+      throw new Error(`Resolved review sidecar is invalid: ${formatError(error)}`);
+    }
+  }
+
+  async restoreThread(
+    documentUri: vscode.Uri,
+    threadId: string
+  ): Promise<ReviewThread> {
+    const reviewDocument = await this.load(documentUri);
+    const existingOpenThread = reviewDocument.threads.find(candidate => candidate.id === threadId);
+
+    if (existingOpenThread) {
+      return existingOpenThread;
+    }
+
+    const resolvedDocument = await this.loadResolved(documentUri);
+    const resolvedIndex = resolvedDocument.threads.findIndex(candidate => candidate.id === threadId);
+
+    if (resolvedIndex < 0) {
+      throw new Error(`Resolved review thread not found: ${threadId}`);
+    }
+
+    const restoredThread = createRestoredReviewThread(
+      resolvedDocument.threads[resolvedIndex],
+      new Date().toISOString()
+    );
+
+    resolvedDocument.threads.splice(resolvedIndex, 1);
+    reviewDocument.threads.push(restoredThread);
+    await this.save(documentUri, reviewDocument);
+    await this.saveResolved(documentUri, resolvedDocument);
+    return restoredThread;
+  }
+
   async getReviewFileUri(documentUri: vscode.Uri): Promise<vscode.Uri> {
     const workspaceFolder = vscode.workspace.getWorkspaceFolder(documentUri);
     const root = workspaceFolder?.uri ?? this.context.globalStorageUri;
@@ -217,32 +274,6 @@ export class ReviewStore {
     }
 
     await this.saveResolved(documentUri, resolvedDocument);
-  }
-
-  private async loadResolved(documentUri: vscode.Uri): Promise<ReviewDocument> {
-    const reviewUri = await this.getResolvedReviewFileUri(documentUri);
-
-    let bytes: Uint8Array;
-
-    try {
-      bytes = await vscode.workspace.fs.readFile(reviewUri);
-    } catch (error) {
-      if (!isFileNotFoundError(error)) {
-        throw new Error(`Could not read resolved review sidecar: ${formatError(error)}`);
-      }
-
-      return {
-        documentUri: documentUri.toString(),
-        threads: [],
-        updatedAt: new Date().toISOString()
-      };
-    }
-
-    try {
-      return parseReviewDocument(documentUri, JSON.parse(decoder.decode(bytes)));
-    } catch (error) {
-      throw new Error(`Resolved review sidecar is invalid: ${formatError(error)}`);
-    }
   }
 
   private async saveResolved(documentUri: vscode.Uri, reviewDocument: ReviewDocument): Promise<void> {

@@ -11,6 +11,7 @@ This extension is built around repeated document-review loops between human auth
 - As an AI-agent user, I want open feedback exported with thread IDs, source labels, discussion history, anchor confidence, and suggested patches so an agent can work from the review queue.
 - As a collaborator, I want comments to remain visible after nearby edits so feedback does not silently disappear when wording changes.
 - As an author, I want rendered-block edits and suggested patch application to use the same review-aware pipeline so sidecar anchors, context, and edit outcomes stay current.
+- As a reviewer, I want accepted, resolved, and rejected threads to remain visible as history so I can audit decisions and restore one when discussion needs to continue.
 
 ## Action Vocabulary
 
@@ -22,6 +23,7 @@ This extension is built around repeated document-review loops between human auth
 - `Accept`: agree with the feedback or recommendation and close the thread as an accepted decision.
 - `Resolve`: close because the underlying issue has been handled, superseded, or no longer applies.
 - `Reject`: close because the recommendation is intentionally declined.
+- `Restore`: reopen a closed thread, move it back to active feedback, and attach it to the current document again.
 - `Re-anchor`: attach a drifted comment to a new document location.
 - `Clean stale anchors`: remove broken metadata only; this is not a review decision.
 - `Export for Agent`: package open threads for AI work without mutating review state.
@@ -65,6 +67,14 @@ This extension is built around repeated document-review loops between human auth
 2. The author replies that the section is contractual context and should remain.
 3. The thread stays open while the discussion continues.
 4. The final user decision is `Reject`, preserving that the recommendation was deliberately declined.
+
+### Restore a Closed Decision
+
+1. A user accepts, resolves, or rejects a thread.
+2. The thread moves into closed history with its final decision and discussion.
+3. If the original anchor text still exists, the history card is `Linked`; if the text disappeared, it is `Outdated`.
+4. The user clicks `Restore` when the decision needs more discussion.
+5. The extension moves the thread back to open feedback, removes the old closed audit pointer, writes a fresh open anchor index, and focuses the restored thread.
 
 ### Comment Survives Iterative Editing
 

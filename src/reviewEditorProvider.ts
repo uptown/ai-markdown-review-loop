@@ -8,6 +8,7 @@ import {
   appendClosedReviewLog,
   findStaleInlineAnchorMarkers,
   insertInlineAnchorMarker,
+  removeClosedReviewLogMarkers,
   removeInlineAnchorMarker,
   removeInlineAnchorMarkers,
   stripInlineAnchorMarkers
@@ -20,6 +21,7 @@ import {
   ReviewAwareEditIntent,
   ReviewAwareEditPlan
 } from './reviewAwareEdits';
+import { getReviewHistoryAnchorStates } from './reviewHistory';
 import { ApplyPatchResult, selectSuggestedPatchReplacement } from './suggestedPatches';
 import { AnchorConfidence, ReviewDocument, ReviewStatus, ReviewThread } from './types';
 
@@ -113,7 +115,14 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
     const render = async (restoreState?: PreviewRestoreState) => {
       try {
         const reviewDocument = await this.store.load(document.uri);
-        webviewPanel.webview.html = this.renderHtml(webviewPanel.webview, document, reviewDocument, restoreState);
+        const resolvedReviewDocument = await this.store.loadResolved(document.uri);
+        webviewPanel.webview.html = this.renderHtml(
+          webviewPanel.webview,
+          document,
+          reviewDocument,
+          resolvedReviewDocument,
+          restoreState
+        );
       } catch (error) {
         webviewPanel.webview.html = this.renderErrorHtml(document, formatError(error));
       }
@@ -189,6 +198,31 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
 
           vscode.window.showInformationMessage(`Cleaned ${threadIds.length} stale review anchor(s).`);
           await render();
+        }
+
+        if (message?.type === 'restoreThread') {
+          const threadId = String(message.threadId ?? '');
+
+          if (!threadId) {
+            vscode.window.showWarningMessage('No review thread was selected for restore.');
+            return;
+          }
+
+          const thread = await this.store.restoreThread(document.uri, threadId);
+          const sidecarUri = await this.store.getReviewFileUri(document.uri);
+          const logRemoved = await removeClosedReviewLogMarkers(document, [threadId]);
+          const markerInserted = await insertInlineAnchorMarker(document, thread, sidecarUri);
+
+          if (!logRemoved) {
+            vscode.window.showWarningMessage('Review thread was restored, but the closed audit log could not be removed.');
+          }
+
+          if (!markerInserted) {
+            vscode.window.showWarningMessage('Review thread was restored, but the Markdown anchor marker could not be inserted.');
+          }
+
+          vscode.window.showInformationMessage('Restored review thread to open feedback.');
+          await render({ focusThreadId: threadId });
         }
 
         if (message?.type === 'anchorLocated') {
@@ -485,6 +519,7 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
     webview: vscode.Webview,
     document: vscode.TextDocument,
     reviewDocument: ReviewDocument,
+    resolvedReviewDocument: ReviewDocument,
     restoreState?: PreviewRestoreState
   ): string {
     const nonce = randomUUID();
@@ -493,11 +528,17 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
     const renderedMarkdown = this.markdown.render(previewMarkdown);
     const storageWarning = this.renderStorageWarning(documentText, reviewDocument);
     const markerLineHints = this.getMarkerLineHints(reviewDocument);
+    const historyAnchorStates = getReviewHistoryAnchorStates(
+      previewMarkdown,
+      resolvedReviewDocument.threads
+    );
     const mermaidScriptUri = webview.asWebviewUri(
       vscode.Uri.joinPath(this.context.extensionUri, 'out', 'vendor', 'mermaid.min.js')
     );
     const state = JSON.stringify({
       threads: reviewDocument.threads,
+      resolvedThreads: resolvedReviewDocument.threads,
+      historyAnchorStates,
       markerLineHints,
       documentVersion: document.version,
       sourceLineCount: countMarkdownLines(previewMarkdown),
@@ -604,6 +645,22 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
       background: var(--vscode-editor-background);
       cursor: pointer;
     }
+    .history-heading {
+      margin-top: 24px;
+      padding-top: 16px;
+      border-top: 1px solid var(--border);
+    }
+    .thread.is-closed {
+      cursor: default;
+      opacity: 0.9;
+    }
+    .thread.is-closed.history-linked {
+      cursor: pointer;
+    }
+    .thread.is-closed.history-outdated {
+      border-style: dashed;
+      border-color: var(--vscode-inputValidation-warningBorder, #cca700);
+    }
     .thread.is-active {
       border-color: #8ad83f;
       box-shadow: inset 3px 0 0 #8ad83f;
@@ -686,6 +743,16 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
       background: rgba(215, 161, 0, 0.18);
     }
     .anchor-state-chip.anchor-missing {
+      border-color: var(--vscode-inputValidation-warningBorder, #cca700);
+      color: var(--vscode-editorWarning-foreground, #ffe9a3);
+      background: var(--vscode-inputValidation-warningBackground, rgba(204, 167, 0, 0.16));
+    }
+    .anchor-state-chip.history-linked {
+      border-color: rgba(138, 216, 63, 0.62);
+      color: #dfffd0;
+      background: rgba(138, 216, 63, 0.16);
+    }
+    .anchor-state-chip.history-outdated {
       border-color: var(--vscode-inputValidation-warningBorder, #cca700);
       color: var(--vscode-editorWarning-foreground, #ffe9a3);
       background: var(--vscode-inputValidation-warningBackground, rgba(204, 167, 0, 0.16));
@@ -1018,6 +1085,11 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
       outline: 2px solid rgba(138, 216, 63, 0.9);
       box-shadow: inset 0 -2px 0 #8ad83f;
     }
+    .history-anchor-target.is-active {
+      border-radius: 4px;
+      outline: 2px solid rgba(138, 216, 63, 0.9);
+      background: rgba(138, 216, 63, 0.16);
+    }
     .review-badge {
       display: inline-flex;
       align-items: center;
@@ -1081,6 +1153,8 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
       <h2>Review Threads</h2>
       ${storageWarning}
       <div id="threads"></div>
+      <h2 class="history-heading">Closed History</h2>
+      <div id="history"></div>
     </aside>
   </div>
   <div id="selection-popover" class="selection-popover">
@@ -1336,6 +1410,18 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
         return;
       }
 
+      const restoreButton = target.closest('[data-restore-thread]');
+
+      if (restoreButton) {
+        event.preventDefault();
+        event.stopPropagation();
+        vscode.postMessage({
+          type: 'restoreThread',
+          threadId: restoreButton.getAttribute('data-thread-id')
+        });
+        return;
+      }
+
       const overlayAction = target.closest('[data-overlay-status]');
 
       if (overlayAction) {
@@ -1396,7 +1482,12 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
     });
 
     const openThreads = state.threads.filter((thread) => thread.status === 'open');
+    const closedThreads = (state.resolvedThreads || [])
+      .filter((thread) => thread.status !== 'open')
+      .sort((left, right) => timestamp(right.updatedAt) - timestamp(left.updatedAt));
+    const historyAnchorStates = state.historyAnchorStates || {};
     const threadsContainer = document.getElementById('threads');
+    const historyContainer = document.getElementById('history');
 
     if (openThreads.length === 0) {
       threadsContainer.innerHTML = '<p class="empty">No open feedback yet.</p>';
@@ -1442,6 +1533,7 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
       }
     }
 
+    renderClosedHistory(closedThreads);
     decorateReviewAnchors(openThreads);
     decorateMermaidReviewBadges(openThreads);
     attachRelatedThreadIds(openThreads);
@@ -1449,6 +1541,46 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
     decorateEditableMarkdownBlocks();
     restorePreviewState();
     renderMermaidDiagrams();
+
+    function renderClosedHistory(threads) {
+      if (threads.length === 0) {
+        historyContainer.innerHTML = '<p class="empty">No closed review history yet.</p>';
+        return;
+      }
+
+      historyContainer.innerHTML = '';
+
+      for (const thread of threads) {
+        const historyState = historyAnchorStates[thread.id] === 'linked' ? 'linked' : 'outdated';
+        const element = document.createElement('section');
+        element.className = 'thread is-closed history-' + historyState + ' ' + sourceClass(thread);
+        element.dataset.threadId = thread.id;
+        element.title = historyState === 'linked'
+          ? 'Closed thread. Click to jump to the matching content.'
+          : 'Closed thread. The original anchor text no longer appears in this document.';
+        element.innerHTML = [
+          '<header><span class="thread-meta">' + renderSourceChip(thread) + renderMetaChip('Status', thread.status) + renderMetaChip('Type', thread.type) + renderHistoryAnchorChip(historyState) + '</span>' + renderMetaChip('Updated', formatDate(thread.updatedAt)) + '</header>',
+          '<blockquote>' + escapeHtml(thread.anchor.text || 'Document') + '</blockquote>',
+          '<p>' + escapeHtml(thread.comment) + '</p>',
+          renderReplies(thread),
+          '<div class="thread-actions">',
+          '<button class="secondary" title="Restore this closed review thread to open feedback." data-thread-id="' + escapeHtml(thread.id) + '" data-restore-thread>Restore</button>',
+          '</div>'
+        ].join('');
+
+        element.addEventListener('click', (event) => {
+          if (event.target instanceof HTMLElement && event.target.closest('button, textarea, form, .reply-list')) {
+            return;
+          }
+
+          if (historyState === 'linked') {
+            focusHistoryAnchor(thread);
+          }
+        });
+
+        historyContainer.appendChild(element);
+      }
+    }
 
     function escapeHtml(value) {
       return String(value)
@@ -2136,6 +2268,14 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
       return '<span class="meta-chip">' + escapeHtml(label) + ': ' + escapeHtml(formatMetaValue(value)) + '</span>';
     }
 
+    function renderHistoryAnchorChip(state) {
+      return '<span class="anchor-state-chip history-' + escapeHtml(state) + '">' + escapeHtml(historyAnchorLabel(state)) + '</span>';
+    }
+
+    function historyAnchorLabel(state) {
+      return state === 'linked' ? 'Linked' : 'Outdated';
+    }
+
     function formatMetaValue(value) {
       return String(value || '')
         .replace(/[-_]+/g, ' ')
@@ -2273,6 +2413,11 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
       return date.toLocaleString();
     }
 
+    function timestamp(value) {
+      const date = new Date(value);
+      return Number.isNaN(date.getTime()) ? 0 : date.getTime();
+    }
+
     function hideCommentOverlay() {
       commentOverlay.style.display = 'none';
       commentOverlay.innerHTML = '';
@@ -2354,6 +2499,37 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
 
       const threadCard = document.querySelector('.thread[data-thread-id="' + cssEscape(threadId) + '"]');
       threadCard?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+
+    function focusHistoryAnchor(thread) {
+      document.querySelectorAll('.is-active').forEach((element) => element.classList.remove('is-active'));
+      document.querySelectorAll('[data-thread-id="' + cssEscape(thread.id) + '"]').forEach((element) => {
+        element.classList.add('is-active');
+      });
+
+      const anchor = findHistoryAnchorElement(thread);
+
+      if (!anchor) {
+        return;
+      }
+
+      anchor.classList.add('history-anchor-target', 'is-active');
+      anchor.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'nearest' });
+    }
+
+    function findHistoryAnchorElement(thread) {
+      const anchorText = normalizeInline(thread.anchor?.text || '');
+
+      if (!anchorText) {
+        return undefined;
+      }
+
+      const candidates = Array.from(markdownBody.querySelectorAll('p, li, h1, h2, h3, h4, h5, h6, td, th, blockquote, [data-source-line]'));
+
+      return candidates.find((element) => {
+        return !shouldSkipHighlightParent(element)
+          && normalizeInline(element.textContent || '').includes(anchorText);
+      });
     }
 
     function shouldSkipHighlightParent(element) {

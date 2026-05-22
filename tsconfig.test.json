@@ -11,6 +11,7 @@
     "src/htmlToMarkdown.ts",
     "src/inlineMarkerPayloads.ts",
     "src/reviewAwareEdits.ts",
+    "src/reviewHistory.ts",
     "src/suggestedPatches.ts",
     "src/types.ts",
     "test/**/*.ts"

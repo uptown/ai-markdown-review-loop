@@ -5,6 +5,7 @@ import {
   findStaleInlineAnchorMarkers,
   readInlineAnchorMarkers,
   removeInlineAnchorMarkerPayloads,
+  removeInlineReviewLogMarkers,
   stripInlineAnchorMarkers
 } from '../src/inlineMarkerPayloads';
 import type { ReviewThread } from '../src/types';
@@ -91,6 +92,18 @@ describe('inline marker payloads', () => {
     ].join('\n');
 
     assert.equal(stripInlineAnchorMarkers(markdown), 'Body\n');
+  });
+
+  it('removes restored thread review logs without disturbing other history', () => {
+    const markdown = [
+      'Body',
+      '<!-- ai-review-log:{"id":"rv_a","status":"resolved"} --> <!-- ai-review-log:{"id":"rv_b","status":"accepted"} -->'
+    ].join('\n');
+
+    assert.equal(
+      removeInlineReviewLogMarkers(markdown, ['rv_a']),
+      'Body\n <!-- ai-review-log:{"id":"rv_b","status":"accepted"} -->'
+    );
   });
 });
 
