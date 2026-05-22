@@ -6,7 +6,8 @@ The first MVP focuses on a local workflow:
 
 - Open a rendered Markdown review preview.
 - Render Mermaid diagrams from fenced `mermaid` code blocks.
-- Select rendered text and attach feedback.
+- Open the review preview from a Markdown editor title shortcut.
+- Drag-select rendered text and attach feedback from an inline comment popover.
 - Attach feedback directly to a Mermaid diagram source block.
 - Store review threads in a workspace-local sidecar file.
 - Export unresolved feedback as Markdown for an AI coding agent.
@@ -25,13 +26,26 @@ To run inside VS Code:
 1. Open this folder in VS Code.
 2. Press `F5` to launch an Extension Development Host.
 3. Open a `.md` file.
-4. Run `AI Markdown Review: Open Review Preview`.
+4. Click the review shortcut in the Markdown editor title, or run `AI Markdown Review: Open Review Preview`.
+
+Installed usage:
+
+1. Open a Markdown file.
+2. Click the `AI Markdown Review` editor title shortcut, right-click the editor and choose `AI Markdown Review: Open Review Preview`, or press `Cmd+Alt+R`.
+3. Drag-select rendered text in the review preview.
+4. Click the floating `Comment` button and save feedback inline.
 
 ## Commands
 
 - `AI Markdown Review: Open Review Preview`
 - `AI Markdown Review: Review Document`
 - `AI Markdown Review: Export Feedback for Agent`
+
+## Shortcuts
+
+- Editor title shortcut on Markdown files: open review preview.
+- Editor context menu on Markdown files: open review preview or export feedback.
+- Keyboard shortcut: `Cmd+Alt+R` on macOS, `Ctrl+Alt+R` elsewhere.
 
 ## Mermaid
 

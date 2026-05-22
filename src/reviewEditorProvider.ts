@@ -70,7 +70,11 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider {
 
     webviewPanel.webview.onDidReceiveMessage(async message => {
       if (message?.type === 'addComment') {
-        await this.addComment(document, String(message.anchorText ?? ''));
+        await this.addComment(
+          document,
+          String(message.anchorText ?? ''),
+          typeof message.comment === 'string' ? message.comment : undefined
+        );
         await render();
       }
 
@@ -111,7 +115,11 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider {
 </figure>`;
   }
 
-  private async addComment(document: vscode.TextDocument, selectedText: string): Promise<void> {
+  private async addComment(
+    document: vscode.TextDocument,
+    selectedText: string,
+    providedComment?: string
+  ): Promise<void> {
     const normalizedSelection = selectedText.trim();
 
     if (!normalizedSelection) {
@@ -119,7 +127,7 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider {
       return;
     }
 
-    const comment = await vscode.window.showInputBox({
+    const comment = providedComment?.trim() || await vscode.window.showInputBox({
       title: 'Add Markdown review feedback',
       prompt: 'What should the agent or author do with this text?',
       placeHolder: 'Example: clarify this acceptance criterion'
@@ -330,6 +338,42 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider {
     .mermaid-source pre {
       margin: 8px 0 0;
     }
+    .selection-popover,
+    .comment-composer {
+      position: fixed;
+      z-index: 20;
+      display: none;
+      max-width: min(360px, calc(100vw - 24px));
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.24);
+      background: var(--vscode-editorWidget-background);
+    }
+    .selection-popover {
+      padding: 6px;
+    }
+    .comment-composer {
+      width: 320px;
+      padding: 10px;
+    }
+    .comment-composer textarea {
+      box-sizing: border-box;
+      width: 100%;
+      min-height: 86px;
+      resize: vertical;
+      border: 1px solid var(--vscode-input-border, var(--border));
+      border-radius: 4px;
+      padding: 8px;
+      color: var(--vscode-input-foreground);
+      background: var(--vscode-input-background);
+      font: inherit;
+    }
+    .comment-composer-actions {
+      display: flex;
+      justify-content: flex-end;
+      gap: 8px;
+      margin-top: 8px;
+    }
     @media (max-width: 900px) {
       .layout {
         grid-template-columns: 1fr;
@@ -358,16 +402,73 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider {
       <div id="threads"></div>
     </aside>
   </div>
+  <div id="selection-popover" class="selection-popover">
+    <button id="selection-comment" class="compact">Comment</button>
+  </div>
+  <form id="comment-composer" class="comment-composer">
+    <textarea id="comment-body" placeholder="Add feedback for this selection"></textarea>
+    <div class="comment-composer-actions">
+      <button type="button" id="comment-cancel" class="secondary compact">Cancel</button>
+      <button type="submit" class="compact">Save</button>
+    </div>
+  </form>
   <script nonce="${nonce}" src="${mermaidScriptUri}"></script>
   <script nonce="${nonce}">
     const vscode = acquireVsCodeApi();
     const state = ${state};
+    const markdownBody = document.getElementById('markdown-body');
+    const selectionPopover = document.getElementById('selection-popover');
+    const selectionCommentButton = document.getElementById('selection-comment');
+    const commentComposer = document.getElementById('comment-composer');
+    const commentBody = document.getElementById('comment-body');
+    const commentCancel = document.getElementById('comment-cancel');
+    let activeSelectionText = '';
+    let activeSelectionRect = null;
 
     renderMermaidDiagrams();
 
     document.getElementById('add-comment').addEventListener('click', () => {
       const selection = String(window.getSelection() || '').trim();
       vscode.postMessage({ type: 'addComment', anchorText: selection });
+    });
+
+    document.addEventListener('selectionchange', () => {
+      window.setTimeout(updateSelectionPopover, 0);
+    });
+
+    markdownBody.addEventListener('mouseup', () => {
+      window.setTimeout(updateSelectionPopover, 0);
+    });
+
+    markdownBody.addEventListener('keyup', () => {
+      window.setTimeout(updateSelectionPopover, 0);
+    });
+
+    selectionCommentButton.addEventListener('click', () => {
+      openComposer();
+    });
+
+    commentCancel.addEventListener('click', () => {
+      hideComposer();
+      updateSelectionPopover();
+    });
+
+    commentComposer.addEventListener('submit', (event) => {
+      event.preventDefault();
+      const body = commentBody.value.trim();
+
+      if (!body || !activeSelectionText) {
+        return;
+      }
+
+      vscode.postMessage({
+        type: 'addComment',
+        anchorText: activeSelectionText,
+        comment: body
+      });
+      hideSelectionPopover();
+      hideComposer();
+      window.getSelection()?.removeAllRanges();
     });
 
     document.addEventListener('click', (event) => {
@@ -386,7 +487,15 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider {
       const source = getMermaidSource(figure);
 
       if (target.matches('[data-mermaid-feedback]')) {
-        vscode.postMessage({ type: 'addComment', anchorText: source });
+        activeSelectionText = source;
+        const rect = target.getBoundingClientRect();
+        activeSelectionRect = {
+          left: rect.left,
+          right: rect.right,
+          top: rect.top,
+          bottom: rect.bottom
+        };
+        openComposer();
       }
 
       if (target.matches('[data-mermaid-copy]')) {
@@ -439,6 +548,85 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider {
     function getMermaidSource(figure) {
       const sourceElement = figure.querySelector('.mermaid-source code');
       return String(sourceElement?.textContent || '').trim();
+    }
+
+    function updateSelectionPopover() {
+      if (commentComposer.style.display === 'block') {
+        return;
+      }
+
+      const selection = window.getSelection();
+
+      if (!selection || selection.rangeCount === 0 || selection.isCollapsed) {
+        hideSelectionPopover();
+        return;
+      }
+
+      const selectedText = String(selection).trim();
+
+      if (!selectedText) {
+        hideSelectionPopover();
+        return;
+      }
+
+      const range = selection.getRangeAt(0);
+      const container = range.commonAncestorContainer.nodeType === Node.ELEMENT_NODE
+        ? range.commonAncestorContainer
+        : range.commonAncestorContainer.parentElement;
+
+      if (!container || !markdownBody.contains(container)) {
+        hideSelectionPopover();
+        return;
+      }
+
+      const rect = range.getBoundingClientRect();
+
+      if (!rect || rect.width === 0 && rect.height === 0) {
+        hideSelectionPopover();
+        return;
+      }
+
+      activeSelectionText = selectedText;
+      activeSelectionRect = {
+        left: rect.left,
+        right: rect.right,
+        top: rect.top,
+        bottom: rect.bottom
+      };
+      positionFloatingElement(selectionPopover, activeSelectionRect, 120);
+      selectionPopover.style.display = 'block';
+    }
+
+    function openComposer() {
+      if (!activeSelectionText || !activeSelectionRect) {
+        return;
+      }
+
+      hideSelectionPopover();
+      commentBody.value = '';
+      positionFloatingElement(commentComposer, activeSelectionRect, 340);
+      commentComposer.style.display = 'block';
+      commentBody.focus();
+    }
+
+    function hideSelectionPopover() {
+      selectionPopover.style.display = 'none';
+    }
+
+    function hideComposer() {
+      commentComposer.style.display = 'none';
+      commentBody.value = '';
+    }
+
+    function positionFloatingElement(element, rect, preferredWidth) {
+      const margin = 12;
+      const availableWidth = window.innerWidth - margin * 2;
+      const width = Math.min(preferredWidth, availableWidth);
+      const left = Math.max(margin, Math.min(rect.right + 8, window.innerWidth - width - margin));
+      const top = Math.max(margin, Math.min(rect.top - 4, window.innerHeight - 140));
+
+      element.style.left = left + 'px';
+      element.style.top = top + 'px';
     }
 
     async function renderMermaidDiagrams() {

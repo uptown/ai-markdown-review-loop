@@ -34,7 +34,8 @@
     "commands": [
       {
         "command": "aiMarkdownReviewLoop.openReviewPreview",
-        "title": "AI Markdown Review: Open Review Preview"
+        "title": "AI Markdown Review: Open Review Preview",
+        "icon": "$(comment-discussion)"
       },
       {
         "command": "aiMarkdownReviewLoop.reviewDocument",
@@ -43,6 +44,40 @@
       {
         "command": "aiMarkdownReviewLoop.exportFeedback",
         "title": "AI Markdown Review: Export Feedback for Agent"
+      }
+    ],
+    "menus": {
+      "editor/title": [
+        {
+          "command": "aiMarkdownReviewLoop.openReviewPreview",
+          "when": "resourceLangId == markdown",
+          "group": "navigation@1"
+        },
+        {
+          "command": "aiMarkdownReviewLoop.reviewDocument",
+          "when": "resourceLangId == markdown",
+          "group": "navigation@2"
+        }
+      ],
+      "editor/context": [
+        {
+          "command": "aiMarkdownReviewLoop.openReviewPreview",
+          "when": "resourceLangId == markdown",
+          "group": "navigation@1"
+        },
+        {
+          "command": "aiMarkdownReviewLoop.exportFeedback",
+          "when": "resourceLangId == markdown",
+          "group": "navigation@2"
+        }
+      ]
+    },
+    "keybindings": [
+      {
+        "command": "aiMarkdownReviewLoop.openReviewPreview",
+        "key": "ctrl+alt+r",
+        "mac": "cmd+alt+r",
+        "when": "editorLangId == markdown"
       }
     ],
     "customEditors": [
