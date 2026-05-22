@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import { renderFeedbackExport } from './exportFeedback';
-import { insertInlineAnchorMarker } from './inlineMarkers';
+import { findMissingInlineAnchorMarkers, insertInlineAnchorMarker } from './inlineMarkers';
 import { createLocalReviewThreads } from './localReview';
 import { ReviewEditorProvider, reviewEditorViewType } from './reviewEditorProvider';
 import { ReviewStore } from './reviewStore';
@@ -85,7 +85,18 @@ export function activate(context: vscode.ExtensionContext): void {
       }
 
       const reviewDocument = await store.load(document.uri);
-      const exportText = renderFeedbackExport(reviewDocument);
+      const missingMarkers = findMissingInlineAnchorMarkers(
+        document.getText(),
+        reviewDocument.threads.map(thread => thread.id)
+      );
+
+      if (missingMarkers.length > 0) {
+        vscode.window.showWarningMessage(
+          `Review sidecar data is missing or incomplete for ${missingMarkers.length} inline anchor(s). Restore the sidecar JSON before treating this export as complete.`
+        );
+      }
+
+      const exportText = appendStorageWarning(renderFeedbackExport(reviewDocument), missingMarkers);
       const exportDocument = await vscode.workspace.openTextDocument({
         content: exportText,
         language: 'markdown'
@@ -131,4 +142,23 @@ async function resolveMarkdownDocument(
 
 function isMarkdown(document: vscode.TextDocument): boolean {
   return document.languageId === 'markdown' || document.fileName.toLowerCase().endsWith('.md');
+}
+
+function appendStorageWarning(
+  exportText: string,
+  missingMarkers: Array<{ sidecar?: string }>
+): string {
+  if (missingMarkers.length === 0) {
+    return exportText;
+  }
+
+  const sidecar = missingMarkers.find(marker => marker.sidecar)?.sidecar ?? '.ai-markdown-review/documents/*.json';
+
+  return [
+    exportText,
+    '',
+    '## Review Storage Warning',
+    '',
+    `This Markdown file contains ${missingMarkers.length} ai-review-anchor marker(s) that do not have matching thread data in ${sidecar}. The original comment text is unavailable from inline anchors alone; restore the sidecar JSON before treating this export as complete.`
+  ].join('\n');
 }

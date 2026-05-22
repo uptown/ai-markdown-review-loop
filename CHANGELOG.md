@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Warns when Markdown inline review anchors refer to sidecar comment JSON that is missing or incomplete.
+
 ## 0.0.8
 
 - Removes the top preview Add Feedback button and Markdown source shortcut provider.

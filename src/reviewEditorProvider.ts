@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import MarkdownIt from 'markdown-it';
 import { randomUUID } from 'crypto';
 import { createAnchor } from './anchors';
-import { insertInlineAnchorMarker, stripInlineAnchorMarkers } from './inlineMarkers';
+import { findMissingInlineAnchorMarkers, insertInlineAnchorMarker, stripInlineAnchorMarkers } from './inlineMarkers';
 import { ReviewStore } from './reviewStore';
 import { ReviewDocument, ReviewStatus, ReviewThread } from './types';
 
@@ -226,7 +226,9 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider {
     reviewDocument: ReviewDocument
   ): string {
     const nonce = randomUUID();
-    const renderedMarkdown = this.markdown.render(stripInlineAnchorMarkers(document.getText()));
+    const documentText = document.getText();
+    const renderedMarkdown = this.markdown.render(stripInlineAnchorMarkers(documentText));
+    const storageWarning = this.renderStorageWarning(documentText, reviewDocument);
     const mermaidScriptUri = webview.asWebviewUri(
       vscode.Uri.joinPath(this.context.extensionUri, 'out', 'vendor', 'mermaid.min.js')
     );
@@ -285,6 +287,23 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider {
       background: var(--panel);
       padding: 16px;
       overflow: auto;
+    }
+    .storage-warning {
+      max-width: 900px;
+      margin: 0 0 16px;
+      border: 1px solid var(--vscode-inputValidation-warningBorder, #cca700);
+      border-radius: 6px;
+      padding: 12px;
+      color: var(--vscode-editorWarning-foreground, var(--text));
+      background: var(--vscode-inputValidation-warningBackground, rgba(204, 167, 0, 0.16));
+    }
+    .storage-warning strong {
+      display: block;
+      margin-bottom: 6px;
+    }
+    .storage-warning p {
+      margin: 0;
+      line-height: 1.45;
     }
     button {
       border: 0;
@@ -535,10 +554,12 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider {
 <body>
   <div class="layout">
     <main>
+      ${storageWarning}
       <article id="markdown-body">${renderedMarkdown}</article>
     </main>
     <aside>
       <h2>Review Threads</h2>
+      ${storageWarning}
       <div id="threads"></div>
     </aside>
   </div>
@@ -1285,6 +1306,25 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider {
   </script>
 </body>
 </html>`;
+  }
+
+  private renderStorageWarning(documentText: string, reviewDocument: ReviewDocument): string {
+    const missingMarkers = findMissingInlineAnchorMarkers(
+      documentText,
+      reviewDocument.threads.map(thread => thread.id)
+    );
+
+    if (missingMarkers.length === 0) {
+      return '';
+    }
+
+    const sidecar = missingMarkers.find(marker => marker.sidecar)?.sidecar ?? '.ai-markdown-review/documents/*.json';
+    const markerLabel = missingMarkers.length === 1 ? 'anchor' : 'anchors';
+
+    return `<section class="storage-warning" role="status">
+    <strong>Review sidecar data is missing or incomplete.</strong>
+    <p>This Markdown file still contains ${missingMarkers.length} ai-review-anchor ${markerLabel}, but the matching review thread data was not found in <code>${escapeHtml(sidecar)}</code>. Comment text cannot be rebuilt from inline anchors; restore the sidecar JSON from backup/source control, or remove the stale anchors if the comments are no longer needed.</p>
+  </section>`;
   }
 
   private renderErrorHtml(document: vscode.TextDocument, message: string): string {

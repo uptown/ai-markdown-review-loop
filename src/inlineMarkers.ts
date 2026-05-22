@@ -2,9 +2,46 @@ import * as vscode from 'vscode';
 import { ReviewThread } from './types';
 
 const inlineAnchorPattern = /^<!-- ai-review-anchor:.*?-->\r?\n?/gm;
+const inlineAnchorCapturePattern = /^<!-- ai-review-anchor:(.*?)-->/gm;
+
+export interface InlineAnchorMarker {
+  id: string;
+  status?: string;
+  hash?: string;
+  sidecar?: string;
+  lineStart?: number;
+  lineEnd?: number;
+}
 
 export function stripInlineAnchorMarkers(markdown: string): string {
   return markdown.replace(inlineAnchorPattern, '');
+}
+
+export function readInlineAnchorMarkers(markdown: string): InlineAnchorMarker[] {
+  const markers: InlineAnchorMarker[] = [];
+  let match: RegExpExecArray | null;
+
+  while ((match = inlineAnchorCapturePattern.exec(markdown)) !== null) {
+    try {
+      const parsed = JSON.parse(match[1].trim());
+
+      if (isInlineAnchorMarker(parsed)) {
+        markers.push(parsed);
+      }
+    } catch {
+      // Ignore malformed anchors here; invalid sidecar JSON is handled separately.
+    }
+  }
+
+  return markers;
+}
+
+export function findMissingInlineAnchorMarkers(
+  markdown: string,
+  knownThreadIds: Iterable<string>
+): InlineAnchorMarker[] {
+  const knownIds = new Set(knownThreadIds);
+  return readInlineAnchorMarkers(markdown).filter(marker => !knownIds.has(marker.id));
 }
 
 export async function insertInlineAnchorMarker(
@@ -100,4 +137,28 @@ function findClosingFenceLine(document: vscode.TextDocument, startLine: number):
   }
 
   return undefined;
+}
+
+function isInlineAnchorMarker(value: unknown): value is InlineAnchorMarker {
+  if (!isRecord(value) || typeof value.id !== 'string') {
+    return false;
+  }
+
+  return optionalString(value.status)
+    && optionalString(value.hash)
+    && optionalString(value.sidecar)
+    && optionalNumber(value.lineStart)
+    && optionalNumber(value.lineEnd);
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}
+
+function optionalString(value: unknown): boolean {
+  return value === undefined || typeof value === 'string';
+}
+
+function optionalNumber(value: unknown): boolean {
+  return value === undefined || typeof value === 'number';
 }
