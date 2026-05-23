@@ -14,14 +14,14 @@ The first MVP focuses on a local workflow:
 - Empty comment composers close on outside click or Escape, while typed drafts stay open.
 - Reply drafts inside the comment overlay also stay open until they are empty.
 - See saved comments as highlights and small badges in the rendered document.
-- Click a highlighted region or badge to inspect, accept, resolve, or reject saved comments.
+- Click a highlighted region or badge to inspect saved comments, draft discussion replies, resolve handled issues, or apply reliable suggested patches.
 - Edit or rewrite a rendered Markdown block through a constrained block editor that keeps review anchors in sync.
 - Edit rendered Markdown tables through a grid editor with row, column, and alignment controls.
 - Edit Mermaid diagram source from the rendered diagram card through the same review-aware edit pipeline.
 - Reply under review comments with clear `You`/`AI` attribution for future AI handoff.
 - Distinguish user comments from AI-generated review comments with separate labels, badges, and highlight colors.
 - Apply suggested replacement patches from review threads when the patch still matches a reliable anchor.
-- Use `Accept` for agreement, `Resolve` for handled issues, and `Reject` for declined recommendations. These close the review thread but do not automatically patch the Markdown.
+- Use `Agree`, `Revise`, and `Disagree` as reply shortcuts that keep the thread open for discussion. Use `Resolve` only when the issue is handled or no longer applies.
 - Click a thread in `Review Threads` to jump back to its highlighted content.
 - Review accepted, resolved, and rejected history from `Review Threads`, including who closed the thread and whether the old anchor is still linked or now outdated.
 - Restore a closed review thread when a decision needs to be reopened.
@@ -33,6 +33,7 @@ The first MVP focuses on a local workflow:
 - Ship a repo-owned AI review policy and thread-creation schema for future AI reviewer integrations.
 - Document the human-AI collaboration loop and first-pass context bootstrap path.
 - Open a generic AI bootstrap prompt from the review preview so any AI agent can learn the review loop and preserve comments while editing Markdown.
+- Open an AI feedback loop prompt when an agent should continue active Review Threads, apply explicit suggested patches, or draft replies without losing review metadata.
 - Run a local heuristic document review to seed obvious feedback items.
 
 ## Development
@@ -59,6 +60,7 @@ Installed usage:
 4. Save feedback inline and the selected text will be highlighted with a comment badge.
 5. Reply under a review thread when you need to add discussion context before exporting feedback.
 6. Use `Open Bootstrap Prompt` when an AI agent needs the repo's review-loop rules before reviewing or editing Markdown.
+7. Use `Open Feedback Loop Prompt` when an AI agent should continue existing threads, replies, and suggested edits.
 
 ## Commands
 
@@ -66,6 +68,7 @@ Installed usage:
 - `AI Markdown Review: Review Document`
 - `AI Markdown Review: Export Feedback for Agent`
 - `AI Markdown Review: Open AI Context Bootstrap Prompt`
+- `AI Markdown Review: Open AI Feedback Loop Prompt`
 
 ## Shortcuts
 
@@ -86,9 +89,9 @@ flowchart TD
   B --> C{Next action}
   C -->|Apply suggested patch| D[Patch document]
   D --> B
-  C -->|Accept| E[Close as agreed]
+  C -->|Agree reply| E[Keep discussing]
   C -->|Resolve| F[Close as handled]
-  C -->|Reject| G[Close as declined]
+  C -->|Disagree reply| G[Keep discussing]
   C -->|Reply| B
 ```
 ````
@@ -142,6 +145,8 @@ Accepted, resolved, or rejected review threads move from `openThreads` to `close
 
 The preview keeps closed feedback visible under `Review Threads` as history. Closed cards use different decision colors for accepted, resolved, and rejected feedback, show who closed the thread when that metadata is available, and show whether the original anchor text is still `Linked` in the current Markdown or `Outdated` because the link target no longer appears. `Restore` reopens a closed thread, moves it back to `openThreads`, removes the closed audit pointer, and writes a fresh open anchor index.
 
+Open thread actions are intentionally discussion-first. The reply shortcuts adapt to the thread type: questions offer answer/clarify/not-applicable drafts, risks offer acknowledge/mitigate/challenge drafts, and fixes or suggestions offer agree/revise/disagree drafts. These shortcuts prefill a reply instead of closing the thread. `Resolve` closes a thread after the issue is handled or no longer applies. For threads with a reliable suggested replacement, `Apply Suggested Patch` is the action that changes Markdown, refreshes anchors, records an edit outcome reply, and closes the thread as `accepted`.
+
 ## Agent Handoff
 
 Feedback exports put open review threads first, followed by source labels, discussion history, anchor confidence, editing guidelines, commenting guidelines, and a future-facing thread-creation contract for AI agents. Agents are instructed to preserve review metadata, make localized edits, report each handled `rv_*` ID with an outcome, avoid closing review threads unless the user explicitly asks for an `accepted`, `resolved`, or `rejected` decision, and follow the repo policy when proposing new AI-authored review threads.
@@ -160,6 +165,13 @@ For first-time setup in a repo, the recommended context injection path is:
 3. Let the AI read the repo docs, use AI Markdown Review Loop when available, and preserve colocated `.ai-review.json` sidecars plus inline review metadata during Markdown edits.
 4. Let the AI draft or refresh `docs/AI-CONTEXT-BRIEF.md` only when a durable context brief is useful; the bootstrap prompt is also the contract for immediate review and edit work.
 5. Use replies on threads to refine or correct AI assumptions instead of starting over with a new prompt each time.
+
+For active review iteration after bootstrap:
+
+1. Use `AI Markdown Review: Open AI Feedback Loop Prompt` or the preview's `Open Feedback Loop Prompt` action.
+2. Copy the opened document into the AI agent that should continue the loop.
+3. Let the AI inspect open Review Threads, answer or challenge existing replies, and apply suggested patches only when explicitly requested.
+4. Require the AI to report every touched `rv_*` thread as replied, applied patch, edited nearby, preserved, stale, blocked, resolved by human request, or needing a human decision.
 
 Suggested replacement patches are treated as document edits, not just review decisions. `Apply Suggested Patch` replaces the matching Markdown text, refreshes affected sidecar anchors and context snippets, records an edit outcome reply, and then closes the target thread as `accepted`; if the original text is missing, duplicated ambiguously, or attached to a low-confidence anchor, the extension leaves the thread open.
 

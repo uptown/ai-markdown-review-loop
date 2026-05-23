@@ -8,9 +8,9 @@ flowchart TD
   B --> C{Next action}
   C -->|Apply suggested patch| D[Patch document]
   D --> B
-  C -->|Accept| E[Close as agreed]
+  C -->|Agree reply| E[Keep discussing]
   C -->|Resolve| F[Close as handled]
-  C -->|Reject| G[Close as declined]
+  C -->|Disagree reply| G[Keep discussing]
   C -->|Reply| B
 ```
 

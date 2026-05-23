@@ -18,7 +18,7 @@
 - Shows reply authors with the same `You` and `AI` labels used by top-level review comments.
 - Debounces review anchor maintenance and only auto-saves high-confidence anchor relocations to the sidecar.
 - Labels review metadata chips as type, severity, and status instead of showing bare values.
-- Adds Accept actions to close agreed review feedback separately from resolve/reject.
+- Replaces open-thread Accept/Reject close buttons with type-aware reply shortcuts, leaving Resolve as the explicit handled-issue closure.
 - Shows suggested replacement patches with an `Apply Suggested Patch` action that updates Markdown only when the target is reliable.
 - Routes `Apply Suggested Patch` through a review-aware edit service that refreshes sidecar anchors/context and records edit outcome replies.
 - Adds a constrained rendered-block Markdown editor and rewrite path that use the same review-aware edit pipeline.
@@ -31,6 +31,7 @@
 - Keeps table-cell comment anchors attached to edited cells, including repeated text in different rows.
 - Adds repo-owned AI review policy, collaboration-loop docs, context bootstrap commands, and guarded rename migration for review sidecars.
 - Simplifies the preview AI context entry point to one bootstrap prompt action and makes that prompt a generic agent contract for review-loop usage and comment-preserving Markdown edits.
+- Adds an AI feedback loop prompt for continuing active review threads, drafting replies, and applying explicit suggested patches through the review-aware edit path.
 - Submits comment and reply textareas with Enter while keeping Shift+Enter for multi-line text.
 - Keeps the active comment overlay or review thread focused after saving a reply.
 - Shows accepted, resolved, and rejected review history with linked/outdated anchor state and a Restore action.
@@ -51,7 +52,7 @@
 ## 0.0.8
 
 - Removes the top preview Add Feedback button and Markdown source shortcut provider.
-- Adds a read-only comment overlay from highlighted regions and badges, including Resolve and Reject actions.
+- Adds a read-only comment overlay from highlighted regions and badges, including Resolve actions and discussion shortcuts.
 
 ## 0.0.7
 

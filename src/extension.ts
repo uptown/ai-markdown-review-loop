@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import { openContextBootstrapPrompt } from './contextBootstrap';
 import { renderFeedbackExport } from './exportFeedback';
+import { openFeedbackLoopPrompt } from './feedbackLoopPrompt';
 import { findStaleInlineAnchorMarkers, insertInlineAnchorMarker } from './inlineMarkers';
 import { rebaseInlineReviewMetadataSidecars } from './inlineMarkerPayloads';
 import { createLocalReviewThreads } from './localReview';
@@ -112,6 +113,13 @@ export function activate(context: vscode.ExtensionContext): void {
 
       if (!opened) {
         vscode.window.showWarningMessage('Open a workspace Markdown file before preparing an AI context bootstrap prompt.');
+      }
+    }),
+    vscode.commands.registerCommand('aiMarkdownReviewLoop.openFeedbackLoopPrompt', async (targetUri?: vscode.Uri) => {
+      const opened = await openFeedbackLoopPrompt(targetUri);
+
+      if (!opened) {
+        vscode.window.showWarningMessage('Open a workspace Markdown file before preparing an AI feedback loop prompt.');
       }
     })
   );

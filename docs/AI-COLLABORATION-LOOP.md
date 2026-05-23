@@ -57,6 +57,15 @@ would need an independent decision.
 AI may suggest what it thinks the right resolution is, but it should not close a
 thread on its own unless the user explicitly requests a closure action.
 
+Open-thread UI should keep discussion cheaper than closure. Reply shortcuts
+adapt to the thread type: questions get answer/clarify/not-applicable drafts,
+risks get acknowledge/mitigate/challenge drafts, and fixes or suggestions get
+agree/revise/disagree drafts. `Resolve` is the normal close action for handled
+or no-longer-applicable issues.
+`Apply Suggested Patch` is separate from reply shortcuts: it mutates Markdown
+through the review-aware edit path and closes the target patch thread as
+`accepted` only after the edit succeeds.
+
 ## Good Human Input
 
 The most valuable human replies are:

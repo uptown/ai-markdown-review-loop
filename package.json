@@ -30,7 +30,8 @@
     "onCommand:aiMarkdownReviewLoop.openReviewBeside",
     "onCommand:aiMarkdownReviewLoop.reviewDocument",
     "onCommand:aiMarkdownReviewLoop.exportFeedback",
-    "onCommand:aiMarkdownReviewLoop.openContextBootstrapPrompt"
+    "onCommand:aiMarkdownReviewLoop.openContextBootstrapPrompt",
+    "onCommand:aiMarkdownReviewLoop.openFeedbackLoopPrompt"
   ],
   "main": "./out/extension.js",
   "contributes": {
@@ -62,6 +63,10 @@
       {
         "command": "aiMarkdownReviewLoop.openContextBootstrapPrompt",
         "title": "AI Markdown Review: Open AI Context Bootstrap Prompt"
+      },
+      {
+        "command": "aiMarkdownReviewLoop.openFeedbackLoopPrompt",
+        "title": "AI Markdown Review: Open AI Feedback Loop Prompt"
       }
     ],
     "menus": {
@@ -100,6 +105,11 @@
           "command": "aiMarkdownReviewLoop.openContextBootstrapPrompt",
           "when": "resourceExtname == .md || resourceLangId == markdown || activeEditor == aiMarkdownReviewLoop.reviewEditor",
           "group": "navigation@3"
+        },
+        {
+          "command": "aiMarkdownReviewLoop.openFeedbackLoopPrompt",
+          "when": "resourceExtname == .md || resourceLangId == markdown || activeEditor == aiMarkdownReviewLoop.reviewEditor",
+          "group": "navigation@4"
         }
       ],
       "editor/context": [
@@ -127,6 +137,11 @@
           "command": "aiMarkdownReviewLoop.openContextBootstrapPrompt",
           "when": "resourceExtname == .md || resourceLangId == markdown",
           "group": "navigation@4"
+        },
+        {
+          "command": "aiMarkdownReviewLoop.openFeedbackLoopPrompt",
+          "when": "resourceExtname == .md || resourceLangId == markdown",
+          "group": "navigation@5"
         }
       ],
       "explorer/context": [
@@ -154,6 +169,11 @@
           "command": "aiMarkdownReviewLoop.openContextBootstrapPrompt",
           "when": "resourceExtname == .md",
           "group": "navigation@4"
+        },
+        {
+          "command": "aiMarkdownReviewLoop.openFeedbackLoopPrompt",
+          "when": "resourceExtname == .md",
+          "group": "navigation@5"
         }
       ]
     },

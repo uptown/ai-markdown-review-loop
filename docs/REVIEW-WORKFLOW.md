@@ -7,7 +7,7 @@ This extension is built around repeated document-review loops between human auth
 - As an author, I want to drag-select rendered Markdown and leave feedback so the comment stays attached to the document content.
 - As a reviewer, I want human and AI comments to be visually distinct so I can judge the source of each concern.
 - As an author, I want to reply before closing a thread so objections, clarification, and decisions are preserved for later AI handoff.
-- As an author, I want `Accept`, `Resolve`, and `Reject` to mean different things so I can close feedback without implying the document was automatically edited.
+- As an author, I want agreement, revision requests, and disagreement to be reply shortcuts so review discussion continues until I explicitly resolve a handled issue or apply a suggested patch.
 - As an AI-agent user, I want open feedback exported with thread IDs, source labels, discussion history, anchor confidence, and suggested patches so an agent can work from the review queue.
 - As an AI-review user, I want AI-written comments to follow a stable policy and schema so review quality does not drift with the model.
 - As a collaborator, I want comments to remain visible after nearby edits so feedback does not silently disappear when wording changes.
@@ -21,14 +21,15 @@ This extension is built around repeated document-review loops between human auth
 ## Action Vocabulary
 
 - `Reply`: add context, clarification, or objection without changing status.
+- `Agree`: draft a reply that records agreement without changing Markdown or closing the thread.
+- `Revise`: draft a reply asking for a sharper comment or safer suggested patch.
+- `Disagree`: draft a reply that records an objection without closing the thread.
 - `Manual edit`: change the Markdown directly from source or a rendered editor. This does not close a thread by itself.
 - `Apply Suggested Patch`: extension action for a suggested replacement patch. It mutates the Markdown and closes the thread as `accepted` only when the original text has one reliable target.
 - `Edit block`: constrained rendered-preview Markdown editing for a source-mapped block. It mutates Markdown and refreshes overlapping thread anchors without deciding review status.
 - `Edit Mermaid`: source editor for a Mermaid fenced code block. It replaces only that fenced block and refreshes overlapping thread anchors without deciding review status.
 - `Rewrite block`: manual rewrite path that uses the same review-aware edit pipeline reserved for future AI rewrite integration.
-- `Accept`: agree with the feedback or recommendation and close the thread as an accepted decision.
 - `Resolve`: close because the underlying issue has been handled, superseded, or no longer applies.
-- `Reject`: close because the recommendation is intentionally declined.
 - `Restore`: reopen a closed thread, move it back to active feedback, and attach it to the current document again.
 - `Needs re-anchor`: state shown when the original anchor cannot be located reliably; reply, edit manually, restore context, or clean stale anchors rather than assuming the feedback disappeared.
 - `Clean stale anchors`: remove broken metadata only; this is not a review decision.
@@ -60,13 +61,13 @@ Any future AI reviewer integration should use both:
 2. The human runs the bootstrap prompt once if the repo does not already have a saved AI context brief.
 3. The AI reads the repo context brief or the best available project docs first.
 4. The extension seeds obvious local review items.
-5. The author replies to one thread with extra context, rejects another recommendation, accepts one direction, and keeps a risky item open.
+5. The author replies to one thread with extra context, uses a disagreement shortcut on another recommendation, applies one explicit suggested patch, and keeps a risky item open.
 6. The agent export includes open feedback plus discussion history, editing guidelines, commenting guidelines, the collaboration loop, and context bootstrap rules.
 
 ### First-Time Context Bootstrap
 
 1. A user installs the plugin in a repo with no prior AI review history.
-2. The review preview exposes a single `Open Bootstrap Prompt` action.
+2. The review preview exposes `Open Bootstrap Prompt` for first-pass context and `Open Feedback Loop Prompt` for active thread iteration.
 3. The user opens a repo-aware bootstrap prompt. The prompt tells any AI agent what files to read, what missing context to ask for, how to use AI Markdown Review Loop when available, and how to preserve review metadata while editing Markdown.
 4. The AI starts from the current Markdown target, then reads shared repo docs such as `README.md`, `docs/AI-CONTEXT-BRIEF.md`, and the AI Markdown Review Loop policy docs when they are relevant.
 5. If the available context still leaves key questions unanswered, the AI asks for the missing context packet instead of guessing.
@@ -78,7 +79,7 @@ Any future AI reviewer integration should use both:
 1. AI opens a thread with a concrete issue and optional suggested patch.
 2. The human replies with constraints, objections, or approval.
 3. AI responds inside the same thread with a narrower diagnosis, a revised patch, or a clarification question.
-4. The human decides whether to close, reject, or keep the thread open.
+4. The human decides whether to apply a suggested patch, resolve the handled issue, or keep the thread open for discussion.
 
 ### AI Suggestion, Manual Fix
 
@@ -117,7 +118,7 @@ Any future AI reviewer integration should use both:
 1. AI recommends removing a section.
 2. The author replies that the section is contractual context and should remain.
 3. The thread stays open while the discussion continues.
-4. The final user decision is `Reject`, preserving that the recommendation was deliberately declined.
+4. The final user reply records the disagreement, then the user resolves the thread only if no further action is needed.
 
 ### Restore a Closed Decision
 

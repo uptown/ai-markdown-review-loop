@@ -37,9 +37,9 @@ This table is intentionally complex enough to exercise rendered table editing. R
 flowchart TD
   Draft[Draft Markdown] --> Review[AI or human review]
   Review --> Decision{Decision}
-  Decision -->|Accept| Accepted[Close as accepted]
+  Decision -->|Agree reply| Agreed[Keep discussing]
   Decision -->|Resolve| Resolved[Close as resolved]
-  Decision -->|Reject| Rejected[Close as rejected]
+  Decision -->|Disagree reply| Disagreed[Keep discussing]
   Decision -->|Reply| Discussion[Continue discussion]
   Discussion --> Review
 ```

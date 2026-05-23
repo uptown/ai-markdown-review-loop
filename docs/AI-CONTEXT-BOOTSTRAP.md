@@ -40,6 +40,11 @@ fence. It can mention `docs/AI-CONTEXT-BRIEF.md` as an optional durable context
 artifact, but the UI should not force the human into managing that file before
 review work can start.
 
+After the first bootstrap, active review iteration should use a separate
+`Open Feedback Loop Prompt`. That prompt is for continuing existing Review
+Threads, drafting replies, and applying explicit suggested patches while
+preserving review metadata.
+
 ## Context Discovery
 
 Before the first AI review pass, the bootstrap prompt should tell the AI to

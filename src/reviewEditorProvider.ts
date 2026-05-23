@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import MarkdownIt from 'markdown-it';
 import { randomUUID } from 'crypto';
 import { openContextBootstrapPrompt } from './contextBootstrap';
+import { openFeedbackLoopPrompt } from './feedbackLoopPrompt';
 import { AnchorMaintenanceController } from './anchorMaintenance';
 import { createAnchor } from './anchors';
 import { htmlBlockToMarkdown } from './htmlToMarkdown';
@@ -248,6 +249,17 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
 
           if (!opened) {
             vscode.window.showWarningMessage('Open a workspace Markdown file before preparing an AI context bootstrap prompt.');
+            return;
+          }
+
+          return;
+        }
+
+        if (message?.type === 'openFeedbackLoopPrompt') {
+          const opened = await openFeedbackLoopPrompt(document.uri);
+
+          if (!opened) {
+            vscode.window.showWarningMessage('Open a workspace Markdown file before preparing an AI feedback loop prompt.');
             return;
           }
 
@@ -2036,12 +2048,30 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
         return;
       }
 
+      const replyTemplateButton = target.closest('[data-reply-template]');
+
+      if (replyTemplateButton) {
+        event.preventDefault();
+        event.stopPropagation();
+        prefillReplyTemplate(replyTemplateButton);
+        return;
+      }
+
       const openContextBootstrapPromptButton = target.closest('[data-open-context-bootstrap-prompt]');
 
       if (openContextBootstrapPromptButton) {
         event.preventDefault();
         event.stopPropagation();
         vscode.postMessage({ type: 'openContextBootstrapPrompt' });
+        return;
+      }
+
+      const openFeedbackLoopPromptButton = target.closest('[data-open-feedback-loop-prompt]');
+
+      if (openFeedbackLoopPromptButton) {
+        event.preventDefault();
+        event.stopPropagation();
+        vscode.postMessage({ type: 'openFeedbackLoopPrompt' });
         return;
       }
 
@@ -2145,11 +2175,7 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
           renderSuggestedPatch(thread),
           renderReplies(thread),
           renderReplyForm(thread),
-          '<div class="thread-actions">',
-          '<button class="secondary" title="Agree with this feedback and close the thread." data-status="accepted">Accept</button>',
-          '<button class="secondary" title="Close because the underlying issue has been handled." data-status="resolved">Resolve</button>',
-          '<button class="secondary" title="Decline this recommendation and close the thread." data-status="rejected">Reject</button>',
-          '</div>'
+          renderThreadActions(thread)
         ].join('');
 
         element.addEventListener('click', (event) => {
@@ -3414,6 +3440,86 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
       return openThreads.find((thread) => thread.id === threadId);
     }
 
+    function prefillReplyTemplate(button) {
+      const threadId = button.getAttribute('data-thread-id') || '';
+      const thread = findThread(threadId);
+      const textArea = findReplyTextArea(threadId, button);
+
+      if (!thread || !textArea) {
+        return;
+      }
+
+      const template = replyTemplateText(button.getAttribute('data-reply-template'), thread);
+      const existingText = String(textArea.value || '').trim();
+      textArea.value = existingText ? existingText + '\\n\\n' + template : template;
+      textArea.focus();
+      textArea.setSelectionRange(textArea.value.length, textArea.value.length);
+    }
+
+    function findReplyTextArea(threadId, sourceElement) {
+      const localTextArea = sourceElement
+        .closest('.thread, .comment-overlay-item')
+        ?.querySelector('[data-reply-form] textarea');
+
+      if (localTextArea) {
+        return localTextArea;
+      }
+
+      if (!threadId) {
+        return undefined;
+      }
+
+      return document.querySelector('[data-reply-form][data-thread-id="' + cssEscape(threadId) + '"] textarea');
+    }
+
+    function replyTemplateText(template, thread) {
+      if (template === 'answer') {
+        return 'Answer: ';
+      }
+
+      if (template === 'clarify') {
+        return 'Please clarify this question because ';
+      }
+
+      if (template === 'not-applicable') {
+        return 'This question no longer applies because ';
+      }
+
+      if (template === 'acknowledge') {
+        return 'Acknowledged. Please keep this note available for future review context.';
+      }
+
+      if (template === 'acknowledge-risk') {
+        return 'This risk is real. Please keep this thread open until the mitigation is captured.';
+      }
+
+      if (template === 'mitigate-risk') {
+        return 'Suggested mitigation: ';
+      }
+
+      if (template === 'challenge') {
+        return 'I do not think this risk applies because ';
+      }
+
+      if (template === 'agree') {
+        return thread.suggestedPatch
+          ? 'I agree with the direction. Please keep this thread open until the suggested patch is applied or revised.'
+          : 'I agree with this feedback. Please keep this thread open until the document is updated or resolved.';
+      }
+
+      if (template === 'revise') {
+        return thread.suggestedPatch
+          ? 'Please revise this suggested patch because '
+          : 'Please revise this feedback with a more specific action because ';
+      }
+
+      if (template === 'disagree') {
+        return 'I disagree because ';
+      }
+
+      return '';
+    }
+
     function openCommentOverlay(threadIds, sourceElement) {
       const threads = threadIds.map(findThread).filter(Boolean);
 
@@ -3453,11 +3559,7 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
         renderSuggestedPatch(thread),
         renderReplies(thread),
         renderReplyForm(thread),
-        '<div class="comment-overlay-actions">',
-        '<button class="secondary compact" title="Agree with this feedback and close the thread." data-thread-id="' + escapeHtml(thread.id) + '" data-overlay-status="accepted">Accept</button>',
-        '<button class="secondary compact" title="Close because the underlying issue has been handled." data-thread-id="' + escapeHtml(thread.id) + '" data-overlay-status="resolved">Resolve</button>',
-        '<button class="secondary compact" title="Decline this recommendation and close the thread." data-thread-id="' + escapeHtml(thread.id) + '" data-overlay-status="rejected">Reject</button>',
-        '</div>',
+        renderCommentOverlayActions(thread),
         '</section>'
       ].join('');
     }
@@ -3518,6 +3620,66 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
         '</div>',
         '</form>'
       ].join('');
+    }
+
+    function renderThreadActions(thread) {
+      return [
+        '<div class="thread-actions">',
+        renderReplyShortcutButtons(thread, ''),
+        '<button class="secondary" title="Close this thread after the issue is handled or no longer applies." data-status="resolved">Resolve</button>',
+        '</div>'
+      ].join('');
+    }
+
+    function renderCommentOverlayActions(thread) {
+      return [
+        '<div class="comment-overlay-actions">',
+        renderReplyShortcutButtons(thread, ' compact'),
+        '<button class="secondary compact" title="Close this thread after the issue is handled or no longer applies." data-thread-id="' + escapeHtml(thread.id) + '" data-overlay-status="resolved">Resolve</button>',
+        '</div>'
+      ].join('');
+    }
+
+    function renderReplyShortcutButtons(thread, classSuffix) {
+      const buttonClass = 'secondary' + classSuffix;
+
+      return replyShortcutDescriptors(thread).map((shortcut) => {
+        return '<button type="button" class="' + buttonClass + '" title="' + escapeHtml(shortcut.title) + '" data-thread-id="' + escapeHtml(thread.id) + '" data-reply-template="' + escapeHtml(shortcut.template) + '">' + escapeHtml(shortcut.label) + '</button>';
+      }).join('');
+    }
+
+    function replyShortcutDescriptors(thread) {
+      const type = String(thread.type || 'note');
+
+      if (type === 'question') {
+        return [
+          { template: 'answer', label: 'Answer', title: 'Draft an answer reply without closing this question.' },
+          { template: 'clarify', label: 'Clarify', title: 'Draft a request for a sharper question or missing context.' },
+          { template: 'not-applicable', label: 'Not Applicable', title: 'Draft a reply explaining why this question no longer applies.' }
+        ];
+      }
+
+      if (type === 'risk') {
+        return [
+          { template: 'acknowledge-risk', label: 'Acknowledge', title: 'Draft a reply acknowledging the risk without closing it.' },
+          { template: 'mitigate-risk', label: 'Mitigate', title: 'Draft a mitigation reply for this risk.' },
+          { template: 'challenge', label: 'Challenge', title: 'Draft a reply challenging this risk without closing it.' }
+        ];
+      }
+
+      if (type === 'fix' || type === 'suggestion') {
+        return [
+          { template: 'agree', label: 'Agree', title: 'Draft an agreement reply without closing this thread.' },
+          { template: 'revise', label: thread.suggestedPatch ? 'Revise Patch' : 'Revise', title: 'Draft a request for a sharper comment or patch.' },
+          { template: 'disagree', label: 'Disagree', title: 'Draft a disagreement reply without closing this thread.' }
+        ];
+      }
+
+      return [
+        { template: 'acknowledge', label: 'Acknowledge', title: 'Draft an acknowledgement reply without closing this note.' },
+        { template: 'revise', label: 'Revise', title: 'Draft a request for a sharper note.' },
+        { template: 'disagree', label: 'Disagree', title: 'Draft a disagreement reply without closing this note.' }
+      ];
     }
 
     function formatDate(value) {
@@ -4061,9 +4223,10 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
   }
 
   private renderContextBootstrapPromptAction(): string {
-    return `<section class="context-bootstrap-bar" aria-label="AI context bootstrap">
+    return `<section class="context-bootstrap-bar" aria-label="AI prompt handoff">
     <div class="context-bootstrap-actions">
       <button type="button" class="secondary compact" data-open-context-bootstrap-prompt>Open Bootstrap Prompt</button>
+      <button type="button" class="secondary compact" data-open-feedback-loop-prompt>Open Feedback Loop Prompt</button>
     </div>
   </section>`;
   }
