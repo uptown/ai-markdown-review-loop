@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import MarkdownIt from 'markdown-it';
 import { randomUUID } from 'crypto';
+import path from 'path';
 import { openContextBootstrapPrompt } from './contextBootstrap';
 import { openFeedbackLoopPrompt } from './feedbackLoopPrompt';
 import { AnchorMaintenanceController } from './anchorMaintenance';
@@ -167,6 +168,7 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
         })();
       }
     });
+    const sidecarSubscription = await this.watchReviewSidecars(document.uri, render);
     const saveSubscription = vscode.workspace.onDidSaveTextDocument(event => {
       if (event.uri.toString() === document.uri.toString()) {
         void this.anchorMaintenance.flush(document);
@@ -175,6 +177,7 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
 
     webviewPanel.onDidDispose(() => {
       changeSubscription.dispose();
+      sidecarSubscription.dispose();
       saveSubscription.dispose();
       void this.anchorMaintenance.flush(document);
     });
@@ -639,6 +642,49 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
       return false;
     }
     return true;
+  }
+
+  private async watchReviewSidecars(
+    documentUri: vscode.Uri,
+    render: () => Promise<void>
+  ): Promise<vscode.Disposable> {
+    const watchers: vscode.FileSystemWatcher[] = [];
+    let timer: ReturnType<typeof setTimeout> | undefined;
+
+    const scheduleRender = () => {
+      if (timer) {
+        clearTimeout(timer);
+      }
+
+      timer = setTimeout(() => {
+        timer = undefined;
+        void render();
+      }, 120);
+    };
+
+    for (const uri of await this.store.getReviewStateFileUris(documentUri)) {
+      if (uri.scheme !== 'file') {
+        continue;
+      }
+
+      const watcher = vscode.workspace.createFileSystemWatcher(
+        new vscode.RelativePattern(path.dirname(uri.fsPath), path.basename(uri.fsPath))
+      );
+      watcher.onDidCreate(scheduleRender);
+      watcher.onDidChange(scheduleRender);
+      watcher.onDidDelete(scheduleRender);
+      watchers.push(watcher);
+    }
+
+    return new vscode.Disposable(() => {
+      if (timer) {
+        clearTimeout(timer);
+      }
+
+      for (const watcher of watchers) {
+        watcher.dispose();
+      }
+    });
   }
 
   private async restoreThread(

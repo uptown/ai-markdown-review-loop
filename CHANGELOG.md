@@ -21,6 +21,7 @@
 - Replaces open-thread Accept/Reject close buttons with type-aware reply shortcuts, leaving Resolve as the explicit handled-issue closure.
 - Shows suggested replacement patches with an `Apply Suggested Patch` action that updates Markdown only when the target is reliable.
 - Hides `Apply Suggested Patch` when the original patch target no longer matches the current Markdown and shows a stale-patch explanation instead.
+- Refreshes the review preview when an AI agent or external editor updates the Markdown review sidecar, so revised suggested patches appear without reopening the preview.
 - Routes `Apply Suggested Patch` through a review-aware edit service that refreshes sidecar anchors/context and records edit outcome replies.
 - Adds a constrained rendered-block Markdown editor and rewrite path that use the same review-aware edit pipeline.
 - Uses Turndown for block-editor HTML-to-Markdown conversion instead of a hand-rolled serializer.

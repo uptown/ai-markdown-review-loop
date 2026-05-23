@@ -266,6 +266,28 @@ export class ReviewStore {
     };
   }
 
+  async getReviewStateFileUris(documentUri: vscode.Uri): Promise<vscode.Uri[]> {
+    const locations = await this.getSidecarLocations(documentUri);
+    const uris = [
+      locations.reviewUri,
+      locations.resolvedUri,
+      locations.legacyReviewUri,
+      locations.legacyResolvedUri
+    ];
+    const seen = new Set<string>();
+
+    return uris.filter(uri => {
+      const key = uri.toString();
+
+      if (seen.has(key)) {
+        return false;
+      }
+
+      seen.add(key);
+      return true;
+    });
+  }
+
   async migrateDocument(oldDocumentUri: vscode.Uri, newDocumentUri: vscode.Uri): Promise<{
     reviewMoved: boolean;
     resolvedMoved: boolean;
