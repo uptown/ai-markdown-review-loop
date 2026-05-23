@@ -1,9 +1,5 @@
 import * as vscode from 'vscode';
-import {
-  openContextBootstrapGuide,
-  openContextBootstrapPrompt,
-  openOrCreateContextBrief
-} from './contextBootstrap';
+import { openContextBootstrapPrompt } from './contextBootstrap';
 import { renderFeedbackExport } from './exportFeedback';
 import { findStaleInlineAnchorMarkers, insertInlineAnchorMarker } from './inlineMarkers';
 import { rebaseInlineReviewMetadataSidecars } from './inlineMarkerPayloads';
@@ -117,16 +113,6 @@ export function activate(context: vscode.ExtensionContext): void {
       if (!opened) {
         vscode.window.showWarningMessage('Open a workspace Markdown file before preparing an AI context bootstrap prompt.');
       }
-    }),
-    vscode.commands.registerCommand('aiMarkdownReviewLoop.openContextBrief', async (targetUri?: vscode.Uri) => {
-      const opened = await openOrCreateContextBrief(targetUri);
-
-      if (!opened) {
-        vscode.window.showWarningMessage('Open a workspace Markdown file before opening or creating the AI context brief.');
-      }
-    }),
-    vscode.commands.registerCommand('aiMarkdownReviewLoop.openContextBootstrapGuide', async () => {
-      await openContextBootstrapGuide(context.extensionUri);
     })
   );
 }

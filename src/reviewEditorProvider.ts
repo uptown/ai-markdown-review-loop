@@ -1,13 +1,7 @@
 import * as vscode from 'vscode';
 import MarkdownIt from 'markdown-it';
 import { randomUUID } from 'crypto';
-import {
-  ContextBootstrapStatus,
-  getContextBootstrapStatus,
-  openContextBootstrapGuide,
-  openContextBootstrapPrompt,
-  openOrCreateContextBrief
-} from './contextBootstrap';
+import { openContextBootstrapPrompt } from './contextBootstrap';
 import { AnchorMaintenanceController } from './anchorMaintenance';
 import { createAnchor } from './anchors';
 import { htmlBlockToMarkdown, preserveSourceListMarker } from './htmlToMarkdown';
@@ -144,14 +138,12 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
       try {
         const reviewDocument = await this.store.load(document.uri);
         const resolvedReviewDocument = await this.store.loadResolved(document.uri);
-        const contextBootstrap = await getContextBootstrapStatus(document.uri);
         webviewPanel.webview.html = this.renderHtml(
           webviewPanel.webview,
           document,
           reviewDocument,
           resolvedReviewDocument,
-          restoreState,
-          contextBootstrap
+          restoreState
         );
       } catch (error) {
         webviewPanel.webview.html = this.renderErrorHtml(document, formatError(error));
@@ -251,17 +243,6 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
           await render({ focusThreadId: threadId });
         }
 
-        if (message?.type === 'openContextBrief') {
-          const opened = await openOrCreateContextBrief(document.uri);
-
-          if (!opened) {
-            vscode.window.showWarningMessage('Open a workspace Markdown file before opening or creating the AI context brief.');
-            return;
-          }
-
-          await render();
-        }
-
         if (message?.type === 'openContextBootstrapPrompt') {
           const opened = await openContextBootstrapPrompt(document.uri);
 
@@ -271,10 +252,6 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
           }
 
           return;
-        }
-
-        if (message?.type === 'openContextBootstrapGuide') {
-          await openContextBootstrapGuide(this.context.extensionUri);
         }
 
         if (message?.type === 'anchorLocated') {
@@ -812,15 +789,14 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
     document: vscode.TextDocument,
     reviewDocument: ReviewDocument,
     resolvedReviewDocument: ReviewDocument,
-    restoreState?: PreviewRestoreState,
-    contextBootstrap?: ContextBootstrapStatus
+    restoreState?: PreviewRestoreState
   ): string {
     const nonce = randomUUID();
     const documentText = document.getText();
     const previewMarkdown = stripInlineAnchorMarkers(documentText);
     const renderedMarkdown = this.markdown.render(previewMarkdown);
     const tables = collectMarkdownTables(previewMarkdown);
-    const contextBootstrapNotice = this.renderContextBootstrapNotice(contextBootstrap);
+    const contextBootstrapNotice = this.renderContextBootstrapPromptAction();
     const storageWarning = this.renderStorageWarning(documentText, reviewDocument);
     const markerLineHints = this.getMarkerLineHints(reviewDocument);
     const historyAnchorStates = getReviewHistoryAnchorStates(
@@ -918,73 +894,14 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
     .context-bootstrap-bar {
       max-width: 900px;
       margin: 0 0 16px;
-      border: 1px solid var(--border);
-      border-radius: 999px;
-      padding: 8px 12px;
-      color: var(--text);
-      background: var(--panel);
       display: flex;
       align-items: center;
-      justify-content: space-between;
-      gap: 12px;
-      flex-wrap: wrap;
-    }
-    .context-bootstrap-summary {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      min-width: 0;
-      flex: 1 1 380px;
-    }
-    .context-bootstrap-status {
-      display: inline-flex;
-      align-items: center;
-      min-height: 18px;
-      border: 1px solid var(--border);
-      border-radius: 999px;
-      padding: 1px 7px;
-      font-size: 11px;
-      line-height: 1.35;
-      color: var(--muted);
-      background: var(--vscode-badge-background, rgba(127, 127, 127, 0.16));
-      white-space: nowrap;
-    }
-    .context-bootstrap-status.is-ready {
-      border-color: rgba(138, 216, 63, 0.5);
-      color: #dff9c3;
-      background: rgba(138, 216, 63, 0.16);
-    }
-    .context-bootstrap-status.is-missing {
-      border-color: rgba(77, 163, 255, 0.45);
-      color: #d8ecff;
-      background: rgba(77, 163, 255, 0.16);
-    }
-    .context-bootstrap-status.is-workspace {
-      border-color: rgba(204, 167, 0, 0.45);
-      color: var(--vscode-editorWarning-foreground, var(--text));
-      background: var(--vscode-inputValidation-warningBackground, rgba(204, 167, 0, 0.12));
-    }
-    .context-bootstrap-copy {
-      margin: 0;
-      line-height: 1.35;
-      color: var(--muted);
-      font-size: 12px;
+      justify-content: flex-end;
     }
     .context-bootstrap-actions {
       display: flex;
       gap: 8px;
       flex-wrap: wrap;
-    }
-    .context-bootstrap-sources {
-      color: var(--muted);
-      font-size: 12px;
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      max-width: 100%;
-    }
-    .context-bootstrap-sources code {
-      font-family: var(--vscode-editor-font-family);
     }
     button {
       border: 0;
@@ -2048,24 +1965,6 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
         event.preventDefault();
         event.stopPropagation();
         vscode.postMessage({ type: 'openContextBootstrapPrompt' });
-        return;
-      }
-
-      const openContextBriefButton = target.closest('[data-open-context-brief]');
-
-      if (openContextBriefButton) {
-        event.preventDefault();
-        event.stopPropagation();
-        vscode.postMessage({ type: 'openContextBrief' });
-        return;
-      }
-
-      const openContextGuideButton = target.closest('[data-open-context-guide]');
-
-      if (openContextGuideButton) {
-        event.preventDefault();
-        event.stopPropagation();
-        vscode.postMessage({ type: 'openContextBootstrapGuide' });
         return;
       }
 
@@ -3969,49 +3868,10 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
   </section>`;
   }
 
-  private renderContextBootstrapNotice(
-    contextBootstrap: ContextBootstrapStatus | undefined
-  ): string {
-    if (!contextBootstrap) {
-      return '';
-    }
-
-    if (!contextBootstrap.hasWorkspaceFolder) {
-      return `<section class="context-bootstrap-bar" role="status">
-    <div class="context-bootstrap-summary">
-      <span class="context-bootstrap-status is-workspace">No workspace</span>
-      <p class="context-bootstrap-copy">AI context becomes durable only when this Markdown file lives inside a workspace folder.</p>
-    </div>
+  private renderContextBootstrapPromptAction(): string {
+    return `<section class="context-bootstrap-bar" aria-label="AI context bootstrap">
     <div class="context-bootstrap-actions">
-      <button type="button" class="secondary compact" data-open-context-guide>How it works</button>
-    </div>
-  </section>`;
-    }
-
-    const extraSources = contextBootstrap.availableSources.filter(source => source !== contextBootstrap.recommendedBriefPath);
-    const sourceCopy = contextBootstrap.hasContextBrief
-      ? `<code>${escapeHtml(contextBootstrap.recommendedBriefPath)}</code> found.`
-      : extraSources.length > 0
-        ? `No saved brief. Start with a bootstrap prompt, then create <code>${escapeHtml(contextBootstrap.recommendedBriefPath)}</code> when the draft is ready.`
-        : `No saved brief. Start with a bootstrap prompt, then create <code>${escapeHtml(contextBootstrap.recommendedBriefPath)}</code>.`;
-    const sourceFooter = !contextBootstrap.hasContextBrief && extraSources.length > 0
-      ? `<div class="context-bootstrap-sources">Detected repo context: ${extraSources.map(source => `<code>${escapeHtml(source)}</code>`).join(', ')}</div>`
-      : '';
-    const statusClass = contextBootstrap.hasContextBrief ? 'is-ready' : 'is-missing';
-    const statusLabel = contextBootstrap.hasContextBrief ? 'AI Context Ready' : 'AI Context Needs Brief';
-    const promptLabel = contextBootstrap.hasContextBrief ? 'Refresh Bootstrap Prompt' : 'Open Bootstrap Prompt';
-    const briefLabel = contextBootstrap.hasContextBrief ? 'Open Brief' : 'Create Brief';
-
-    return `<section class="context-bootstrap-bar" role="status">
-    <div class="context-bootstrap-summary">
-      <span class="context-bootstrap-status ${statusClass}">${statusLabel}</span>
-      <p class="context-bootstrap-copy">${sourceCopy}</p>
-      ${sourceFooter}
-    </div>
-    <div class="context-bootstrap-actions">
-      <button type="button" class="compact" data-open-context-bootstrap-prompt>${promptLabel}</button>
-      <button type="button" class="secondary compact" data-open-context-brief>${briefLabel}</button>
-      <button type="button" class="secondary compact" data-open-context-guide>How it works</button>
+      <button type="button" class="secondary compact" data-open-context-bootstrap-prompt>Open Bootstrap Prompt</button>
     </div>
   </section>`;
   }

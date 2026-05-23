@@ -45,8 +45,9 @@ describe('agent review policy', () => {
 
     assert.match(collaboration, /## Recommended Loop/);
     assert.match(collaboration, /## When AI Should Reply Instead Of Opening A New Thread/);
-    assert.match(bootstrap, /Prompt First, Brief Second/);
+    assert.match(bootstrap, /Prompt First, Brief Optional/);
     assert.match(bootstrap, /Open Bootstrap Prompt/);
     assert.match(bootstrap, /docs\/AI-CONTEXT-BRIEF.md/);
+    assert.match(bootstrap, /\.ai-markdown-review\/` sidecars/);
   });
 });

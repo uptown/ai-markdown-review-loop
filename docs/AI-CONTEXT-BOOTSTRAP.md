@@ -11,7 +11,7 @@ bad assumptions about what matters.
 The plugin cannot safely infer product intent, domain constraints, or business
 rules from Markdown alone. That context needs an explicit home.
 
-## Prompt First, Brief Second
+## Prompt First, Brief Optional
 
 The first user-facing step should not be "fill out a blank context file."
 
@@ -19,21 +19,24 @@ The first step should be a bootstrap prompt that tells the AI to:
 
 1. read the repo-owned docs that already exist
 2. ask only for the missing context
-3. draft a durable `docs/AI-CONTEXT-BRIEF.md`
+3. use AI Markdown Review Loop as the review surface when plugin tools are available
+4. preserve comments, sidecars, anchors, and review decisions while editing Markdown
+5. optionally draft or refresh `docs/AI-CONTEXT-BRIEF.md` when durable context would help
 
 That keeps onboarding lightweight for the human while still giving the repo a
-stable context artifact for later review passes.
+stable agent contract for review and edit passes.
 
 ## Recommended Plugin UX
 
-When the repo does not yet have `docs/AI-CONTEXT-BRIEF.md`, the plugin should:
+The review preview should expose one compact action:
 
-1. keep a compact `AI Context` status bar visible in the review preview
-2. show `Open Bootstrap Prompt` as the primary action when no saved brief exists
-3. switch that same control to `Refresh Bootstrap Prompt` after a brief exists
-4. show `Create Brief` before the file exists, then `Open Brief` after it exists
-5. keep the actual `docs/AI-CONTEXT-BRIEF.md` file as the durable output, not
-   the first thing the user has to author by hand
+- `Open Bootstrap Prompt`
+
+The preview should not show context readiness, detected brief status, `Open
+Brief`, or `How it works` as top-of-document chrome. The generated prompt is
+the handoff surface. It can mention `docs/AI-CONTEXT-BRIEF.md` as an optional
+durable context artifact, but the UI should not force the human into managing
+that file before review work can start.
 
 ## Recommended Context Sources
 
@@ -46,8 +49,8 @@ read these sources in order when they exist:
 4. `README.md`
 5. the current Markdown document under review
 
-If the early files already answer the core questions, the AI can draft or
-refresh the brief immediately. If not, it should ask for the missing context
+If the early files already answer the core questions, the AI can continue with
+the requested review or edit task. If not, it should ask for missing context
 instead of guessing.
 
 ## Minimum Context Packet
@@ -64,12 +67,14 @@ For a strong first review pass, the human should provide:
 
 ## Durable File Convention
 
-For teams that want repeatable AI review quality, create a repo-owned file at:
+For teams that want repeatable AI review quality, the AI may create or refresh
+a repo-owned file at:
 
 - `docs/AI-CONTEXT-BRIEF.md`
 
 This file should be short and durable. It is not meant to duplicate the entire
-PRD. It should capture the context that the AI must know before it comments.
+PRD, and it is not a prerequisite for every review pass. It should capture the
+context that the AI must know before it comments.
 
 ## Context Brief Template
 
@@ -89,12 +94,21 @@ PRD. It should capture the context that the AI must know before it comments.
 
 The generated bootstrap prompt should tell the AI to:
 
-- not start the real review yet
+- work in any AI agent that can read/edit repo files
 - read the repo sources in order
 - extract whatever context is already knowable
 - ask at most 3 specific follow-up questions about missing context
-- draft or refresh `docs/AI-CONTEXT-BRIEF.md` in the exact template above
-- stop after drafting the brief so the human can confirm or save it
+- use AI Markdown Review Loop tools and Review Threads when available
+- follow `docs/AI-REVIEW-POLICY.md`, `docs/AI-COLLABORATION-LOOP.md`, and
+  `docs/agent-review-thread.schema.json` when direct plugin tools are not
+  available
+- preserve `.ai-markdown-review/` sidecars, inline `ai-review-anchors`, inline
+  `ai-review-log` audit pointers, thread ids, replies, statuses, and decision
+  history during normal Markdown edits
+- prefer localized edits over whole-document rewrites
+- report every touched `rv_*` thread with an outcome
+- optionally draft or refresh `docs/AI-CONTEXT-BRIEF.md` if durable context is
+  missing or stale
 
 ## How The Plugin Should Use This
 
@@ -103,8 +117,10 @@ The export packet for AI agents should:
 - point to this bootstrap convention
 - tell the AI which files to read first
 - tell the AI what to ask the human if the repo is missing context
-- point users toward the bootstrap prompt instead of asking them to fill a
-  generic brief from scratch
+- point users toward the bootstrap prompt instead of showing a persistent
+  context status panel in the review preview
+- reinforce that Markdown edits must preserve review metadata and report
+  affected thread outcomes
 
 That way the first AI review pass starts from explicit context instead of
 default model assumptions.

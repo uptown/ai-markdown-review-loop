@@ -64,7 +64,7 @@ describe('renderFeedbackExport', () => {
     assert.match(output, /Canonical creation schema: docs\/agent-review-thread.schema.json/);
     assert.match(output, /Canonical collaboration loop: docs\/AI-COLLABORATION-LOOP.md/);
     assert.match(output, /Canonical context bootstrap: docs\/AI-CONTEXT-BOOTSTRAP.md/);
-    assert.match(output, /bootstrap prompt, not from a blank context file/);
+    assert.match(output, /bootstrap prompt, not from a status panel or a blank context file/);
     assert.match(output, /canonical source material instead of copying full templates or examples/);
     assert.doesNotMatch(output, /# AI Context Brief/);
     assert.doesNotMatch(output, /"source": "ai"/);

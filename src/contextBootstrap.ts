@@ -1,5 +1,4 @@
 import * as vscode from 'vscode';
-import { AGENT_CONTEXT_BRIEF_TEMPLATE } from './agentReviewPolicy';
 import { createContextBootstrapPrompt } from './contextBootstrapPrompt';
 
 export const AI_CONTEXT_BRIEF_RELATIVE_PATH = 'docs/AI-CONTEXT-BRIEF.md';
@@ -9,38 +8,6 @@ export const AI_CONTEXT_SOURCE_PATHS = [
   '.agent/PROJECT_STATE.md',
   'README.md'
 ] as const;
-
-export interface ContextBootstrapStatus {
-  hasWorkspaceFolder: boolean;
-  hasContextBrief: boolean;
-  availableSources: string[];
-  recommendedBriefPath: string;
-}
-
-export async function getContextBootstrapStatus(
-  documentUri: vscode.Uri
-): Promise<ContextBootstrapStatus> {
-  const workspaceFolder = vscode.workspace.getWorkspaceFolder(documentUri);
-
-  if (!workspaceFolder) {
-    return {
-      hasWorkspaceFolder: false,
-      hasContextBrief: false,
-      availableSources: [],
-      recommendedBriefPath: AI_CONTEXT_BRIEF_RELATIVE_PATH
-    };
-  }
-
-  const availableSources = await getAvailableContextSources(workspaceFolder);
-  const hasContextBrief = availableSources.includes(AI_CONTEXT_BRIEF_RELATIVE_PATH);
-
-  return {
-    hasWorkspaceFolder: true,
-    hasContextBrief,
-    availableSources,
-    recommendedBriefPath: AI_CONTEXT_BRIEF_RELATIVE_PATH
-  };
-}
 
 export async function openContextBootstrapPrompt(
   documentUri?: vscode.Uri
@@ -70,48 +37,6 @@ export async function openContextBootstrapPrompt(
     viewColumn: vscode.ViewColumn.Beside
   });
   return document;
-}
-
-export async function openOrCreateContextBrief(
-  documentUri?: vscode.Uri
-): Promise<vscode.TextDocument | undefined> {
-  const workspaceFolder = resolveWorkspaceFolder(documentUri);
-
-  if (!workspaceFolder) {
-    return undefined;
-  }
-
-  const briefUri = vscode.Uri.joinPath(workspaceFolder.uri, AI_CONTEXT_BRIEF_RELATIVE_PATH);
-  await vscode.workspace.fs.createDirectory(vscode.Uri.joinPath(workspaceFolder.uri, 'docs'));
-
-  if (!await fileExists(briefUri)) {
-    await vscode.workspace.fs.writeFile(
-      briefUri,
-      Buffer.from(`${createContextBriefTemplate()}\n`, 'utf8')
-    );
-  }
-
-  const document = await vscode.workspace.openTextDocument(briefUri);
-  await vscode.window.showTextDocument(document, {
-    preview: false,
-    viewColumn: vscode.ViewColumn.Beside
-  });
-  return document;
-}
-
-export async function openContextBootstrapGuide(
-  extensionUri: vscode.Uri
-): Promise<void> {
-  const guideUri = vscode.Uri.joinPath(extensionUri, 'docs', 'AI-CONTEXT-BOOTSTRAP.md');
-  const document = await vscode.workspace.openTextDocument(guideUri);
-  await vscode.window.showTextDocument(document, {
-    preview: false,
-    viewColumn: vscode.ViewColumn.Beside
-  });
-}
-
-export function createContextBriefTemplate(): string {
-  return AGENT_CONTEXT_BRIEF_TEMPLATE;
 }
 
 async function fileExists(uri: vscode.Uri): Promise<boolean> {

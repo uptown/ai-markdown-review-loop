@@ -3,21 +3,26 @@ import assert from 'node:assert/strict';
 import { createContextBootstrapPrompt } from '../src/contextBootstrapPrompt';
 
 describe('createContextBootstrapPrompt', () => {
-  it('builds a repo-aware bootstrap prompt that drafts the durable brief before review', () => {
+  it('builds a generic agent bootstrap prompt that preserves review metadata during reviews and edits', () => {
     const prompt = createContextBootstrapPrompt({
       availableSources: ['docs/PRD.md', 'README.md'],
       currentDocumentPath: 'docs/specs/checkout.md',
       recommendedBriefPath: 'docs/AI-CONTEXT-BRIEF.md'
     });
 
-    assert.match(prompt, /# AI Context Bootstrap Prompt/);
-    assert.match(prompt, /Do not start the actual review yet\./);
+    assert.match(prompt, /# AI Markdown Review Loop Bootstrap Prompt/);
+    assert.match(prompt, /with any AI agent/);
+    assert.match(prompt, /continue with the requested review or edit task/i);
     assert.match(prompt, /1\. `docs\/PRD.md`/);
     assert.match(prompt, /2\. `README.md`/);
     assert.match(prompt, /3\. `docs\/specs\/checkout.md`/);
     assert.match(prompt, /ask me at most 3 specific questions/i);
-    assert.match(prompt, /draft or refresh `docs\/AI-CONTEXT-BRIEF.md`/i);
+    assert.match(prompt, /If `docs\/AI-CONTEXT-BRIEF.md` exists, treat it as durable context/i);
     assert.match(prompt, /# AI Context Brief/);
-    assert.match(prompt, /Then run the first AI review pass with that brief available to read first\./);
+    assert.match(prompt, /use them as the review surface/i);
+    assert.match(prompt, /\.ai-markdown-review\/documents\/\*\.json/);
+    assert.match(prompt, /Inline `ai-review-anchors` and `ai-review-log` comments are metadata pointers/);
+    assert.match(prompt, /Do not mark threads `accepted`, `resolved`, or `rejected`/);
+    assert.match(prompt, /list any `rv_\*` threads you touched/);
   });
 });

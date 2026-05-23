@@ -30,9 +30,7 @@
     "onCommand:aiMarkdownReviewLoop.openReviewBeside",
     "onCommand:aiMarkdownReviewLoop.reviewDocument",
     "onCommand:aiMarkdownReviewLoop.exportFeedback",
-    "onCommand:aiMarkdownReviewLoop.openContextBootstrapPrompt",
-    "onCommand:aiMarkdownReviewLoop.openContextBrief",
-    "onCommand:aiMarkdownReviewLoop.openContextBootstrapGuide"
+    "onCommand:aiMarkdownReviewLoop.openContextBootstrapPrompt"
   ],
   "main": "./out/extension.js",
   "contributes": {
@@ -64,14 +62,6 @@
       {
         "command": "aiMarkdownReviewLoop.openContextBootstrapPrompt",
         "title": "AI Markdown Review: Open AI Context Bootstrap Prompt"
-      },
-      {
-        "command": "aiMarkdownReviewLoop.openContextBrief",
-        "title": "AI Markdown Review: Open/Create AI Context Brief"
-      },
-      {
-        "command": "aiMarkdownReviewLoop.openContextBootstrapGuide",
-        "title": "AI Markdown Review: Open AI Context Bootstrap Guide"
       }
     ],
     "menus": {

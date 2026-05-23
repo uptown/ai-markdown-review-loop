@@ -29,6 +29,7 @@
 - Adds a rendered Markdown table grid editor with row, column, and alignment controls through the review-aware edit pipeline.
 - Keeps table-cell comment anchors attached to edited cells, including repeated text in different rows.
 - Adds repo-owned AI review policy, collaboration-loop docs, context bootstrap commands, and guarded rename migration for review sidecars.
+- Simplifies the preview AI context entry point to one bootstrap prompt action and makes that prompt a generic agent contract for review-loop usage and comment-preserving Markdown edits.
 - Submits comment and reply textareas with Enter while keeping Shift+Enter for multi-line text.
 - Keeps the active comment overlay or review thread focused after saving a reply.
 - Shows accepted, resolved, and rejected review history with linked/outdated anchor state and a Restore action.
