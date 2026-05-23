@@ -95,6 +95,29 @@ export function htmlBlockToMarkdown(html: string): string {
   return cleanMarkdown(turndown.turndown(html));
 }
 
+export function preserveSourceListMarker(
+  sourceMarkdown: string,
+  oneBasedLineStart: number,
+  replacementMarkdown: string
+): string {
+  const sourceLine = sourceMarkdown.split(/\r?\n/)[oneBasedLineStart - 1] ?? '';
+  const sourceMarker = parseListMarker(sourceLine);
+
+  if (!sourceMarker) {
+    return replacementMarkdown;
+  }
+
+  const lines = replacementMarkdown.split(/\r?\n/);
+  const replacementMarker = parseListMarker(lines[0] ?? '');
+
+  if (!replacementMarker) {
+    return replacementMarkdown;
+  }
+
+  lines[0] = `${replacementMarker.indent}${sourceMarker.marker} ${replacementMarker.content}`;
+  return lines.join('\n');
+}
+
 function toCodeSpan(value: string): string {
   const backtick = '`';
   const normalized = value.replace(/\s+/g, ' ').trim();
@@ -252,4 +275,32 @@ function transformOutsideFencedCode(
 
 function normalizeInlineText(value: string): string {
   return value.replace(/\s+/g, ' ').trim();
+}
+
+function parseListMarker(line: string): {
+  indent: string;
+  marker: string;
+  content: string;
+} | undefined {
+  const ordered = line.match(/^(\s*)(\d+[.)])\s+(.*)$/);
+
+  if (ordered) {
+    return {
+      indent: ordered[1],
+      marker: ordered[2],
+      content: ordered[3]
+    };
+  }
+
+  const unordered = line.match(/^(\s*)([-+*])\s+(.*)$/);
+
+  if (unordered) {
+    return {
+      indent: unordered[1],
+      marker: unordered[2],
+      content: unordered[3]
+    };
+  }
+
+  return undefined;
 }

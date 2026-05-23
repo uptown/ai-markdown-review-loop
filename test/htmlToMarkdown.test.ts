@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { htmlBlockToMarkdown } from '../src/htmlToMarkdown';
+import { htmlBlockToMarkdown, preserveSourceListMarker } from '../src/htmlToMarkdown';
 
 describe('htmlBlockToMarkdown', () => {
   it('converts common rich text blocks to Markdown', () => {
@@ -67,6 +67,38 @@ describe('htmlBlockToMarkdown', () => {
     assert.equal(
       htmlBlockToMarkdown('<ol><li>First</li><li>Second</li></ol>'),
       ['1. First', '2. Second'].join('\n')
+    );
+  });
+
+  it('preserves ordered list numbering when the block editor submits one list item', () => {
+    const replacement = htmlBlockToMarkdown('<li>Second numbered item edited</li>');
+
+    assert.equal(replacement, '- Second numbered item edited');
+    assert.equal(
+      preserveSourceListMarker(
+        ['1. First numbered item', '2. Second numbered item', '3. Third numbered item'].join('\n'),
+        2,
+        replacement
+      ),
+      '2. Second numbered item edited'
+    );
+  });
+
+  it('preserves custom ordered markers and nested list content on edited list items', () => {
+    assert.equal(
+      preserveSourceListMarker(
+        ['9) Previous', '10) Current item'].join('\n'),
+        2,
+        ['- Current item edited', '  - Nested detail'].join('\n')
+      ),
+      ['10) Current item edited', '  - Nested detail'].join('\n')
+    );
+  });
+
+  it('leaves intentional non-list block replacements alone', () => {
+    assert.equal(
+      preserveSourceListMarker('2. Current item', 1, '## Current item'),
+      '## Current item'
     );
   });
 

@@ -24,6 +24,7 @@
 - Adds a constrained rendered-block Markdown editor and rewrite path that use the same review-aware edit pipeline.
 - Uses Turndown for block-editor HTML-to-Markdown conversion instead of a hand-rolled serializer.
 - Hardens rendered-block HTML-to-Markdown conversion for empty inline tags, task lists, fenced code languages, pasted tables, and malformed emphasis.
+- Preserves ordered list numbering when editing one rendered list item through the block editor.
 - Adds Mermaid source editing from rendered diagram cards through the review-aware edit pipeline.
 - Adds a rendered Markdown table grid editor with row, column, and alignment controls through the review-aware edit pipeline.
 - Keeps table-cell comment anchors attached to edited cells, including repeated text in different rows.

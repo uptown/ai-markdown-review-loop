@@ -10,7 +10,7 @@ import {
 } from './contextBootstrap';
 import { AnchorMaintenanceController } from './anchorMaintenance';
 import { createAnchor } from './anchors';
-import { htmlBlockToMarkdown } from './htmlToMarkdown';
+import { htmlBlockToMarkdown, preserveSourceListMarker } from './htmlToMarkdown';
 import { createMermaidFenceReplacement } from './mermaidEdits';
 import {
   findStaleInlineAnchorMarkers,
@@ -342,13 +342,15 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
         if (message?.type === 'editMarkdownBlock') {
           const lineStart = parseSourceLine(message.lineStart);
           const lineEnd = parseSourceLine(message.lineEnd);
-          const replacement = htmlBlockToMarkdown(String(message.html ?? ''));
+          const replacementMarkdown = htmlBlockToMarkdown(String(message.html ?? ''));
           const intent = parseReviewAwareEditIntent(message.intent);
 
           if (!lineStart || !lineEnd || lineEnd < lineStart || !intent) {
             vscode.window.showWarningMessage('Ignored invalid Markdown block edit.');
             return;
           }
+
+          const replacement = preserveSourceListMarker(document.getText(), lineStart, replacementMarkdown);
 
           await this.anchorMaintenance.flush(document);
           const plan = createLineRangeEditPlan(document.getText(), {
@@ -2632,11 +2634,35 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
     function wrapEditableBlockHtml(block, innerHtml) {
       const tag = block.tagName.toLowerCase();
 
+      if (tag === 'li') {
+        return wrapEditableListItemHtml(block, innerHtml);
+      }
+
       if (/^(p|h[1-6]|li|blockquote)$/.test(tag)) {
         return '<' + tag + '>' + innerHtml + '</' + tag + '>';
       }
 
       return '<p>' + innerHtml + '</p>';
+    }
+
+    function wrapEditableListItemHtml(block, innerHtml) {
+      const list = block.parentElement;
+      const listTag = list?.tagName?.toLowerCase();
+
+      if (listTag === 'ol') {
+        const start = Number(list.getAttribute('start')) || 1;
+        const itemIndex = Array.from(list.children)
+          .filter((child) => child.tagName?.toLowerCase() === 'li')
+          .indexOf(block);
+        const itemNumber = start + Math.max(0, itemIndex);
+        return '<ol start="' + itemNumber + '"><li>' + innerHtml + '</li></ol>';
+      }
+
+      if (listTag === 'ul') {
+        return '<ul><li>' + innerHtml + '</li></ul>';
+      }
+
+      return '<li>' + innerHtml + '</li>';
     }
 
     function getEditableLineRange(block) {
