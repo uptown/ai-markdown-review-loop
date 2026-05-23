@@ -1,4 +1,4 @@
-import type { ReviewAnchor, SuggestedPatch } from './types';
+import type { ReviewAnchor, ReviewThread, SuggestedPatch } from './types';
 
 export type ApplyPatchResult =
   | 'applied'
@@ -52,6 +52,28 @@ export function selectSuggestedPatchReplacement(
     end: match.index + patch.original.length,
     replacement: patch.replacement
   };
+}
+
+export function getSuggestedPatchResults(
+  markdown: string,
+  threads: readonly ReviewThread[]
+): Record<string, ApplyPatchResult> {
+  const results: Record<string, ApplyPatchResult> = {};
+
+  for (const thread of threads) {
+    if (!thread.suggestedPatch) {
+      continue;
+    }
+
+    const selection = selectSuggestedPatchReplacement(
+      markdown,
+      thread.suggestedPatch,
+      thread.anchor
+    );
+    results[thread.id] = selection.result;
+  }
+
+  return results;
 }
 
 function findAllPatchMatches(text: string, original: string): Array<{ index: number }> {

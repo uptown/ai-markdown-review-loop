@@ -33,7 +33,11 @@ import {
 } from './reviewAwareEdits';
 import { createRestoredReviewThread, getReviewHistoryAnchorStates } from './reviewHistory';
 import { restoreReviewSidecarSnapshot, ReviewUndoController } from './reviewUndo';
-import { ApplyPatchResult, selectSuggestedPatchReplacement } from './suggestedPatches';
+import {
+  ApplyPatchResult,
+  getSuggestedPatchResults,
+  selectSuggestedPatchReplacement
+} from './suggestedPatches';
 import {
   collectMarkdownTables,
   createMarkdownTableReplacement
@@ -823,6 +827,7 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
       previewMarkdown,
       resolvedReviewDocument.threads
     );
+    const suggestedPatchResults = getSuggestedPatchResults(documentText, reviewDocument.threads);
     const mermaidScriptUri = webview.asWebviewUri(
       vscode.Uri.joinPath(this.context.extensionUri, 'out', 'vendor', 'mermaid.min.js')
     );
@@ -830,6 +835,7 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
       threads: reviewDocument.threads,
       resolvedThreads: resolvedReviewDocument.threads,
       historyAnchorStates,
+      suggestedPatchResults,
       markerLineHints,
       tables,
       documentVersion: document.version,
@@ -1446,6 +1452,12 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
       gap: 6px;
       margin-top: 10px;
       flex-wrap: wrap;
+    }
+    .suggested-patch-status {
+      margin: 8px 0 0;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.35;
     }
     .reply-list {
       margin-top: 10px;
@@ -3583,15 +3595,41 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
         return '';
       }
 
+      const patchResult = state.suggestedPatchResults?.[thread.id] || 'missingPatch';
+      const canApplyPatch = patchResult === 'applied';
+      const patchAction = canApplyPatch
+        ? '<button type="button" class="compact" title="Apply this replacement and close the thread as accepted." data-thread-id="' + escapeHtml(thread.id) + '" data-apply-suggested-patch>Apply Suggested Patch</button>'
+        : '<p class="suggested-patch-status">' + escapeHtml(formatSuggestedPatchResult(patchResult)) + '</p>';
+
       return [
         '<details class="suggested-patch">',
         '<summary>Suggested edit</summary>',
         '<pre><code>- ' + escapeHtml(patch.original || '') + '\\n+ ' + escapeHtml(patch.replacement || '') + '</code></pre>',
         '<div class="suggested-patch-actions">',
-        '<button type="button" class="compact" title="Apply this replacement and close the thread as accepted." data-thread-id="' + escapeHtml(thread.id) + '" data-apply-suggested-patch>Apply Suggested Patch</button>',
+        patchAction,
         '</div>',
         '</details>'
       ].join('');
+    }
+
+    function formatSuggestedPatchResult(result) {
+      if (result === 'ambiguous') {
+        return 'Patch target matches multiple places. Reply with a narrower patch or re-anchor before applying.';
+      }
+
+      if (result === 'lowConfidenceAnchor') {
+        return 'Patch target needs a more reliable anchor before it can be applied.';
+      }
+
+      if (result === 'originalNotFound') {
+        return 'Patch target no longer matches the current Markdown. Ask the AI to revise the patch or resolve this thread manually.';
+      }
+
+      if (result === 'missingPatch') {
+        return 'This thread does not include an applicable replacement patch.';
+      }
+
+      return 'Patch cannot be applied safely from the current review state.';
     }
 
     function renderCommentQualityWarning(comment) {

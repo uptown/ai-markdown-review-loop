@@ -1,7 +1,10 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { selectSuggestedPatchReplacement } from '../src/suggestedPatches';
-import type { ReviewAnchor, SuggestedPatch } from '../src/types';
+import {
+  getSuggestedPatchResults,
+  selectSuggestedPatchReplacement
+} from '../src/suggestedPatches';
+import type { ReviewAnchor, ReviewThread, SuggestedPatch } from '../src/types';
 
 const replacePatch: SuggestedPatch = {
   mode: 'replace',
@@ -75,11 +78,55 @@ describe('selectSuggestedPatchReplacement', () => {
 
     assert.deepEqual(result, { result: 'missingPatch' });
   });
+
+  it('summarizes patch applicability before the webview renders apply actions', () => {
+    assert.deepEqual(
+      getSuggestedPatchResults('old sentence', [
+        thread('rv_ready', replacePatch, anchor({ lineStart: 1 })),
+        thread('rv_stale', {
+          mode: 'replace',
+          original: 'stale sentence',
+          replacement: 'new sentence'
+        }, anchor({ text: 'stale sentence', lineStart: 1 })),
+        thread('rv_low_confidence', replacePatch, anchor({ lineStart: 1, confidence: 'approximate' }))
+      ]),
+      {
+        rv_ready: 'applied',
+        rv_stale: 'originalNotFound',
+        rv_low_confidence: 'lowConfidenceAnchor'
+      }
+    );
+  });
 });
 
 function anchor(overrides: Partial<ReviewAnchor>): ReviewAnchor {
   return {
     text: 'old sentence',
     ...overrides
+  };
+}
+
+function thread(
+  id: string,
+  suggestedPatch: SuggestedPatch,
+  reviewAnchor: ReviewAnchor,
+  anchorText = reviewAnchor.text
+): ReviewThread {
+  return {
+    id,
+    documentUri: 'file:///doc.md',
+    anchor: {
+      ...reviewAnchor,
+      text: anchorText
+    },
+    type: 'suggestion',
+    source: 'ai',
+    status: 'open',
+    severity: 'medium',
+    comment: 'Apply this edit.',
+    suggestedPatch,
+    thread: [],
+    createdAt: '2026-05-24T00:00:00.000Z',
+    updatedAt: '2026-05-24T00:00:00.000Z'
   };
 }
