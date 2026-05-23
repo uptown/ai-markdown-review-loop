@@ -40,20 +40,22 @@ fence. It can mention `docs/AI-CONTEXT-BRIEF.md` as an optional durable context
 artifact, but the UI should not force the human into managing that file before
 review work can start.
 
-## Recommended Context Sources
+## Context Discovery
 
 Before the first AI review pass, the bootstrap prompt should tell the AI to
-read these sources in order when they exist:
+start from the current Markdown target, then read shared repo context that is
+available to an AI agent. Useful shared sources often include:
 
-1. `docs/AI-CONTEXT-BRIEF.md`
-2. `docs/PRD.md`
-3. `.agent/PROJECT_STATE.md`
-4. `README.md`
-5. the current Markdown document under review
+- `README.md`
+- `docs/AI-CONTEXT-BRIEF.md`
+- `docs/AI-REVIEW-POLICY.md`
+- `docs/AI-COLLABORATION-LOOP.md`
+- `docs/agent-review-thread.schema.json`
+- nearby docs that explain the same feature, workflow, or product area
 
-If the early files already answer the core questions, the AI can continue with
-the requested review or edit task. If not, it should ask for missing context
-instead of guessing.
+If the available context already answers the core questions, the AI can
+continue with the requested review or edit task. If not, it should ask for
+missing context instead of guessing.
 
 ## Minimum Context Packet
 
@@ -98,7 +100,7 @@ The generated bootstrap prompt should tell the AI to:
 
 - treat the whole opened document as the prompt to follow
 - work in any AI agent that can read/edit repo files
-- read the repo sources in order
+- start from the current Markdown target and discover relevant shared repo docs
 - extract whatever context is already knowable
 - ask at most 3 specific follow-up questions about missing context
 - use AI Markdown Review Loop tools and Review Threads when available

@@ -1,20 +1,14 @@
 import { AGENT_CONTEXT_BRIEF_TEMPLATE } from './agentReviewPolicy';
 
 export interface ContextBootstrapPromptInput {
-  availableSources: readonly string[];
   currentDocumentPath?: string;
   recommendedBriefPath?: string;
 }
 
 export function createContextBootstrapPrompt(input: ContextBootstrapPromptInput): string {
   const recommendedBriefPath = input.recommendedBriefPath ?? 'docs/AI-CONTEXT-BRIEF.md';
-  const orderedSources = dedupeStrings([
-    ...input.availableSources,
-    input.currentDocumentPath ?? ''
-  ].filter(Boolean));
-  const sourceList = formatSourceList(orderedSources);
   const targetInstruction = input.currentDocumentPath
-    ? `The initial Markdown review target is \`${input.currentDocumentPath}\`. If I name a different target later, use the newer target.`
+    ? `Initial Markdown target: \`${input.currentDocumentPath}\`. If I name a different target later, use the newer target.`
     : 'Ask me which Markdown file to review or edit if the target is not already clear from the conversation.';
 
   return [
@@ -26,11 +20,10 @@ export function createContextBootstrapPrompt(input: ContextBootstrapPromptInput)
     '',
     targetInstruction,
     '',
-    'Read these repo context sources first, in order. Skip files that do not exist; do not treat a missing optional source as a blocker by itself:',
-    sourceList,
-    '',
     'Context discovery:',
-    '1. Extract what is already knowable about:',
+    '1. Start with the current Markdown target and nearby docs that explain the same feature, workflow, or product area.',
+    `2. Read shared repo context that is available to an AI agent, especially \`README.md\`, \`${recommendedBriefPath}\`, \`docs/AI-REVIEW-POLICY.md\`, \`docs/AI-COLLABORATION-LOOP.md\`, and \`docs/agent-review-thread.schema.json\` when they are relevant.`,
+    '3. Extract what is already knowable about:',
     '   - Product goal',
     '   - Intended audience',
     '   - Hard constraints',
@@ -38,8 +31,8 @@ export function createContextBootstrapPrompt(input: ContextBootstrapPromptInput)
     '   - Canonical source docs',
     '   - Current open decisions',
     '   - Review focus for this pass',
-    '2. If a required slot is unclear and it changes the review or edit outcome, ask me at most 3 specific questions. Ask only about missing information.',
-    `3. If \`${recommendedBriefPath}\` exists, treat it as durable context. If it is missing or stale, offer a compact draft or refresh using this format:`,
+    '4. If the available context leaves a decision unclear and that decision changes the review or edit outcome, ask me at most 3 specific questions. Ask only about missing information.',
+    `5. Treat \`${recommendedBriefPath}\` as an optional durable context brief when it is available. If durable context would help future review passes, offer a compact draft or refresh using this format:`,
     '',
     AGENT_CONTEXT_BRIEF_TEMPLATE.trimEnd(),
     '',
@@ -65,24 +58,4 @@ export function createContextBootstrapPrompt(input: ContextBootstrapPromptInput)
     '',
     'Do not stop after creating or refreshing context. The goal is to use this context to operate through the review loop while keeping review metadata intact.'
   ].join('\n');
-}
-
-function dedupeStrings(values: readonly string[]): string[] {
-  return [...new Set(values)];
-}
-
-function formatSourceList(sources: readonly string[]): string {
-  const effectiveSources = sources.length > 0
-    ? sources
-    : [
-      'docs/AI-CONTEXT-BRIEF.md',
-      'docs/PRD.md',
-      '.agent/PROJECT_STATE.md',
-      'README.md',
-      'the current Markdown document under review'
-    ];
-
-  return effectiveSources
-    .map((source, index) => `${index + 1}. \`${source}\``)
-    .join('\n');
 }

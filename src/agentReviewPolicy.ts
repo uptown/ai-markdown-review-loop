@@ -48,11 +48,11 @@ export const AGENT_COLLABORATION_LOOP_GUIDELINES = [
 
 export const AGENT_CONTEXT_BOOTSTRAP_GUIDELINES = [
   `Canonical context bootstrap: ${AGENT_CONTEXT_BOOTSTRAP_DOC_PATH}`,
-  'Before the first AI review pass, read repo-owned context files in this order when they exist: `docs/AI-CONTEXT-BRIEF.md`, `docs/PRD.md`, `.agent/PROJECT_STATE.md`, then `README.md`.',
+  'Before the first AI review pass, start from the current Markdown target and read shared repo context that is available to an AI agent, such as `README.md`, `docs/AI-CONTEXT-BRIEF.md`, and the AI Markdown Review Loop policy docs.',
   'Human onboarding should start from a short bootstrap prompt, not from a status panel or a blank context file.',
   'The bootstrap prompt should work with any AI agent: read repo docs, ask only for missing context, use AI Markdown Review Loop tools when available, and preserve colocated sidecar review metadata during Markdown edits.',
   'If `docs/AI-CONTEXT-BRIEF.md` is missing or stale, the AI can draft or refresh it, but brief creation is not the only outcome of bootstrap.',
-  'If those files do not provide enough context, ask the human for the missing pieces instead of guessing.',
+  'If the available context does not provide enough context, ask the human for the missing pieces instead of guessing.',
   'The minimum context packet is: product goal, intended audience, hard constraints, non-goals, canonical source docs, and current open decisions.',
   'Treat explicit user replies in review threads as newer context than older project docs when they conflict.',
   'If key context is missing, prefer opening `question` threads over pretending the requirement is settled.'

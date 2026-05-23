@@ -68,8 +68,8 @@ Any future AI reviewer integration should use both:
 1. A user installs the plugin in a repo with no prior AI review history.
 2. The review preview exposes a single `Open Bootstrap Prompt` action.
 3. The user opens a repo-aware bootstrap prompt. The prompt tells any AI agent what files to read, what missing context to ask for, how to use AI Markdown Review Loop when available, and how to preserve review metadata while editing Markdown.
-4. The AI first looks for `docs/AI-CONTEXT-BRIEF.md`, `docs/PRD.md`, `.agent/PROJECT_STATE.md`, and `README.md`.
-5. If those files still leave key questions unanswered, the AI asks for the missing context packet instead of guessing.
+4. The AI starts from the current Markdown target, then reads shared repo docs such as `README.md`, `docs/AI-CONTEXT-BRIEF.md`, and the AI Markdown Review Loop policy docs when they are relevant.
+5. If the available context still leaves key questions unanswered, the AI asks for the missing context packet instead of guessing.
 6. If a durable brief would help, the AI drafts or refreshes `docs/AI-CONTEXT-BRIEF.md`.
 7. The AI continues with the requested review or edit work and reports any touched `rv_*` thread outcomes.
 

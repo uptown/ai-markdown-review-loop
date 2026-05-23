@@ -5,6 +5,7 @@ import path from 'node:path';
 import {
   AGENT_COLLABORATION_LOOP_DOC_PATH,
   AGENT_CONTEXT_BOOTSTRAP_DOC_PATH,
+  AGENT_CONTEXT_BOOTSTRAP_GUIDELINES,
   AGENT_COMMENTING_GUIDELINES,
   AGENT_EDITING_GUIDELINES,
   AGENT_REVIEW_POLICY_DOC_PATH,
@@ -49,5 +50,12 @@ describe('agent review policy', () => {
     assert.match(bootstrap, /Open Bootstrap Prompt/);
     assert.match(bootstrap, /docs\/AI-CONTEXT-BRIEF.md/);
     assert.match(bootstrap, /colocated `\.<filename>\.ai-review\.json` sidecars/);
+    assert.doesNotMatch(bootstrap, /docs\/PRD.md/);
+    assert.doesNotMatch(bootstrap, /\.agent\/PROJECT_STATE.md/);
+    assert.doesNotMatch(AGENT_CONTEXT_BOOTSTRAP_GUIDELINES.join('\n'), /docs\/PRD.md/);
+    assert.doesNotMatch(
+      AGENT_CONTEXT_BOOTSTRAP_GUIDELINES.join('\n'),
+      /\.agent\/PROJECT_STATE.md/
+    );
   });
 });
