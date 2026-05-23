@@ -84,7 +84,7 @@ Mermaid diagrams render directly inside the review preview:
 flowchart TD
   A[Draft PRD] --> B[AI review]
   B --> C{Next action}
-  C -->|Apply edit| D[Patch document]
+  C -->|Apply suggested patch| D[Patch document]
   D --> B
   C -->|Accept| E[Close as agreed]
   C -->|Resolve| F[Close as handled]
@@ -144,7 +144,7 @@ The preview keeps closed feedback visible under `Review Threads` as history. Clo
 
 ## Agent Handoff
 
-Feedback exports include open thread IDs, source labels, discussion history, anchor confidence, editing guidelines, commenting guidelines, and a future-facing thread-creation contract for AI agents. Agents are instructed to preserve review metadata, make localized edits, report each handled `rv_*` ID with an outcome, avoid closing review threads unless the user explicitly asks for an `accepted`, `resolved`, or `rejected` decision, and follow the repo policy when proposing new AI-authored review threads.
+Feedback exports put open review threads first, followed by source labels, discussion history, anchor confidence, editing guidelines, commenting guidelines, and a future-facing thread-creation contract for AI agents. Agents are instructed to preserve review metadata, make localized edits, report each handled `rv_*` ID with an outcome, avoid closing review threads unless the user explicitly asks for an `accepted`, `resolved`, or `rejected` decision, and follow the repo policy when proposing new AI-authored review threads.
 
 Canonical AI review contracts:
 
@@ -161,7 +161,7 @@ For first-time setup in a repo, the recommended context injection path is:
 4. Let the AI draft or refresh `docs/AI-CONTEXT-BRIEF.md` only when a durable context brief is useful; the bootstrap prompt is also the contract for immediate review and edit work.
 5. Use replies on threads to refine or correct AI assumptions instead of starting over with a new prompt each time.
 
-Suggested replacement patches are treated as document edits, not just review decisions. `Apply Edit` replaces the matching Markdown text, refreshes affected sidecar anchors and context snippets, records an edit outcome reply, and then closes the target thread as `accepted`; if the original text is missing, duplicated ambiguously, or attached to a low-confidence anchor, the extension leaves the thread open.
+Suggested replacement patches are treated as document edits, not just review decisions. `Apply Suggested Patch` replaces the matching Markdown text, refreshes affected sidecar anchors and context snippets, records an edit outcome reply, and then closes the target thread as `accepted`; if the original text is missing, duplicated ambiguously, or attached to a low-confidence anchor, the extension leaves the thread open.
 
 Rendered block edits use the same review-aware edit pipeline. The MVP editor is intentionally constrained to source-mapped Markdown blocks instead of replacing the whole file with a free-form WYSIWYG surface, so open comments can stay attached to the edited range and ordinary source edits still fall back to debounced re-anchoring.
 

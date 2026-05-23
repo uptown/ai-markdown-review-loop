@@ -1033,6 +1033,19 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
       color: #ffe9a3;
       background: rgba(215, 161, 0, 0.22);
     }
+    .quality-warning {
+      margin: 8px 0;
+      border: 1px solid var(--vscode-inputValidation-warningBorder, #cca700);
+      border-radius: 4px;
+      padding: 7px 8px;
+      color: var(--vscode-inputValidation-warningForeground, var(--vscode-editor-foreground));
+      background: var(--vscode-inputValidation-warningBackground, rgba(204, 167, 0, 0.12));
+      font-size: 12px;
+      line-height: 1.4;
+    }
+    .quality-warning[hidden] {
+      display: none;
+    }
     .decision-chip {
       border-color: var(--border);
       color: var(--muted);
@@ -1606,6 +1619,7 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
   <form id="comment-composer" class="comment-composer">
     <p class="comment-composer-label">Comment on selected text</p>
     <textarea id="comment-body" placeholder="Add feedback for this selection"></textarea>
+    <p id="comment-quality-warning" class="quality-warning" hidden></p>
     <div class="comment-composer-actions">
       <button type="button" id="comment-cancel" class="secondary compact">Cancel</button>
       <button type="submit" class="compact">Save</button>
@@ -1670,6 +1684,7 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
     const selectionCommentButton = document.getElementById('selection-comment');
     const commentComposer = document.getElementById('comment-composer');
     const commentBody = document.getElementById('comment-body');
+    const commentQualityWarning = document.getElementById('comment-quality-warning');
     const commentCancel = document.getElementById('comment-cancel');
     const commentOverlay = document.getElementById('comment-overlay');
     const blockEditor = document.getElementById('block-editor');
@@ -1907,6 +1922,10 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
       window.getSelection()?.removeAllRanges();
     });
 
+    commentBody.addEventListener('input', () => {
+      updateCommentQualityWarning();
+    });
+
     document.addEventListener('submit', (event) => {
       const target = event.target;
 
@@ -2122,6 +2141,7 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
           '<header><span class="thread-meta">' + renderSourceChip(thread) + renderMetaChip('Type', thread.type) + '<span class="anchor-state-chip" data-anchor-state>Locating</span></span>' + renderMetaChip('Severity', thread.severity) + '</header>',
           '<blockquote>' + escapeHtml(thread.anchor.text || 'Document') + '</blockquote>',
           '<p>' + escapeHtml(thread.comment) + '</p>',
+          renderCommentQualityWarning(thread.comment),
           renderSuggestedPatch(thread),
           renderReplies(thread),
           renderReplyForm(thread),
@@ -3429,6 +3449,7 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
         renderMetaChip('Status', thread.status || 'open'),
         '</div>',
         '<p class="comment-overlay-comment">' + escapeHtml(thread.comment || '') + '</p>',
+        renderCommentQualityWarning(thread.comment),
         renderSuggestedPatch(thread),
         renderReplies(thread),
         renderReplyForm(thread),
@@ -3453,10 +3474,20 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
         '<summary>Suggested edit</summary>',
         '<pre><code>- ' + escapeHtml(patch.original || '') + '\\n+ ' + escapeHtml(patch.replacement || '') + '</code></pre>',
         '<div class="suggested-patch-actions">',
-        '<button type="button" class="compact" title="Apply this replacement and close the thread as accepted." data-thread-id="' + escapeHtml(thread.id) + '" data-apply-suggested-patch>Apply Edit</button>',
+        '<button type="button" class="compact" title="Apply this replacement and close the thread as accepted." data-thread-id="' + escapeHtml(thread.id) + '" data-apply-suggested-patch>Apply Suggested Patch</button>',
         '</div>',
         '</details>'
       ].join('');
+    }
+
+    function renderCommentQualityWarning(comment) {
+      const warning = commentQualityWarningText(comment);
+
+      if (!warning) {
+        return '';
+      }
+
+      return '<p class="quality-warning">Agent handoff warning: ' + escapeHtml(warning) + '</p>';
     }
 
     function renderReplies(thread) {
@@ -3870,6 +3901,7 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
       }
       hideSelectionPopover();
       commentBody.value = '';
+      updateCommentQualityWarning();
       positionFloatingElement(commentComposer, activeSelectionRect, 340);
       commentComposer.style.display = 'block';
       commentBody.focus();
@@ -3882,6 +3914,7 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
     function hideComposer() {
       commentComposer.style.display = 'none';
       commentBody.value = '';
+      updateCommentQualityWarning();
     }
 
     function hideComposerIfEmpty(target) {
@@ -3898,6 +3931,37 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
       }
 
       hideComposer();
+    }
+
+    function updateCommentQualityWarning() {
+      const warning = commentQualityWarningText(commentBody.value);
+
+      if (!warning || !commentBody.value.trim()) {
+        commentQualityWarning.hidden = true;
+        commentQualityWarning.textContent = '';
+        return;
+      }
+
+      commentQualityWarning.hidden = false;
+      commentQualityWarning.textContent = 'Agent handoff warning: ' + warning;
+    }
+
+    function commentQualityWarningText(comment) {
+      const normalized = String(comment || '').trim().replace(/\\s+/g, ' ');
+
+      if (!normalized) {
+        return 'Comment is empty, so an AI agent has no actionable instruction.';
+      }
+
+      if (normalized.length < 8) {
+        return 'Comment is too short for reliable AI handoff; add the expected action or reason.';
+      }
+
+      if (!/[\\p{L}\\p{N}]/u.test(normalized)) {
+        return 'Comment has no readable words or numbers; add a concrete action or question.';
+      }
+
+      return '';
     }
 
     function positionFloatingElement(element, rect, preferredWidth) {

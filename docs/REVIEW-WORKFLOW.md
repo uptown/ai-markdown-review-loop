@@ -21,8 +21,8 @@ This extension is built around repeated document-review loops between human auth
 ## Action Vocabulary
 
 - `Reply`: add context, clarification, or objection without changing status.
-- `Apply edit`: change the Markdown manually or through an agent patch. This does not close a thread by itself.
-- `Apply Edit`: extension action for a suggested replacement patch. It mutates the Markdown and closes the thread as `accepted` only when the original text has one reliable target.
+- `Manual edit`: change the Markdown directly from source or a rendered editor. This does not close a thread by itself.
+- `Apply Suggested Patch`: extension action for a suggested replacement patch. It mutates the Markdown and closes the thread as `accepted` only when the original text has one reliable target.
 - `Edit block`: constrained rendered-preview Markdown editing for a source-mapped block. It mutates Markdown and refreshes overlapping thread anchors without deciding review status.
 - `Edit Mermaid`: source editor for a Mermaid fenced code block. It replaces only that fenced block and refreshes overlapping thread anchors without deciding review status.
 - `Rewrite block`: manual rewrite path that uses the same review-aware edit pipeline reserved for future AI rewrite integration.
@@ -30,7 +30,7 @@ This extension is built around repeated document-review loops between human auth
 - `Resolve`: close because the underlying issue has been handled, superseded, or no longer applies.
 - `Reject`: close because the recommendation is intentionally declined.
 - `Restore`: reopen a closed thread, move it back to active feedback, and attach it to the current document again.
-- `Re-anchor`: attach a drifted comment to a new document location.
+- `Needs re-anchor`: state shown when the original anchor cannot be located reliably; reply, edit manually, restore context, or clean stale anchors rather than assuming the feedback disappeared.
 - `Clean stale anchors`: remove broken metadata only; this is not a review decision.
 - `Export for Agent`: package open threads for AI work without mutating review state.
 
@@ -92,7 +92,7 @@ Any future AI reviewer integration should use both:
 1. AI feedback includes a suggested replacement patch.
 2. The author opens the thread and reviews the diff.
 3. The extension checks that the original text still exists at a reliable anchor.
-4. The author clicks `Apply Edit`.
+4. The author clicks `Apply Suggested Patch`.
 5. The extension replaces the Markdown text, refreshes affected sidecar anchors and context snippets, records edit outcome replies, removes the open target anchor, archives the target thread as `accepted`, and leaves an audit log pointer.
 6. If the text is missing, duplicated ambiguously, or attached to a low-confidence anchor, the thread remains open for reply, re-anchor, or manual editing.
 

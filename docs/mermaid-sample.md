@@ -6,7 +6,7 @@ This file is a quick manual smoke test for the review preview.
 flowchart TD
   A[Draft PRD] --> B[AI review]
   B --> C{Next action}
-  C -->|Apply edit| D[Patch document]
+  C -->|Apply suggested patch| D[Patch document]
   D --> B
   C -->|Accept| E[Close as agreed]
   C -->|Resolve| F[Close as handled]
@@ -16,5 +16,6 @@ flowchart TD
 
 Review target:
 
-- Select this sentence and add normal text feedback.
+- Select this sentence and add a useful text comment.
+- Try a too-short comment first to see the handoff quality warning.
 - Use the diagram card Feedback button to attach feedback to the Mermaid source.

@@ -51,10 +51,30 @@ describe('renderFeedbackExport', () => {
           thread: [],
           createdAt: '2026-05-22T00:00:00.000Z',
           updatedAt: '2026-05-22T00:00:00.000Z'
+        },
+        {
+          id: 'rv_vague',
+          documentUri: 'file:///workspace/spec.md',
+          anchor: {
+            text: 'Vague text',
+            lineStart: 5,
+            confidence: 'exact'
+          },
+          type: 'note',
+          source: 'human',
+          status: 'open',
+          severity: 'medium',
+          comment: 'ㄴㅇ',
+          thread: [],
+          createdAt: '2026-05-22T00:00:00.000Z',
+          updatedAt: '2026-05-22T00:00:00.000Z'
         }
       ]
     } satisfies ReviewDocument);
 
+    assert.match(output, /## Open Review Threads/);
+    assert.ok(output.indexOf('## Open Review Threads') < output.indexOf('## Agent Editing Guidelines'));
+    assert.ok(output.indexOf('## rv_open') < output.indexOf('## Agent Editing Guidelines'));
     assert.match(output, /## Agent Editing Guidelines/);
     assert.match(output, /## Agent Commenting Guidelines/);
     assert.match(output, /## Agent Thread Creation Contract/);
@@ -72,6 +92,10 @@ describe('renderFeedbackExport', () => {
     assert.match(output, /## rv_open/);
     assert.match(output, /- Anchor confidence: recovered/);
     assert.match(output, /- Allowed to close: no/);
+    assert.match(output, /- Handoff quality: ready/);
+    assert.match(output, /## rv_vague/);
+    assert.match(output, /- Handoff quality: needs_detail/);
+    assert.match(output, /Comment is too short for reliable AI handoff/);
     assert.match(output, /Suggested patch:/);
     assert.doesNotMatch(output, /rv_closed/);
   });

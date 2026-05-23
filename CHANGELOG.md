@@ -19,8 +19,8 @@
 - Debounces review anchor maintenance and only auto-saves high-confidence anchor relocations to the sidecar.
 - Labels review metadata chips as type, severity, and status instead of showing bare values.
 - Adds Accept actions to close agreed review feedback separately from resolve/reject.
-- Shows suggested replacement patches with an Apply Edit action that updates Markdown only when the target is reliable.
-- Routes Apply Edit through a review-aware edit service that refreshes sidecar anchors/context and records edit outcome replies.
+- Shows suggested replacement patches with an `Apply Suggested Patch` action that updates Markdown only when the target is reliable.
+- Routes `Apply Suggested Patch` through a review-aware edit service that refreshes sidecar anchors/context and records edit outcome replies.
 - Adds a constrained rendered-block Markdown editor and rewrite path that use the same review-aware edit pipeline.
 - Uses Turndown for block-editor HTML-to-Markdown conversion instead of a hand-rolled serializer.
 - Hardens rendered-block HTML-to-Markdown conversion for empty inline tags, task lists, fenced code languages, pasted tables, and malformed emphasis.
@@ -42,6 +42,8 @@
 - Updates partial comment anchors to the edited word or phrase when a reviewed text fragment changes in place.
 - Humanizes automatic review update replies and hides older internal edit-pipeline wording in the preview.
 - Keeps review sidecar updates in sync with Ctrl+Z/Ctrl+Shift+Z for review-aware edits and review marker changes.
+- Moves agent exports to a threads-first layout and flags review comments that are too vague for reliable AI handoff.
+- Cleans the Mermaid smoke-test sample so source view does not start with stale review metadata.
 - Adds Node unit and scenario tests for suggested patch selection, review-aware edits, inline anchor metadata, review lifecycle flow, and agent feedback export guardrails.
 - Extends license policy guidance to cover test tooling and future dependencies.
 - Adds agent editing guidelines and workflow documentation for iterative human/AI review handoff.
