@@ -4,7 +4,7 @@ import { randomUUID } from 'crypto';
 import { openContextBootstrapPrompt } from './contextBootstrap';
 import { AnchorMaintenanceController } from './anchorMaintenance';
 import { createAnchor } from './anchors';
-import { htmlBlockToMarkdown, preserveSourceListMarker } from './htmlToMarkdown';
+import { htmlBlockToMarkdown } from './htmlToMarkdown';
 import { createMermaidFenceReplacement } from './mermaidEdits';
 import {
   findStaleInlineAnchorMarkers,
@@ -319,7 +319,6 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
         if (message?.type === 'editMarkdownBlock') {
           const lineStart = parseSourceLine(message.lineStart);
           const lineEnd = parseSourceLine(message.lineEnd);
-          const replacementMarkdown = htmlBlockToMarkdown(String(message.html ?? ''));
           const intent = parseReviewAwareEditIntent(message.intent);
 
           if (!lineStart || !lineEnd || lineEnd < lineStart || !intent) {
@@ -327,13 +326,16 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
             return;
           }
 
-          const replacement = preserveSourceListMarker(document.getText(), lineStart, replacementMarkdown);
+          const replacementMarkdown = htmlBlockToMarkdown(String(message.html ?? ''), {
+            sourceMarkdown: document.getText(),
+            oneBasedLineStart: lineStart
+          });
 
           await this.anchorMaintenance.flush(document);
           const plan = createLineRangeEditPlan(document.getText(), {
             lineStart,
             lineEnd,
-            replacement,
+            replacement: replacementMarkdown,
             actor: 'user',
             intent
           });
@@ -1231,6 +1233,27 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
     .block-editor-surface:focus {
       box-shadow: inset 0 0 0 1px var(--vscode-focusBorder);
     }
+    .editable-list-item {
+      display: grid;
+      grid-template-columns: auto minmax(0, 1fr);
+      gap: 8px;
+      align-items: start;
+    }
+    .editable-list-marker {
+      color: var(--muted);
+      font-variant-numeric: tabular-nums;
+      user-select: none;
+      padding-top: 1px;
+    }
+    .editable-list-body {
+      min-width: 0;
+    }
+    .editable-list-body > :first-child {
+      margin-top: 0;
+    }
+    .editable-list-body > :last-child {
+      margin-bottom: 0;
+    }
     .mermaid-editor-source {
       box-sizing: border-box;
       width: 100%;
@@ -1733,7 +1756,7 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
         type: 'editMarkdownBlock',
         lineStart: activeBlockEdit.lineStart,
         lineEnd: activeBlockEdit.lineEnd,
-        html: blockEditorSurface.innerHTML,
+        html: serializeBlockEditorHtml(),
         intent: activeBlockEdit.intent
       });
       hideBlockEditor();
@@ -2545,6 +2568,19 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
     }
 
     function wrapEditableListItemHtml(block, innerHtml) {
+      return [
+        '<div class="editable-list-item" data-editable-list-item>',
+        '<span class="editable-list-marker" contenteditable="false" aria-hidden="true">',
+        escapeHtml(getListMarkerLabel(block)),
+        '</span>',
+        '<div class="editable-list-body" data-editable-list-body>',
+        innerHtml,
+        '</div>',
+        '</div>'
+      ].join('');
+    }
+
+    function getListMarkerLabel(block) {
       const list = block.parentElement;
       const listTag = list?.tagName?.toLowerCase();
 
@@ -2553,15 +2589,20 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
         const itemIndex = Array.from(list.children)
           .filter((child) => child.tagName?.toLowerCase() === 'li')
           .indexOf(block);
-        const itemNumber = start + Math.max(0, itemIndex);
-        return '<ol start="' + itemNumber + '"><li>' + innerHtml + '</li></ol>';
+        return String(start + Math.max(0, itemIndex)) + '.';
       }
 
-      if (listTag === 'ul') {
-        return '<ul><li>' + innerHtml + '</li></ul>';
+      return '-';
+    }
+
+    function serializeBlockEditorHtml() {
+      const listBody = blockEditorSurface.querySelector('[data-editable-list-body]');
+
+      if (listBody instanceof HTMLElement) {
+        return '<li>' + listBody.innerHTML + '</li>';
       }
 
-      return '<li>' + innerHtml + '</li>';
+      return blockEditorSurface.innerHTML;
     }
 
     function getEditableLineRange(block) {

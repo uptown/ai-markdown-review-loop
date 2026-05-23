@@ -28,6 +28,11 @@ const turndown = new TurndownService({
   linkStyle: 'inlined'
 });
 
+export interface HtmlBlockSourceContext {
+  sourceMarkdown: string;
+  oneBasedLineStart: number;
+}
+
 turndown.addRule('emptyLink', {
   filter: node => {
     return node.nodeName.toLowerCase() === 'a' && !normalizeInlineText(node.textContent || '');
@@ -91,31 +96,12 @@ turndown.addRule('styleCode', {
   }
 });
 
-export function htmlBlockToMarkdown(html: string): string {
-  return cleanMarkdown(turndown.turndown(html));
-}
-
-export function preserveSourceListMarker(
-  sourceMarkdown: string,
-  oneBasedLineStart: number,
-  replacementMarkdown: string
+export function htmlBlockToMarkdown(
+  html: string,
+  sourceContext?: HtmlBlockSourceContext
 ): string {
-  const sourceLine = sourceMarkdown.split(/\r?\n/)[oneBasedLineStart - 1] ?? '';
-  const sourceMarker = parseListMarker(sourceLine);
-
-  if (!sourceMarker) {
-    return replacementMarkdown;
-  }
-
-  const lines = replacementMarkdown.split(/\r?\n/);
-  const replacementMarker = parseListMarker(lines[0] ?? '');
-
-  if (!replacementMarker) {
-    return replacementMarkdown;
-  }
-
-  lines[0] = `${replacementMarker.indent}${sourceMarker.marker} ${replacementMarker.content}`;
-  return lines.join('\n');
+  const markdown = cleanMarkdown(turndown.turndown(html));
+  return sourceContext ? preserveSourceBlockSyntax(markdown, sourceContext) : markdown;
 }
 
 function toCodeSpan(value: string): string {
@@ -303,4 +289,33 @@ function parseListMarker(line: string): {
   }
 
   return undefined;
+}
+
+function preserveSourceBlockSyntax(
+  replacementMarkdown: string,
+  sourceContext: HtmlBlockSourceContext
+): string {
+  const sourceLine = sourceContext.sourceMarkdown.split(/\r?\n/)[sourceContext.oneBasedLineStart - 1] ?? '';
+  const sourceMarker = parseListMarker(sourceLine);
+
+  if (!sourceMarker) {
+    return replacementMarkdown;
+  }
+
+  const lines = replacementMarkdown.split(/\r?\n/);
+  const replacementMarker = parseListMarker(lines[0] ?? '');
+
+  if (!replacementMarker) {
+    return replacementMarkdown;
+  }
+
+  lines[0] = `${sourceMarker.indent}${sourceMarker.marker} ${replacementMarker.content}`;
+
+  for (let index = 1; index < lines.length; index += 1) {
+    if (sourceMarker.indent && lines[index].trim()) {
+      lines[index] = `${sourceMarker.indent}${lines[index]}`;
+    }
+  }
+
+  return lines.join('\n');
 }
