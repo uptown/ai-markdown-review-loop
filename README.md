@@ -32,6 +32,7 @@ The first MVP focuses on a local workflow:
 - Export unresolved feedback as Markdown for an AI coding agent.
 - Ship a repo-owned AI review policy and thread-creation schema for future AI reviewer integrations.
 - Document the human-AI collaboration loop and first-pass context bootstrap path.
+- Run deterministic AI reviewer and human author simulations to collect review-loop product feedback.
 - Open a generic AI bootstrap prompt from the review preview so any AI agent can learn the review loop and preserve comments while editing Markdown.
 - Open an AI feedback loop prompt when an agent should continue active Review Threads, apply explicit suggested patches, or draft replies without losing review metadata.
 - Run a local heuristic document review to seed obvious feedback items.
@@ -156,6 +157,7 @@ Canonical AI review contracts:
 - [AI Review Policy](./docs/AI-REVIEW-POLICY.md)
 - [AI Collaboration Loop](./docs/AI-COLLABORATION-LOOP.md)
 - [AI Context Bootstrap](./docs/AI-CONTEXT-BOOTSTRAP.md)
+- [Review Loop Simulation](./docs/REVIEW-LOOP-SIMULATION.md)
 - [AI Review Thread Schema](./docs/agent-review-thread.schema.json)
 
 For first-time setup in a repo, the recommended context injection path is:

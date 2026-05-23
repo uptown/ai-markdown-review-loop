@@ -51,6 +51,7 @@ export function createFeedbackLoopPrompt(input: FeedbackLoopPromptInput): string
     '',
     'Action semantics:',
     '- `Apply Suggested Patch` means the human wants the proposed Markdown change applied. Apply the patch through the review-aware edit path, refresh affected anchors, record an edit outcome reply, and close the target thread as `accepted` only after the edit succeeds.',
+    '- If the human says "accept this suggestion" and the thread has a safe suggested patch, treat that as an apply request. If there is no safe patch target, ask before closing anything.',
     '- `Agree` means the human agrees with the feedback. Add or draft a reply; do not mutate the document or close the thread unless the human also asks to apply a patch or resolve the issue.',
     '- `Disagree` means the human is challenging the feedback. Add or draft a reply with the reason, then continue the same thread unless the issue has split into a separate concern.',
     '- `Revise` means the human wants a sharper comment or patch. Reply with a narrower diagnosis, a revised suggested patch, or a specific clarifying question.',
@@ -69,7 +70,7 @@ export function createFeedbackLoopPrompt(input: FeedbackLoopPromptInput): string
     '',
     'Final response requirements:',
     '- List each touched `rv_*` thread.',
-    '- For each one, report one outcome: replied, applied patch, edited nearby, preserved, stale, blocked, resolved by human request, or needs human decision.',
+    '- For each one, report one outcome: replied - waiting for human decision, applied patch, edited nearby, preserved, stale, blocked, resolved by human request, or needs human decision.',
     '- Do not claim the loop is complete until every open feedback item involved in this turn has an explicit outcome.'
   ].join('\n');
 }

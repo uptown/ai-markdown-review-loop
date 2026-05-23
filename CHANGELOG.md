@@ -32,6 +32,8 @@
 - Adds repo-owned AI review policy, collaboration-loop docs, context bootstrap commands, and guarded rename migration for review sidecars.
 - Simplifies the preview AI context entry point to one bootstrap prompt action and makes that prompt a generic agent contract for review-loop usage and comment-preserving Markdown edits.
 - Adds an AI feedback loop prompt for continuing active review threads, drafting replies, and applying explicit suggested patches through the review-aware edit path.
+- Clarifies feedback-loop prompt behavior for "accept this suggestion" so safe suggested patches are treated as apply requests instead of close-only decisions.
+- Adds a deterministic AI reviewer and human author simulation harness plus a review-loop feedback report.
 - Submits comment and reply textareas with Enter while keeping Shift+Enter for multi-line text.
 - Keeps the active comment overlay or review thread focused after saving a reply.
 - Shows accepted, resolved, and rejected review history with linked/outdated anchor state and a Restore action.
@@ -46,6 +48,7 @@
 - Moves agent exports to a threads-first layout and flags review comments that are too vague for reliable AI handoff.
 - Cleans the Mermaid smoke-test sample so source view does not start with stale review metadata.
 - Adds Node unit and scenario tests for suggested patch selection, review-aware edits, inline anchor metadata, review lifecycle flow, and agent feedback export guardrails.
+- Adds regression coverage for simulated review-loop scenarios, including patch application clarity, anchor preservation visibility, AI handoff continuity, and human-gated closure.
 - Extends license policy guidance to cover test tooling and future dependencies.
 - Adds agent editing guidelines and workflow documentation for iterative human/AI review handoff.
 

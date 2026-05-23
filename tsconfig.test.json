@@ -15,6 +15,7 @@
     "src/reviewAwareEdits.ts",
     "src/reviewDocumentUpdates.ts",
     "src/reviewHistory.ts",
+    "src/reviewLoopSimulation.ts",
     "src/reviewSidecarCodec.ts",
     "src/reviewSidecarPaths.ts",
     "src/suggestedPatches.ts",

@@ -23,6 +23,7 @@ export function createContextBootstrapPrompt(input: ContextBootstrapPromptInput)
     '',
     'Review-loop rules:',
     '- Treat review threads as conversation state. Prefer replying to an existing `rv_*` thread over opening a duplicate.',
+    '- If existing review threads, replies, or suggested patches are already in play, switch to the AI Feedback Loop Prompt or focused feedback export before continuing.',
     '- If you create AI-authored feedback, identify it as AI-authored and keep it specific, actionable, and anchored to the smallest stable text span.',
     '- Do not close a thread or mark it accepted, resolved, or rejected unless the human explicitly asks for that decision.',
     '- Apply a suggested Markdown change only when the human explicitly asks you to apply it and the target text is unambiguous.',

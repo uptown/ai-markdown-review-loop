@@ -18,6 +18,7 @@ describe('createContextBootstrapPrompt', () => {
     assert.match(prompt, /docs\/AI-COLLABORATION-LOOP.md/);
     assert.match(prompt, /ask at most 3 specific questions/i);
     assert.match(prompt, /Treat review threads as conversation state/);
+    assert.match(prompt, /switch to the AI Feedback Loop Prompt/);
     assert.match(prompt, /Apply a suggested Markdown change only when the human explicitly asks/i);
     assert.match(prompt, /hidden `\.<filename>\.ai-review\.json` sidecars/);
     assert.match(prompt, /inline `ai-review-\*` metadata comments/);
