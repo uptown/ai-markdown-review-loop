@@ -49,7 +49,9 @@ describe('agent review policy', () => {
     assert.match(bootstrap, /Prompt First, Brief Optional/);
     assert.match(bootstrap, /Open Bootstrap Prompt/);
     assert.match(bootstrap, /docs\/AI-CONTEXT-BRIEF.md/);
-    assert.match(bootstrap, /colocated `\.<filename>\.ai-review\.json` sidecars/);
+    assert.match(bootstrap, /nearby `\.<filename>\.ai-review\.json` sidecars/);
+    assert.match(bootstrap, /`ai-review-\*` metadata comments/);
+    assert.match(bootstrap, /should not embed the context brief template/);
     assert.doesNotMatch(bootstrap, /docs\/PRD.md/);
     assert.doesNotMatch(bootstrap, /\.agent\/PROJECT_STATE.md/);
     assert.doesNotMatch(AGENT_CONTEXT_BOOTSTRAP_GUIDELINES.join('\n'), /docs\/PRD.md/);
