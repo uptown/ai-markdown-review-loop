@@ -33,6 +33,7 @@
 - Adds repo-owned AI review policy, collaboration-loop docs, context bootstrap commands, and guarded rename migration for review sidecars.
 - Simplifies the preview AI context entry point to one bootstrap prompt action and makes that prompt a generic agent contract for review-loop usage and comment-preserving Markdown edits.
 - Adds an AI feedback loop prompt for continuing active review threads, drafting replies, and applying explicit suggested patches through the review-aware edit path.
+- Opens generated prompt and feedback-export documents as read-only virtual Markdown so VS Code does not wait to back up unsaved prompt editors during reload.
 - Clarifies feedback-loop prompt behavior for "accept this suggestion" so safe suggested patches are treated as apply requests instead of close-only decisions.
 - Adds a deterministic AI reviewer and human author simulation harness plus a review-loop feedback report.
 - Submits comment and reply textareas with Enter while keeping Shift+Enter for multi-line text.

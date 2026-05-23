@@ -5,6 +5,7 @@ import { openFeedbackLoopPrompt } from './feedbackLoopPrompt';
 import { findStaleInlineAnchorMarkers, insertInlineAnchorMarker } from './inlineMarkers';
 import { rebaseInlineReviewMetadataSidecars } from './inlineMarkerPayloads';
 import { createLocalReviewThreads } from './localReview';
+import { openReadOnlyMarkdownPrompt, registerPromptDocumentProvider } from './promptDocuments';
 import { ReviewEditorProvider, reviewEditorViewType } from './reviewEditorProvider';
 import { ReviewStore } from './reviewStore';
 
@@ -14,6 +15,7 @@ export function activate(context: vscode.ExtensionContext): void {
 
   context.subscriptions.push(
     provider,
+    registerPromptDocumentProvider(),
     vscode.window.registerCustomEditorProvider(reviewEditorViewType, provider, {
       webviewOptions: {
         retainContextWhenHidden: true
@@ -101,12 +103,7 @@ export function activate(context: vscode.ExtensionContext): void {
       }
 
       const exportText = appendStorageWarning(renderFeedbackExport(reviewDocument), missingMarkers);
-      const exportDocument = await vscode.workspace.openTextDocument({
-        content: exportText,
-        language: 'markdown'
-      });
-
-      await vscode.window.showTextDocument(exportDocument, vscode.ViewColumn.Beside);
+      await openReadOnlyMarkdownPrompt('AI Review Feedback Export', exportText);
     }),
     vscode.commands.registerCommand('aiMarkdownReviewLoop.openContextBootstrapPrompt', async (targetUri?: vscode.Uri) => {
       const opened = await openContextBootstrapPrompt(targetUri);

@@ -18,16 +18,8 @@ export async function openFeedbackLoopPrompt(
     ? vscode.workspace.asRelativePath(documentUri, false)
     : undefined;
   const prompt = createFeedbackLoopPrompt({ currentDocumentPath });
-  const document = await vscode.workspace.openTextDocument({
-    content: `${prompt}\n`,
-    language: 'markdown'
-  });
-
-  await vscode.window.showTextDocument(document, {
-    preview: false,
-    viewColumn: vscode.ViewColumn.Beside
-  });
-  return document;
+  const { openReadOnlyMarkdownPrompt } = await import('./promptDocuments');
+  return openReadOnlyMarkdownPrompt('AI Feedback Loop Prompt', prompt);
 }
 
 export function createFeedbackLoopPrompt(input: FeedbackLoopPromptInput): string {

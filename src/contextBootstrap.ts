@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import { createContextBootstrapPrompt } from './contextBootstrapPrompt';
+import { openReadOnlyMarkdownPrompt } from './promptDocuments';
 
 export const AI_CONTEXT_BRIEF_RELATIVE_PATH = 'docs/AI-CONTEXT-BRIEF.md';
 
@@ -19,16 +20,7 @@ export async function openContextBootstrapPrompt(
     currentDocumentPath,
     recommendedBriefPath: AI_CONTEXT_BRIEF_RELATIVE_PATH
   });
-  const document = await vscode.workspace.openTextDocument({
-    content: `${prompt}\n`,
-    language: 'markdown'
-  });
-
-  await vscode.window.showTextDocument(document, {
-    preview: false,
-    viewColumn: vscode.ViewColumn.Beside
-  });
-  return document;
+  return openReadOnlyMarkdownPrompt('AI Context Bootstrap Prompt', prompt);
 }
 
 function resolveWorkspaceFolder(documentUri?: vscode.Uri): vscode.WorkspaceFolder | undefined {
