@@ -33,9 +33,56 @@ describe('review history', () => {
     assert.equal(restored.thread[1].role, 'user');
     assert.match(restored.thread[1].text, /restored this closed thread/);
   });
+
+  it('marks repeated history anchors outdated when no line, occurrence, or context disambiguates them', () => {
+    const states = getReviewHistoryAnchorStates(
+      [
+        'Alpha repeated phrase',
+        'Spacer',
+        'Omega repeated phrase'
+      ].join('\n'),
+      [
+        thread('rv_ambiguous', 'repeated phrase', {
+          lineStart: undefined,
+          lineEnd: undefined,
+          occurrence: undefined,
+          contextBefore: undefined,
+          contextAfter: undefined
+        })
+      ]
+    );
+
+    assert.deepEqual(states, {
+      rv_ambiguous: 'outdated'
+    });
+  });
+
+  it('keeps repeated history anchors linked when the stored line still matches', () => {
+    const states = getReviewHistoryAnchorStates(
+      [
+        'Alpha repeated phrase',
+        'Spacer',
+        'Omega repeated phrase'
+      ].join('\n'),
+      [
+        thread('rv_linked_line', 'repeated phrase', {
+          lineStart: 3,
+          lineEnd: 3
+        })
+      ]
+    );
+
+    assert.deepEqual(states, {
+      rv_linked_line: 'linked'
+    });
+  });
 });
 
-function thread(id: string, anchorText: string): ReviewThread {
+function thread(
+  id: string,
+  anchorText: string,
+  anchorOverrides: Partial<ReviewThread['anchor']> = {}
+): ReviewThread {
   return {
     id,
     documentUri: 'file:///workspace/spec.md',
@@ -43,7 +90,8 @@ function thread(id: string, anchorText: string): ReviewThread {
       text: anchorText,
       lineStart: 1,
       lineEnd: 1,
-      confidence: 'exact'
+      confidence: 'exact',
+      ...anchorOverrides
     },
     type: 'note',
     source: 'human',

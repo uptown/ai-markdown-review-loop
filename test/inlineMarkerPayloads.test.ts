@@ -5,6 +5,7 @@ import {
   createInlineAnchorMarker,
   findStaleInlineAnchorMarkers,
   readInlineAnchorMarkers,
+  rebaseInlineReviewMetadataSidecars,
   removeInlineAnchorMarkersFromMarkdown,
   removeInlineAnchorMarkerPayloads,
   removeInlineReviewLogMarkers,
@@ -144,6 +145,67 @@ describe('inline marker payloads', () => {
         '<!-- ai-review-anchors:{"sidecar":".ai-markdown-review/documents/spec.json","ids":["rv_b"]} -->',
         '<!-- ai-review-log:{"id":"rv_a","status":"accepted","sidecar":".ai-markdown-review/resolved/spec.json","updatedAt":"2026-05-23T00:00:00.000Z"} -->',
         ''
+      ].join('\n')
+    );
+  });
+
+  it('rebases anchor and review log sidecar paths after a document rename', () => {
+    const markdown = [
+      'Body',
+      '<!-- ai-review-anchors:{"sidecar":".ai-markdown-review/documents/old.json","ids":["rv_a"]} -->',
+      '<!-- ai-review-log:{"id":"rv_done","status":"resolved","sidecar":".ai-markdown-review/resolved/old.json","updatedAt":"2026-05-23T00:00:00.000Z"} -->'
+    ].join('\n');
+
+    assert.equal(
+      rebaseInlineReviewMetadataSidecars(markdown, {
+        '.ai-markdown-review/documents/old.json': '.ai-markdown-review/documents/new.json',
+        '.ai-markdown-review/resolved/old.json': '.ai-markdown-review/resolved/new.json'
+      }),
+      [
+        'Body',
+        '<!-- ai-review-anchors:{"sidecar":".ai-markdown-review/documents/new.json","ids":["rv_a"]} -->',
+        '<!-- ai-review-log:{"id":"rv_done","status":"resolved","sidecar":".ai-markdown-review/resolved/new.json","updatedAt":"2026-05-23T00:00:00.000Z"} -->'
+      ].join('\n')
+    );
+  });
+
+  it('rebases adjacent metadata comments even when logs share one line', () => {
+    const markdown = [
+      'Body',
+      '<!-- ai-review-log:{"id":"rv_a","status":"resolved","sidecar":".ai-markdown-review/resolved/old.json","updatedAt":"2026-05-23T00:00:00.000Z"} --> <!-- ai-review-anchor:{"id":"rv_b","sidecar":".ai-markdown-review/documents/old.json"} -->'
+    ].join('\n');
+
+    assert.equal(
+      rebaseInlineReviewMetadataSidecars(markdown, {
+        '.ai-markdown-review/documents/old.json': '.ai-markdown-review/documents/new.json',
+        '.ai-markdown-review/resolved/old.json': '.ai-markdown-review/resolved/new.json'
+      }),
+      [
+        'Body',
+        '<!-- ai-review-log:{"id":"rv_a","status":"resolved","sidecar":".ai-markdown-review/resolved/new.json","updatedAt":"2026-05-23T00:00:00.000Z"} --> <!-- ai-review-anchor:{"id":"rv_b","sidecar":".ai-markdown-review/documents/new.json"} -->'
+      ].join('\n')
+    );
+  });
+
+  it('does not rewrite ai-review metadata examples inside fenced code blocks', () => {
+    const markdown = [
+      'Body',
+      '```md',
+      '<!-- ai-review-anchor:{"id":"rv_example","sidecar":".ai-markdown-review/documents/old.json"} -->',
+      '```',
+      '<!-- ai-review-anchor:{"id":"rv_real","sidecar":".ai-markdown-review/documents/old.json"} -->'
+    ].join('\n');
+
+    assert.equal(
+      rebaseInlineReviewMetadataSidecars(markdown, {
+        '.ai-markdown-review/documents/old.json': '.ai-markdown-review/documents/new.json'
+      }),
+      [
+        'Body',
+        '```md',
+        '<!-- ai-review-anchor:{"id":"rv_example","sidecar":".ai-markdown-review/documents/old.json"} -->',
+        '```',
+        '<!-- ai-review-anchor:{"id":"rv_real","sidecar":".ai-markdown-review/documents/new.json"} -->'
       ].join('\n')
     );
   });

@@ -12,6 +12,7 @@ The first MVP focuses on a local workflow:
 - Drag-select rendered text and attach feedback from an inline comment popover.
 - Submit comments and replies with `Enter`, while `Shift+Enter` keeps a newline.
 - Empty comment composers close on outside click or Escape, while typed drafts stay open.
+- Reply drafts inside the comment overlay also stay open until they are empty.
 - See saved comments as highlights and small badges in the rendered document.
 - Click a highlighted region or badge to inspect, accept, resolve, or reject saved comments.
 - Edit or rewrite a rendered Markdown block through a constrained block editor that keeps review anchors in sync.
@@ -25,9 +26,13 @@ The first MVP focuses on a local workflow:
 - Review accepted, resolved, and rejected history from `Review Threads`, including whether the old anchor is still linked or now outdated.
 - Restore a closed review thread when a decision needs to be reopened.
 - Persist compact `ai-review-anchor` metadata in the Markdown file while storing full thread data in sidecar JSON.
+- Keep review sidecars and inline metadata aligned when a reviewed Markdown file is renamed.
 - Attach feedback directly to a Mermaid diagram source block.
 - Store review threads in a workspace-local sidecar file.
 - Export unresolved feedback as Markdown for an AI coding agent.
+- Ship a repo-owned AI review policy and thread-creation schema for future AI reviewer integrations.
+- Document the human-AI collaboration loop and first-pass context bootstrap path.
+- Show a compact `AI Context` status bar in the review preview, with quick access to the bootstrap prompt, context brief, and guide.
 - Run a local heuristic document review to seed obvious feedback items.
 
 ## Development
@@ -53,12 +58,16 @@ Installed usage:
 3. Drag-select rendered text in the review preview.
 4. Save feedback inline and the selected text will be highlighted with a comment badge.
 5. Reply under a review thread when you need to add discussion context before exporting feedback.
+6. Use the compact `AI Context` bar to open the bootstrap prompt first, then create or open the context brief when the draft is ready.
 
 ## Commands
 
 - `AI Markdown Review: Open Review Preview`
 - `AI Markdown Review: Review Document`
 - `AI Markdown Review: Export Feedback for Agent`
+- `AI Markdown Review: Open AI Context Bootstrap Prompt`
+- `AI Markdown Review: Open/Create AI Context Brief`
+- `AI Markdown Review: Open AI Context Bootstrap Guide`
 
 ## Shortcuts
 
@@ -127,7 +136,21 @@ The preview keeps closed feedback visible under `Review Threads` as history. Clo
 
 ## Agent Handoff
 
-Feedback exports include open thread IDs, source labels, discussion history, anchor confidence, and editing guidelines for AI agents. Agents are instructed to preserve review metadata, make localized edits, report each handled `rv_*` ID with an outcome, and avoid closing review threads unless the user explicitly asks for an `accepted`, `resolved`, or `rejected` decision.
+Feedback exports include open thread IDs, source labels, discussion history, anchor confidence, editing guidelines, commenting guidelines, and a future-facing thread-creation contract for AI agents. Agents are instructed to preserve review metadata, make localized edits, report each handled `rv_*` ID with an outcome, avoid closing review threads unless the user explicitly asks for an `accepted`, `resolved`, or `rejected` decision, and follow the repo policy when proposing new AI-authored review threads.
+
+Canonical AI review contracts:
+
+- [AI Review Policy](./docs/AI-REVIEW-POLICY.md)
+- [AI Collaboration Loop](./docs/AI-COLLABORATION-LOOP.md)
+- [AI Context Bootstrap](./docs/AI-CONTEXT-BOOTSTRAP.md)
+- [AI Review Thread Schema](./docs/agent-review-thread.schema.json)
+
+For first-time setup in a repo, the recommended context injection path is:
+
+1. Use `AI Markdown Review: Open AI Context Bootstrap Prompt` or the preview notice.
+2. Paste that prompt into your AI so it reads the repo docs and asks only for missing context.
+3. Save the resulting durable summary to `docs/AI-CONTEXT-BRIEF.md`.
+4. Use replies on threads to refine or correct AI assumptions instead of starting over with a new prompt each time.
 
 Suggested replacement patches are treated as document edits, not just review decisions. `Apply Edit` replaces the matching Markdown text, refreshes affected sidecar anchors and context snippets, records an edit outcome reply, and then closes the target thread as `accepted`; if the original text is missing, duplicated ambiguously, or attached to a low-confidence anchor, the extension leaves the thread open.
 
@@ -136,6 +159,8 @@ Rendered block edits use the same review-aware edit pipeline. The MVP editor is 
 Rendered Markdown tables get a dedicated grid editor instead of the generic block editor. Use `Edit Table` from the preview table controls to edit header/body cells, add or remove rows and columns, choose column alignment, and save back to pipe-table Markdown through the same review-aware edit and undo path.
 
 Review-aware edits, new comment anchors, review decisions, and restored threads register sidecar snapshots with the Markdown edit. Undo and redo restore the matching `.ai-markdown-review` sidecar state when the Markdown text rolls backward or forward.
+
+If a sidecar write fails during a review-aware change, the extension rolls the Markdown and sidecar files back together instead of leaving a half-applied review state behind.
 
 ## Packaging
 

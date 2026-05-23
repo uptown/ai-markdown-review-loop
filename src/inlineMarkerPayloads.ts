@@ -159,6 +159,22 @@ export function appendInlineReviewLogMarker(
   return appendMetadataLine(markdown, createInlineReviewLogMarker(payload));
 }
 
+export function rebaseInlineReviewMetadataSidecars(
+  markdown: string,
+  sidecarRewrites: Record<string, string>
+): string {
+  if (Object.keys(sidecarRewrites).length === 0) {
+    return markdown;
+  }
+
+  return rewriteOutsideFencedCode(markdown, line => {
+    return line.replace(/([ \t]*)<!-- ai-review-(anchor|anchors|log):(.*?)-->/g, (match, leading, kind, payload) => {
+      const rewritten = rewriteInlineMetadataPayload(kind, payload, sidecarRewrites);
+      return rewritten ? `${leading}<!-- ai-review-${kind}:${rewritten} -->` : match;
+    });
+  });
+}
+
 function parseInlineAnchorPayload(payload: string): InlineAnchorMarker[] {
   try {
     const parsed = JSON.parse(payload.trim());
@@ -194,6 +210,96 @@ function compactMarker(marker: InlineAnchorMarker): InlineAnchorMarker {
   };
 }
 
+function rewriteInlineMetadataPayload(
+  kind: string,
+  payload: string,
+  sidecarRewrites: Record<string, string>
+): string | undefined {
+  try {
+    const parsed = JSON.parse(payload.trim());
+
+    if (kind === 'log' && isInlineReviewLogMarker(parsed)) {
+      return JSON.stringify({
+        ...parsed,
+        sidecar: sidecarRewrites[parsed.sidecar] ?? parsed.sidecar
+      });
+    }
+
+    if (kind === 'anchor' || kind === 'anchors') {
+      if (Array.isArray(parsed)) {
+        return JSON.stringify(parsed.map(marker => {
+          if (!isInlineAnchorMarker(marker)) {
+            return marker;
+          }
+
+          return {
+            ...marker,
+            sidecar: marker.sidecar ? (sidecarRewrites[marker.sidecar] ?? marker.sidecar) : marker.sidecar
+          };
+        }));
+      }
+
+      if (isCompactInlineAnchorGroup(parsed)) {
+        return JSON.stringify({
+          ...parsed,
+          sidecar: sidecarRewrites[parsed.sidecar] ?? parsed.sidecar
+        });
+      }
+
+      if (isInlineAnchorMarker(parsed)) {
+        return JSON.stringify({
+          ...parsed,
+          sidecar: parsed.sidecar ? (sidecarRewrites[parsed.sidecar] ?? parsed.sidecar) : parsed.sidecar
+        });
+      }
+    }
+  } catch {
+    return undefined;
+  }
+
+  return undefined;
+}
+
+function rewriteOutsideFencedCode(
+  markdown: string,
+  rewriteLine: (line: string) => string
+): string {
+  const parts = markdown.split(/(\r?\n)/);
+  const rewritten: string[] = [];
+  let fence: { marker: string; length: number } | undefined;
+
+  for (let index = 0; index < parts.length; index += 2) {
+    const line = parts[index] ?? '';
+    const newline = parts[index + 1] ?? '';
+    const fenceMatch = line.match(/^[ \t]{0,3}(`{3,}|~{3,})/);
+
+    if (!fence && fenceMatch) {
+      fence = {
+        marker: fenceMatch[1][0],
+        length: fenceMatch[1].length
+      };
+      rewritten.push(line, newline);
+      continue;
+    }
+
+    if (fence) {
+      rewritten.push(line, newline);
+
+      if (fenceMatch
+        && fenceMatch[1][0] === fence.marker
+        && fenceMatch[1].length >= fence.length) {
+        fence = undefined;
+      }
+
+      continue;
+    }
+
+    rewritten.push(rewriteLine(line), newline);
+  }
+
+  return rewritten.join('');
+}
+
 function appendMetadataLine(markdown: string, marker: string): string {
   const prefix = markdown.length > 0 && !markdown.endsWith('\n') ? '\n' : '';
   return `${markdown}${prefix}${marker}\n`;
@@ -216,6 +322,14 @@ function isCompactInlineAnchorGroup(value: unknown): value is { sidecar: string;
     && typeof value.sidecar === 'string'
     && Array.isArray(value.ids)
     && value.ids.every(id => typeof id === 'string');
+}
+
+function isInlineReviewLogMarker(value: unknown): value is InlineReviewLogMarker {
+  return isRecord(value)
+    && typeof value.id === 'string'
+    && typeof value.status === 'string'
+    && typeof value.sidecar === 'string'
+    && typeof value.updatedAt === 'string';
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

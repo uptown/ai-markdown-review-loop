@@ -15,6 +15,7 @@ package-lock.json
 .gitignore
 .nvmrc
 docs/PRD.md
+docs/AI-CONTEXT-BRIEF.md
 docs/mermaid-sample.md
 out/*.js
 !out/extension.js

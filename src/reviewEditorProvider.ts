@@ -1,6 +1,13 @@
 import * as vscode from 'vscode';
 import MarkdownIt from 'markdown-it';
 import { randomUUID } from 'crypto';
+import {
+  ContextBootstrapStatus,
+  getContextBootstrapStatus,
+  openContextBootstrapGuide,
+  openContextBootstrapPrompt,
+  openOrCreateContextBrief
+} from './contextBootstrap';
 import { AnchorMaintenanceController } from './anchorMaintenance';
 import { createAnchor } from './anchors';
 import { htmlBlockToMarkdown } from './htmlToMarkdown';
@@ -30,13 +37,14 @@ import {
   ReviewAwareEditPlan
 } from './reviewAwareEdits';
 import { createRestoredReviewThread, getReviewHistoryAnchorStates } from './reviewHistory';
-import { ReviewUndoController } from './reviewUndo';
+import { restoreReviewSidecarSnapshot, ReviewUndoController } from './reviewUndo';
 import { ApplyPatchResult, selectSuggestedPatchReplacement } from './suggestedPatches';
 import {
   collectMarkdownTables,
   createMarkdownTableReplacement
 } from './tableEdits';
 import { AnchorConfidence, ReviewDocument, ReviewStatus, ReviewThread } from './types';
+import type { ReviewSidecarSnapshot } from './reviewUndo';
 
 const viewType = 'aiMarkdownReviewLoop.reviewEditor';
 
@@ -136,12 +144,14 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
       try {
         const reviewDocument = await this.store.load(document.uri);
         const resolvedReviewDocument = await this.store.loadResolved(document.uri);
+        const contextBootstrap = await getContextBootstrapStatus(document.uri);
         webviewPanel.webview.html = this.renderHtml(
           webviewPanel.webview,
           document,
           reviewDocument,
           resolvedReviewDocument,
-          restoreState
+          restoreState,
+          contextBootstrap
         );
       } catch (error) {
         webviewPanel.webview.html = this.renderErrorHtml(document, formatError(error));
@@ -239,6 +249,32 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
 
           vscode.window.showInformationMessage('Restored review thread to open feedback.');
           await render({ focusThreadId: threadId });
+        }
+
+        if (message?.type === 'openContextBrief') {
+          const opened = await openOrCreateContextBrief(document.uri);
+
+          if (!opened) {
+            vscode.window.showWarningMessage('Open a workspace Markdown file before opening or creating the AI context brief.');
+            return;
+          }
+
+          await render();
+        }
+
+        if (message?.type === 'openContextBootstrapPrompt') {
+          const opened = await openContextBootstrapPrompt(document.uri);
+
+          if (!opened) {
+            vscode.window.showWarningMessage('Open a workspace Markdown file before preparing an AI context bootstrap prompt.');
+            return;
+          }
+
+          return;
+        }
+
+        if (message?.type === 'openContextBootstrapGuide') {
+          await openContextBootstrapGuide(this.context.extensionUri);
         }
 
         if (message?.type === 'anchorLocated') {
@@ -488,16 +524,18 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
       id: thread.id,
       sidecar: vscode.workspace.asRelativePath(sidecarUri, false)
     }]);
-    const markerInserted = await this.replaceDocumentMarkdown(document, beforeMarkdown, afterMarkdown);
+    const committed = await this.commitReviewMutation(
+      document,
+      beforeMarkdown,
+      afterMarkdown,
+      beforeSnapshot,
+      async () => this.store.save(document.uri, reviewDocument)
+    );
 
-    if (!markerInserted) {
+    if (!committed) {
       vscode.window.showWarningMessage('Feedback could not be anchored in Markdown.');
       return;
     }
-
-    await this.store.save(document.uri, reviewDocument);
-    const afterSnapshot = await this.reviewUndo.capture(document.uri);
-    this.reviewUndo.register(document.uri, beforeMarkdown, document.getText(), beforeSnapshot, afterSnapshot);
   }
 
   private async updateThreadStatus(
@@ -534,17 +572,22 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
       )
       : beforeMarkdown;
 
-    if (!await this.replaceDocumentMarkdown(document, beforeMarkdown, afterMarkdown)) {
+    const committed = await this.commitReviewMutation(
+      document,
+      beforeMarkdown,
+      afterMarkdown,
+      beforeSnapshot,
+      async () => this.store.saveBoth(
+        document.uri,
+        appliedUpdates.reviewDocument,
+        appliedUpdates.resolvedReviewDocument
+      )
+    );
+
+    if (!committed) {
       vscode.window.showWarningMessage('Review status was updated, but the Markdown markers could not be updated.');
       return;
     }
-
-    await this.store.save(document.uri, appliedUpdates.reviewDocument);
-    if (appliedUpdates.closedThreads.length > 0) {
-      await this.store.saveResolved(document.uri, appliedUpdates.resolvedReviewDocument);
-    }
-    const afterSnapshot = await this.reviewUndo.capture(document.uri);
-    this.reviewUndo.register(document.uri, beforeMarkdown, document.getText(), beforeSnapshot, afterSnapshot);
   }
 
   private async applyReviewAwareEdit(
@@ -578,16 +621,21 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
       )
       : editedMarkdown;
 
-    if (!await this.replaceDocumentMarkdown(document, beforeMarkdown, afterMarkdown)) {
+    const committed = await this.commitReviewMutation(
+      document,
+      beforeMarkdown,
+      afterMarkdown,
+      beforeSnapshot,
+      async () => this.store.saveBoth(
+        document.uri,
+        appliedUpdates.reviewDocument,
+        appliedUpdates.resolvedReviewDocument
+      )
+    );
+
+    if (!committed) {
       return false;
     }
-
-    await this.store.save(document.uri, appliedUpdates.reviewDocument);
-    if (appliedUpdates.closedThreads.length > 0) {
-      await this.store.saveResolved(document.uri, appliedUpdates.resolvedReviewDocument);
-    }
-    const afterSnapshot = await this.reviewUndo.capture(document.uri);
-    this.reviewUndo.register(document.uri, beforeMarkdown, document.getText(), beforeSnapshot, afterSnapshot);
     return true;
   }
 
@@ -624,17 +672,24 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
         sidecar: vscode.workspace.asRelativePath(sidecarUri, false)
       }]
     );
-
-    if (!await this.replaceDocumentMarkdown(document, beforeMarkdown, afterMarkdown)) {
-      throw new Error('Markdown markers could not be updated.');
-    }
-
     resolvedReviewDocument.threads.splice(resolvedIndex, 1);
     reviewDocument.threads.push(restoredThread);
-    await this.store.save(document.uri, reviewDocument);
-    await this.store.saveResolved(document.uri, resolvedReviewDocument);
-    const afterSnapshot = await this.reviewUndo.capture(document.uri);
-    this.reviewUndo.register(document.uri, beforeMarkdown, document.getText(), beforeSnapshot, afterSnapshot);
+
+    const committed = await this.commitReviewMutation(
+      document,
+      beforeMarkdown,
+      afterMarkdown,
+      beforeSnapshot,
+      async () => this.store.saveBoth(
+        document.uri,
+        reviewDocument,
+        resolvedReviewDocument
+      )
+    );
+
+    if (!committed) {
+      throw new Error('Markdown markers could not be updated.');
+    }
   }
 
   private applyClosedThreadMarkers(
@@ -682,6 +737,47 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
     return vscode.workspace.applyEdit(edit);
   }
 
+  private async commitReviewMutation(
+    document: vscode.TextDocument,
+    beforeMarkdown: string,
+    afterMarkdown: string,
+    beforeSnapshot: ReviewSidecarSnapshot,
+    writeSidecars: () => Promise<void>
+  ): Promise<boolean> {
+    const documentUpdated = await this.replaceDocumentMarkdown(document, beforeMarkdown, afterMarkdown);
+
+    if (!documentUpdated) {
+      return false;
+    }
+
+    try {
+      await writeSidecars();
+    } catch (error) {
+      if (!await this.rollbackReviewMutation(document, beforeMarkdown, beforeSnapshot)) {
+        throw new Error(`Review sidecar write failed and Markdown rollback was rejected by VS Code: ${formatError(error)}`);
+      }
+      throw error;
+    }
+
+    const afterSnapshot = await this.reviewUndo.capture(document.uri);
+    this.reviewUndo.register(document.uri, beforeMarkdown, document.getText(), beforeSnapshot, afterSnapshot);
+    return true;
+  }
+
+  private async rollbackReviewMutation(
+    document: vscode.TextDocument,
+    beforeMarkdown: string,
+    beforeSnapshot: ReviewSidecarSnapshot
+  ): Promise<boolean> {
+    await restoreReviewSidecarSnapshot(beforeSnapshot);
+
+    if (document.getText() !== beforeMarkdown) {
+      return this.replaceDocumentMarkdown(document, document.getText(), beforeMarkdown);
+    }
+
+    return true;
+  }
+
   private async applySuggestedPatch(
     document: vscode.TextDocument,
     thread: ReviewThread
@@ -714,13 +810,15 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
     document: vscode.TextDocument,
     reviewDocument: ReviewDocument,
     resolvedReviewDocument: ReviewDocument,
-    restoreState?: PreviewRestoreState
+    restoreState?: PreviewRestoreState,
+    contextBootstrap?: ContextBootstrapStatus
   ): string {
     const nonce = randomUUID();
     const documentText = document.getText();
     const previewMarkdown = stripInlineAnchorMarkers(documentText);
     const renderedMarkdown = this.markdown.render(previewMarkdown);
     const tables = collectMarkdownTables(previewMarkdown);
+    const contextBootstrapNotice = this.renderContextBootstrapNotice(contextBootstrap);
     const storageWarning = this.renderStorageWarning(documentText, reviewDocument);
     const markerLineHints = this.getMarkerLineHints(reviewDocument);
     const historyAnchorStates = getReviewHistoryAnchorStates(
@@ -814,6 +912,77 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
       gap: 8px;
       margin-top: 10px;
       flex-wrap: wrap;
+    }
+    .context-bootstrap-bar {
+      max-width: 900px;
+      margin: 0 0 16px;
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      padding: 8px 12px;
+      color: var(--text);
+      background: var(--panel);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+    .context-bootstrap-summary {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      min-width: 0;
+      flex: 1 1 380px;
+    }
+    .context-bootstrap-status {
+      display: inline-flex;
+      align-items: center;
+      min-height: 18px;
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      padding: 1px 7px;
+      font-size: 11px;
+      line-height: 1.35;
+      color: var(--muted);
+      background: var(--vscode-badge-background, rgba(127, 127, 127, 0.16));
+      white-space: nowrap;
+    }
+    .context-bootstrap-status.is-ready {
+      border-color: rgba(138, 216, 63, 0.5);
+      color: #dff9c3;
+      background: rgba(138, 216, 63, 0.16);
+    }
+    .context-bootstrap-status.is-missing {
+      border-color: rgba(77, 163, 255, 0.45);
+      color: #d8ecff;
+      background: rgba(77, 163, 255, 0.16);
+    }
+    .context-bootstrap-status.is-workspace {
+      border-color: rgba(204, 167, 0, 0.45);
+      color: var(--vscode-editorWarning-foreground, var(--text));
+      background: var(--vscode-inputValidation-warningBackground, rgba(204, 167, 0, 0.12));
+    }
+    .context-bootstrap-copy {
+      margin: 0;
+      line-height: 1.35;
+      color: var(--muted);
+      font-size: 12px;
+    }
+    .context-bootstrap-actions {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    .context-bootstrap-sources {
+      color: var(--muted);
+      font-size: 12px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      max-width: 100%;
+    }
+    .context-bootstrap-sources code {
+      font-family: var(--vscode-editor-font-family);
     }
     button {
       border: 0;
@@ -1442,6 +1611,7 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
 <body>
   <div class="layout">
     <main>
+      ${contextBootstrapNotice}
       ${storageWarning}
       <article id="markdown-body">${renderedMarkdown}</article>
     </main>
@@ -1711,7 +1881,9 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
 
     document.addEventListener('keydown', (event) => {
       if (event.key === 'Escape') {
-        hideCommentOverlay();
+        if (!hideCommentOverlayIfClean()) {
+          return;
+        }
         hideSelectionPopover();
         hideComposerIfEmpty();
         hideBlockEditorIfClean();
@@ -1868,6 +2040,33 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
         return;
       }
 
+      const openContextBootstrapPromptButton = target.closest('[data-open-context-bootstrap-prompt]');
+
+      if (openContextBootstrapPromptButton) {
+        event.preventDefault();
+        event.stopPropagation();
+        vscode.postMessage({ type: 'openContextBootstrapPrompt' });
+        return;
+      }
+
+      const openContextBriefButton = target.closest('[data-open-context-brief]');
+
+      if (openContextBriefButton) {
+        event.preventDefault();
+        event.stopPropagation();
+        vscode.postMessage({ type: 'openContextBrief' });
+        return;
+      }
+
+      const openContextGuideButton = target.closest('[data-open-context-guide]');
+
+      if (openContextGuideButton) {
+        event.preventDefault();
+        event.stopPropagation();
+        vscode.postMessage({ type: 'openContextBootstrapGuide' });
+        return;
+      }
+
       const restoreButton = target.closest('[data-restore-thread]');
 
       if (restoreButton) {
@@ -1941,7 +2140,7 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
         }
       }
 
-      hideCommentOverlay();
+      hideCommentOverlayIfClean();
     });
 
     const openThreads = state.threads.filter((thread) => thread.status === 'open');
@@ -2152,7 +2351,9 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
         return;
       }
 
-      hideCommentOverlay();
+      if (!hideCommentOverlayIfClean()) {
+        return;
+      }
       hideSelectionPopover();
       hideComposerIfEmpty();
       hideMermaidEditorIfClean();
@@ -2219,7 +2420,9 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
       }
 
       const table = findTableEditData(lineRange) || readTableDataFromDom(tableElement);
-      hideCommentOverlay();
+      if (!hideCommentOverlayIfClean()) {
+        return;
+      }
       hideSelectionPopover();
       hideComposerIfEmpty();
       hideBlockEditorIfClean();
@@ -2402,7 +2605,9 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
         return;
       }
 
-      hideCommentOverlay();
+      if (!hideCommentOverlayIfClean()) {
+        return;
+      }
       hideSelectionPopover();
       hideComposerIfEmpty();
       hideBlockEditorIfClean();
@@ -3144,6 +3349,11 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
         return;
       }
 
+      if (commentOverlay.style.display === 'block' && hasDirtyOverlayReplyDrafts()) {
+        focusFirstDirtyOverlayReply();
+        return;
+      }
+
       commentOverlay.innerHTML = threads.map(renderCommentOverlayItem).join('');
       commentOverlay.dataset.threadIds = threads.map((thread) => thread.id).join(',');
       const rect = sourceElement.getBoundingClientRect();
@@ -3247,6 +3457,20 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
       delete commentOverlay.dataset.threadIds;
     }
 
+    function hideCommentOverlayIfClean() {
+      if (commentOverlay.style.display !== 'block') {
+        return true;
+      }
+
+      if (hasDirtyOverlayReplyDrafts()) {
+        focusFirstDirtyOverlayReply();
+        return false;
+      }
+
+      hideCommentOverlay();
+      return true;
+    }
+
     function restorePreviewState() {
       const focusThreadId = String(restoreState.focusThreadId || '');
       const overlayThreadIds = Array.isArray(restoreState.overlayThreadIds)
@@ -3347,12 +3571,28 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
         return undefined;
       }
 
-      const candidates = Array.from(markdownBody.querySelectorAll('p, li, h1, h2, h3, h4, h5, h6, td, th, blockquote, [data-source-line]'));
-
-      return candidates.find((element) => {
+      const candidates = Array.from(markdownBody.querySelectorAll('p, li, h1, h2, h3, h4, h5, h6, td, th, blockquote, [data-source-line]')).filter((element) => {
         return !shouldSkipHighlightParent(element)
           && normalizeInline(element.textContent || '').includes(anchorText);
       });
+
+      if (candidates.length === 0) {
+        return undefined;
+      }
+
+      const preferredLine = Number(thread.anchor?.lastLocatedLine || thread.anchor?.lineStart || 0);
+
+      if (preferredLine > 0) {
+        return candidates
+          .map((element) => ({
+            element,
+            lineDistance: sourceLineDistance(element, preferredLine),
+            exactness: normalizeInline(element.textContent || '') === anchorText ? 0 : 1
+          }))
+          .sort((left, right) => left.lineDistance - right.lineDistance || left.exactness - right.exactness)[0]?.element;
+      }
+
+      return candidates[Math.min(getAnchorOccurrence(thread), candidates.length - 1)];
     }
 
     function shouldSkipHighlightParent(element) {
@@ -3361,6 +3601,38 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
 
     function normalizeInline(value) {
       return String(value).replace(/\\s+/g, ' ').trim();
+    }
+
+    function hasDirtyOverlayReplyDrafts() {
+      return Array.from(commentOverlay.querySelectorAll('[data-reply-form] textarea')).some((input) => {
+        return input instanceof HTMLTextAreaElement && input.value.trim().length > 0;
+      });
+    }
+
+    function focusFirstDirtyOverlayReply() {
+      const dirtyInput = Array.from(commentOverlay.querySelectorAll('[data-reply-form] textarea')).find((input) => {
+        return input instanceof HTMLTextAreaElement && input.value.trim().length > 0;
+      });
+      if (dirtyInput instanceof HTMLTextAreaElement) {
+        dirtyInput.focus();
+        return true;
+      }
+      return false;
+    }
+
+    function sourceLineDistance(element, preferredLine) {
+      const sourceLine = Number(element.getAttribute('data-source-line') || element.closest('[data-source-line]')?.getAttribute('data-source-line') || 0);
+      const sourceLineEnd = Number(element.getAttribute('data-source-line-end') || element.closest('[data-source-line-end]')?.getAttribute('data-source-line-end') || sourceLine);
+
+      if (!sourceLine) {
+        return Number.POSITIVE_INFINITY;
+      }
+
+      if (preferredLine >= sourceLine && preferredLine <= sourceLineEnd) {
+        return 0;
+      }
+
+      return Math.min(Math.abs(sourceLine - preferredLine), Math.abs(sourceLineEnd - preferredLine));
     }
 
     function looksLikeMermaidSource(value) {
@@ -3540,7 +3812,9 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
         return;
       }
 
-      hideCommentOverlay();
+      if (!hideCommentOverlayIfClean()) {
+        return;
+      }
       hideSelectionPopover();
       commentBody.value = '';
       positionFloatingElement(commentComposer, activeSelectionRect, 340);
@@ -3665,6 +3939,53 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
     <p>This Markdown file still contains ${missingMarkers.length} stale ai-review-anchor ${markerLabel}. The matching review thread data is missing from <code>${escapeHtml(sidecar)}</code> or no longer open. Comment text cannot be rebuilt from inline anchors; restore the sidecar JSON from backup/source control, or clean the stale anchors if the comments are no longer needed.</p>
     <div class="storage-warning-actions">
       <button type="button" class="secondary compact" data-cleanup-stale-anchors data-thread-ids="${escapeHtml(markerIds)}">Clean stale anchors</button>
+    </div>
+  </section>`;
+  }
+
+  private renderContextBootstrapNotice(
+    contextBootstrap: ContextBootstrapStatus | undefined
+  ): string {
+    if (!contextBootstrap) {
+      return '';
+    }
+
+    if (!contextBootstrap.hasWorkspaceFolder) {
+      return `<section class="context-bootstrap-bar" role="status">
+    <div class="context-bootstrap-summary">
+      <span class="context-bootstrap-status is-workspace">No workspace</span>
+      <p class="context-bootstrap-copy">AI context becomes durable only when this Markdown file lives inside a workspace folder.</p>
+    </div>
+    <div class="context-bootstrap-actions">
+      <button type="button" class="secondary compact" data-open-context-guide>How it works</button>
+    </div>
+  </section>`;
+    }
+
+    const extraSources = contextBootstrap.availableSources.filter(source => source !== contextBootstrap.recommendedBriefPath);
+    const sourceCopy = contextBootstrap.hasContextBrief
+      ? `<code>${escapeHtml(contextBootstrap.recommendedBriefPath)}</code> found.`
+      : extraSources.length > 0
+        ? `No saved brief. Start with a bootstrap prompt, then create <code>${escapeHtml(contextBootstrap.recommendedBriefPath)}</code> when the draft is ready.`
+        : `No saved brief. Start with a bootstrap prompt, then create <code>${escapeHtml(contextBootstrap.recommendedBriefPath)}</code>.`;
+    const sourceFooter = !contextBootstrap.hasContextBrief && extraSources.length > 0
+      ? `<div class="context-bootstrap-sources">Detected repo context: ${extraSources.map(source => `<code>${escapeHtml(source)}</code>`).join(', ')}</div>`
+      : '';
+    const statusClass = contextBootstrap.hasContextBrief ? 'is-ready' : 'is-missing';
+    const statusLabel = contextBootstrap.hasContextBrief ? 'AI Context Ready' : 'AI Context Needs Brief';
+    const promptLabel = contextBootstrap.hasContextBrief ? 'Refresh Bootstrap Prompt' : 'Open Bootstrap Prompt';
+    const briefLabel = contextBootstrap.hasContextBrief ? 'Open Brief' : 'Create Brief';
+
+    return `<section class="context-bootstrap-bar" role="status">
+    <div class="context-bootstrap-summary">
+      <span class="context-bootstrap-status ${statusClass}">${statusLabel}</span>
+      <p class="context-bootstrap-copy">${sourceCopy}</p>
+      ${sourceFooter}
+    </div>
+    <div class="context-bootstrap-actions">
+      <button type="button" class="compact" data-open-context-bootstrap-prompt>${promptLabel}</button>
+      <button type="button" class="secondary compact" data-open-context-brief>${briefLabel}</button>
+      <button type="button" class="secondary compact" data-open-context-guide>How it works</button>
     </div>
   </section>`;
   }

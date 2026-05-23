@@ -4,7 +4,7 @@ import { renderFeedbackExport } from '../src/exportFeedback';
 import type { ReviewDocument } from '../src/types';
 
 describe('renderFeedbackExport', () => {
-  it('exports agent editing rules and per-thread closure guardrails', () => {
+  it('exports agent editing rules, commenting rules, and per-thread closure guardrails', () => {
     const output = renderFeedbackExport({
       documentUri: 'file:///workspace/spec.md',
       updatedAt: '2026-05-22T00:00:00.000Z',
@@ -56,6 +56,18 @@ describe('renderFeedbackExport', () => {
     } satisfies ReviewDocument);
 
     assert.match(output, /## Agent Editing Guidelines/);
+    assert.match(output, /## Agent Commenting Guidelines/);
+    assert.match(output, /## Agent Thread Creation Contract/);
+    assert.match(output, /## Human-AI Feedback Loop/);
+    assert.match(output, /## Initial Context Bootstrap/);
+    assert.match(output, /Canonical review policy: docs\/AI-REVIEW-POLICY.md/);
+    assert.match(output, /Canonical creation schema: docs\/agent-review-thread.schema.json/);
+    assert.match(output, /Canonical collaboration loop: docs\/AI-COLLABORATION-LOOP.md/);
+    assert.match(output, /Canonical context bootstrap: docs\/AI-CONTEXT-BOOTSTRAP.md/);
+    assert.match(output, /bootstrap prompt, not from a blank context file/);
+    assert.match(output, /canonical source material instead of copying full templates or examples/);
+    assert.doesNotMatch(output, /# AI Context Brief/);
+    assert.doesNotMatch(output, /"source": "ai"/);
     assert.match(output, /Do not mark a thread `accepted`, `resolved`, or `rejected`/);
     assert.match(output, /## rv_open/);
     assert.match(output, /- Anchor confidence: recovered/);

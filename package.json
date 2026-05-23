@@ -29,7 +29,10 @@
     "onCommand:aiMarkdownReviewLoop.openReviewPreview",
     "onCommand:aiMarkdownReviewLoop.openReviewBeside",
     "onCommand:aiMarkdownReviewLoop.reviewDocument",
-    "onCommand:aiMarkdownReviewLoop.exportFeedback"
+    "onCommand:aiMarkdownReviewLoop.exportFeedback",
+    "onCommand:aiMarkdownReviewLoop.openContextBootstrapPrompt",
+    "onCommand:aiMarkdownReviewLoop.openContextBrief",
+    "onCommand:aiMarkdownReviewLoop.openContextBootstrapGuide"
   ],
   "main": "./out/extension.js",
   "contributes": {
@@ -57,6 +60,18 @@
       {
         "command": "aiMarkdownReviewLoop.exportFeedback",
         "title": "AI Markdown Review: Export Feedback for Agent"
+      },
+      {
+        "command": "aiMarkdownReviewLoop.openContextBootstrapPrompt",
+        "title": "AI Markdown Review: Open AI Context Bootstrap Prompt"
+      },
+      {
+        "command": "aiMarkdownReviewLoop.openContextBrief",
+        "title": "AI Markdown Review: Open/Create AI Context Brief"
+      },
+      {
+        "command": "aiMarkdownReviewLoop.openContextBootstrapGuide",
+        "title": "AI Markdown Review: Open AI Context Bootstrap Guide"
       }
     ],
     "menus": {
@@ -90,6 +105,11 @@
           "command": "aiMarkdownReviewLoop.exportFeedback",
           "when": "resourceExtname == .md || resourceLangId == markdown || activeEditor == aiMarkdownReviewLoop.reviewEditor",
           "group": "navigation@2"
+        },
+        {
+          "command": "aiMarkdownReviewLoop.openContextBootstrapPrompt",
+          "when": "resourceExtname == .md || resourceLangId == markdown || activeEditor == aiMarkdownReviewLoop.reviewEditor",
+          "group": "navigation@3"
         }
       ],
       "editor/context": [
@@ -112,6 +132,11 @@
           "command": "aiMarkdownReviewLoop.exportFeedback",
           "when": "resourceExtname == .md || resourceLangId == markdown",
           "group": "navigation@3"
+        },
+        {
+          "command": "aiMarkdownReviewLoop.openContextBootstrapPrompt",
+          "when": "resourceExtname == .md || resourceLangId == markdown",
+          "group": "navigation@4"
         }
       ],
       "explorer/context": [
@@ -134,6 +159,11 @@
           "command": "aiMarkdownReviewLoop.exportFeedback",
           "when": "resourceExtname == .md",
           "group": "navigation@3"
+        },
+        {
+          "command": "aiMarkdownReviewLoop.openContextBootstrapPrompt",
+          "when": "resourceExtname == .md",
+          "group": "navigation@4"
         }
       ]
     },

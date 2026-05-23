@@ -119,6 +119,10 @@ async function restoreSnapshot(snapshot: ReviewSidecarSnapshot): Promise<void> {
   ]);
 }
 
+export async function restoreReviewSidecarSnapshot(snapshot: ReviewSidecarSnapshot): Promise<void> {
+  await restoreSnapshot(snapshot);
+}
+
 async function restoreFile(uri: vscode.Uri, bytes: Uint8Array | undefined): Promise<void> {
   if (bytes === undefined) {
     try {

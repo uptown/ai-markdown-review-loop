@@ -21,15 +21,12 @@ export function createAnchor(
   const fullText = document.getText();
   const occurrence = normalizeOccurrence(options.occurrence);
   const lineHint = normalizeLineHint(document, options.lineHint);
-  const startOffset = lineHint
-    ? document.offsetAt(new vscode.Position(lineHint - 1, 0))
-    : undefined;
   let match = exact.length > 0
-    ? pickOccurrence(findAllMatches(fullText, exact, startOffset), occurrence, startOffset)
+    ? pickOccurrence(document, findAllMatches(fullText, exact), occurrence, lineHint)
     : undefined;
 
   if (!match && normalized.length > 0) {
-    match = pickOccurrence(findAllMatches(fullText, normalized, startOffset), occurrence, startOffset);
+    match = pickOccurrence(document, findAllMatches(fullText, normalized), occurrence, lineHint);
   }
 
   if (!match) {
@@ -94,19 +91,41 @@ function findAllMatches(
 }
 
 function pickOccurrence(
+  document: vscode.TextDocument,
   matches: Array<{ index: number; length: number }>,
   occurrence: number,
-  startOffset?: number
+  lineHint?: number
 ): { index: number; length: number } | undefined {
   if (matches.length === 0) {
     return undefined;
   }
 
-  if (typeof startOffset === 'number') {
-    return matches[0];
+  const requestedMatch = matches[Math.min(occurrence, matches.length - 1)];
+
+  if (lineHint === undefined) {
+    return requestedMatch;
   }
 
-  return matches[Math.min(occurrence, matches.length - 1)];
+  if (lineForMatch(document, requestedMatch) === lineHint) {
+    return requestedMatch;
+  }
+
+  const lineMatches = matches.filter(match => lineForMatch(document, match) === lineHint);
+
+  if (lineMatches.length > 0) {
+    return lineMatches[Math.min(occurrence, lineMatches.length - 1)];
+  }
+
+  const lineStartOffset = document.offsetAt(new vscode.Position(lineHint - 1, 0));
+  const laterMatch = matches.find(match => match.index >= lineStartOffset);
+  return laterMatch ?? requestedMatch;
+}
+
+function lineForMatch(
+  document: vscode.TextDocument,
+  match: { index: number; length: number }
+): number {
+  return document.positionAt(match.index).line + 1;
 }
 
 function createOffsetContext(

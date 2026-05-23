@@ -1,0 +1,87 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://uptown.github.io/ai-markdown-review-loop/schemas/agent-review-thread.schema.json",
+  "title": "AI Proposed Review Thread",
+  "description": "Machine-readable payload for a future AI-generated review thread proposal before the host assigns ids and timestamps.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "source",
+    "status",
+    "anchor",
+    "type",
+    "severity",
+    "comment"
+  ],
+  "properties": {
+    "source": {
+      "const": "ai",
+      "description": "AI-generated review feedback must declare ai as the source."
+    },
+    "status": {
+      "const": "open",
+      "description": "New AI-generated review feedback starts open."
+    },
+    "type": {
+      "type": "string",
+      "enum": ["fix", "question", "note", "risk", "suggestion"]
+    },
+    "severity": {
+      "type": "string",
+      "enum": ["low", "medium", "high"]
+    },
+    "anchor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["text"],
+      "properties": {
+        "text": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The narrowest stable text span that proves the issue."
+        },
+        "lineStart": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "lineEnd": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "occurrence": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "contextBefore": {
+          "type": "string"
+        },
+        "contextAfter": {
+          "type": "string"
+        }
+      }
+    },
+    "comment": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Why this text is a problem and what kind of action it needs."
+    },
+    "suggestedPatch": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mode", "original", "replacement"],
+      "properties": {
+        "mode": {
+          "const": "replace"
+        },
+        "original": {
+          "type": "string",
+          "minLength": 1
+        },
+        "replacement": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    }
+  }
+}

@@ -11,6 +11,11 @@ interface AddThreadsResult {
   addedThreads: ReviewThread[];
 }
 
+interface ReviewSidecarLocations {
+  reviewUri: vscode.Uri;
+  resolvedUri: vscode.Uri;
+}
+
 export interface AnchorLocationUpdate {
   threadId: string;
   lineStart: number;
@@ -23,43 +28,30 @@ export class ReviewStore {
   constructor(private readonly context: vscode.ExtensionContext) {}
 
   async load(documentUri: vscode.Uri): Promise<ReviewDocument> {
-    const reviewUri = await this.getReviewFileUri(documentUri);
-
-    let bytes: Uint8Array;
-
-    try {
-      bytes = await vscode.workspace.fs.readFile(reviewUri);
-    } catch (error) {
-      if (!isFileNotFoundError(error)) {
-        throw new Error(`Could not read review sidecar: ${formatError(error)}`);
-      }
-
-      return {
-        documentUri: documentUri.toString(),
-        threads: [],
-        updatedAt: new Date().toISOString()
-      };
-    }
-
-    try {
-      return parseReviewDocument(documentUri, JSON.parse(decoder.decode(bytes)));
-    } catch (error) {
-      throw new Error(`Review sidecar is invalid: ${formatError(error)}`);
-    }
+    const { reviewUri } = await this.getSidecarLocations(documentUri);
+    return this.readReviewDocument(reviewUri, documentUri, 'review sidecar');
   }
 
   async save(documentUri: vscode.Uri, reviewDocument: ReviewDocument): Promise<void> {
-    const reviewUri = await this.getReviewFileUri(documentUri);
-    const payload: ReviewDocument = {
-      documentUri: documentUri.toString(),
-      threads: reviewDocument.threads,
-      updatedAt: new Date().toISOString()
-    };
+    const { reviewUri } = await this.getSidecarLocations(documentUri);
+    await this.writeReviewDocument(reviewUri, documentUri, reviewDocument);
+  }
 
-    await vscode.workspace.fs.writeFile(
-      reviewUri,
-      encoder.encode(`${JSON.stringify(payload, null, 2)}\n`)
-    );
+  async saveBoth(
+    documentUri: vscode.Uri,
+    reviewDocument: ReviewDocument,
+    resolvedReviewDocument: ReviewDocument
+  ): Promise<void> {
+    const { reviewUri, resolvedUri } = await this.getSidecarLocations(documentUri);
+    const before = await this.captureSidecarBytes(reviewUri, resolvedUri);
+
+    try {
+      await this.writeReviewDocument(reviewUri, documentUri, reviewDocument);
+      await this.writeReviewDocument(resolvedUri, documentUri, resolvedReviewDocument);
+    } catch (error) {
+      await this.restoreSidecarBytes(reviewUri, resolvedUri, before);
+      throw error;
+    }
   }
 
   async addThread(documentUri: vscode.Uri, thread: ReviewThread): Promise<ReviewDocument> {
@@ -109,8 +101,9 @@ export class ReviewStore {
 
     if (thread.status !== 'open') {
       reviewDocument.threads = reviewDocument.threads.filter(candidate => candidate.id !== thread.id);
-      await this.archiveThread(documentUri, thread);
-      await this.save(documentUri, reviewDocument);
+      const resolvedDocument = await this.loadResolved(documentUri);
+      upsertThread(resolvedDocument.threads, thread);
+      await this.saveBoth(documentUri, reviewDocument, resolvedDocument);
       return reviewDocument;
     }
 
@@ -190,29 +183,8 @@ export class ReviewStore {
   }
 
   async loadResolved(documentUri: vscode.Uri): Promise<ReviewDocument> {
-    const reviewUri = await this.getResolvedReviewFileUri(documentUri);
-
-    let bytes: Uint8Array;
-
-    try {
-      bytes = await vscode.workspace.fs.readFile(reviewUri);
-    } catch (error) {
-      if (!isFileNotFoundError(error)) {
-        throw new Error(`Could not read resolved review sidecar: ${formatError(error)}`);
-      }
-
-      return {
-        documentUri: documentUri.toString(),
-        threads: [],
-        updatedAt: new Date().toISOString()
-      };
-    }
-
-    try {
-      return parseReviewDocument(documentUri, JSON.parse(decoder.decode(bytes)));
-    } catch (error) {
-      throw new Error(`Resolved review sidecar is invalid: ${formatError(error)}`);
-    }
+    const { resolvedUri } = await this.getSidecarLocations(documentUri);
+    return this.readReviewDocument(resolvedUri, documentUri, 'resolved review sidecar');
   }
 
   async restoreThread(
@@ -240,44 +212,107 @@ export class ReviewStore {
 
     resolvedDocument.threads.splice(resolvedIndex, 1);
     reviewDocument.threads.push(restoredThread);
-    await this.save(documentUri, reviewDocument);
-    await this.saveResolved(documentUri, resolvedDocument);
+    await this.saveBoth(documentUri, reviewDocument, resolvedDocument);
     return restoredThread;
   }
 
   async getReviewFileUri(documentUri: vscode.Uri): Promise<vscode.Uri> {
-    const workspaceFolder = vscode.workspace.getWorkspaceFolder(documentUri);
-    const root = workspaceFolder?.uri ?? this.context.globalStorageUri;
-    const reviewRoot = vscode.Uri.joinPath(root, '.ai-markdown-review', 'documents');
-    await vscode.workspace.fs.createDirectory(reviewRoot);
-
-    return vscode.Uri.joinPath(reviewRoot, `${hashText(documentUri.toString())}.json`);
+    const { reviewUri } = await this.getSidecarLocations(documentUri);
+    return reviewUri;
   }
 
   async getResolvedReviewFileUri(documentUri: vscode.Uri): Promise<vscode.Uri> {
-    const workspaceFolder = vscode.workspace.getWorkspaceFolder(documentUri);
-    const root = workspaceFolder?.uri ?? this.context.globalStorageUri;
-    const reviewRoot = vscode.Uri.joinPath(root, '.ai-markdown-review', 'resolved');
-    await vscode.workspace.fs.createDirectory(reviewRoot);
-
-    return vscode.Uri.joinPath(reviewRoot, `${hashText(documentUri.toString())}.json`);
+    const { resolvedUri } = await this.getSidecarLocations(documentUri);
+    return resolvedUri;
   }
 
-  private async archiveThread(documentUri: vscode.Uri, thread: ReviewThread): Promise<void> {
-    const resolvedDocument = await this.loadResolved(documentUri);
-    const existingIndex = resolvedDocument.threads.findIndex(candidate => candidate.id === thread.id);
+  async migrateDocument(oldDocumentUri: vscode.Uri, newDocumentUri: vscode.Uri): Promise<{
+    reviewMoved: boolean;
+    resolvedMoved: boolean;
+  }> {
+    const oldLocations = await this.getSidecarLocations(oldDocumentUri);
+    const newLocations = await this.getSidecarLocations(newDocumentUri);
+    const beforeNewSidecars = await this.captureSidecarBytes(newLocations.reviewUri, newLocations.resolvedUri);
+    let reviewMoved = false;
+    let resolvedMoved = false;
 
-    if (existingIndex >= 0) {
-      resolvedDocument.threads[existingIndex] = thread;
-    } else {
-      resolvedDocument.threads.push(thread);
+    try {
+      reviewMoved = await this.migrateSidecarFile(
+        oldLocations.reviewUri,
+        newLocations.reviewUri,
+        newDocumentUri
+      );
+      resolvedMoved = await this.migrateSidecarFile(
+        oldLocations.resolvedUri,
+        newLocations.resolvedUri,
+        newDocumentUri
+      );
+    } catch (error) {
+      await this.restoreSidecarBytes(newLocations.reviewUri, newLocations.resolvedUri, beforeNewSidecars);
+      throw error;
     }
 
-    await this.saveResolved(documentUri, resolvedDocument);
+    return { reviewMoved, resolvedMoved };
+  }
+
+  async deleteDocumentSidecars(documentUri: vscode.Uri): Promise<void> {
+    const { reviewUri, resolvedUri } = await this.getSidecarLocations(documentUri);
+    await Promise.all([
+      restoreFile(reviewUri, undefined),
+      restoreFile(resolvedUri, undefined)
+    ]);
   }
 
   async saveResolved(documentUri: vscode.Uri, reviewDocument: ReviewDocument): Promise<void> {
-    const reviewUri = await this.getResolvedReviewFileUri(documentUri);
+    const { resolvedUri } = await this.getSidecarLocations(documentUri);
+    await this.writeReviewDocument(resolvedUri, documentUri, reviewDocument);
+  }
+
+  private async getSidecarLocations(documentUri: vscode.Uri): Promise<ReviewSidecarLocations> {
+    const workspaceFolder = vscode.workspace.getWorkspaceFolder(documentUri);
+    const root = workspaceFolder?.uri ?? this.context.globalStorageUri;
+    const documentsRoot = vscode.Uri.joinPath(root, '.ai-markdown-review', 'documents');
+    const resolvedRoot = vscode.Uri.joinPath(root, '.ai-markdown-review', 'resolved');
+    await Promise.all([
+      vscode.workspace.fs.createDirectory(documentsRoot),
+      vscode.workspace.fs.createDirectory(resolvedRoot)
+    ]);
+
+    return {
+      reviewUri: vscode.Uri.joinPath(documentsRoot, `${hashText(documentUri.toString())}.json`),
+      resolvedUri: vscode.Uri.joinPath(resolvedRoot, `${hashText(documentUri.toString())}.json`)
+    };
+  }
+
+  private async readReviewDocument(
+    uri: vscode.Uri,
+    documentUri: vscode.Uri,
+    label: string
+  ): Promise<ReviewDocument> {
+    let bytes: Uint8Array;
+
+    try {
+      bytes = await vscode.workspace.fs.readFile(uri);
+    } catch (error) {
+      if (!isFileNotFoundError(error)) {
+        throw new Error(`Could not read ${label}: ${formatError(error)}`);
+      }
+
+      return createEmptyReviewDocument(documentUri);
+    }
+
+    try {
+      return parseReviewDocument(documentUri, JSON.parse(decoder.decode(bytes)));
+    } catch (error) {
+      throw new Error(`${capitalize(label)} is invalid: ${formatError(error)}`);
+    }
+  }
+
+  private async writeReviewDocument(
+    uri: vscode.Uri,
+    documentUri: vscode.Uri,
+    reviewDocument: ReviewDocument
+  ): Promise<void> {
     const payload: ReviewDocument = {
       documentUri: documentUri.toString(),
       threads: reviewDocument.threads,
@@ -285,14 +320,110 @@ export class ReviewStore {
     };
 
     await vscode.workspace.fs.writeFile(
-      reviewUri,
+      uri,
       encoder.encode(`${JSON.stringify(payload, null, 2)}\n`)
     );
+  }
+
+  private async captureSidecarBytes(
+    reviewUri: vscode.Uri,
+    resolvedUri: vscode.Uri
+  ): Promise<{
+    reviewBytes: Uint8Array | undefined;
+    resolvedBytes: Uint8Array | undefined;
+  }> {
+    return {
+      reviewBytes: await readFileIfExists(reviewUri),
+      resolvedBytes: await readFileIfExists(resolvedUri)
+    };
+  }
+
+  private async restoreSidecarBytes(
+    reviewUri: vscode.Uri,
+    resolvedUri: vscode.Uri,
+    snapshot: {
+      reviewBytes: Uint8Array | undefined;
+      resolvedBytes: Uint8Array | undefined;
+    }
+  ): Promise<void> {
+    await Promise.all([
+      restoreFile(reviewUri, snapshot.reviewBytes),
+      restoreFile(resolvedUri, snapshot.resolvedBytes)
+    ]);
+  }
+
+  private async migrateSidecarFile(
+    oldUri: vscode.Uri,
+    newUri: vscode.Uri,
+    newDocumentUri: vscode.Uri
+  ): Promise<boolean> {
+    const sourceBytes = await readFileIfExists(oldUri);
+
+    if (!sourceBytes) {
+      return false;
+    }
+
+    const sourceDocument = parseReviewDocument(
+      newDocumentUri,
+      JSON.parse(decoder.decode(sourceBytes))
+    );
+    const targetBytes = await readFileIfExists(newUri);
+    const targetDocument = targetBytes
+      ? parseReviewDocument(newDocumentUri, JSON.parse(decoder.decode(targetBytes)))
+      : createEmptyReviewDocument(newDocumentUri);
+    const mergedDocument = mergeReviewDocuments(targetDocument, sourceDocument, newDocumentUri);
+
+    await this.writeReviewDocument(newUri, newDocumentUri, mergedDocument);
+    return true;
   }
 }
 
 export function hashText(value: string): string {
   return createHash('sha256').update(value).digest('hex').slice(0, 24);
+}
+
+function createEmptyReviewDocument(documentUri: vscode.Uri): ReviewDocument {
+  return {
+    documentUri: documentUri.toString(),
+    threads: [],
+    updatedAt: new Date().toISOString()
+  };
+}
+
+function mergeReviewDocuments(
+  target: ReviewDocument,
+  source: ReviewDocument,
+  documentUri: vscode.Uri
+): ReviewDocument {
+  const merged = new Map<string, ReviewThread>();
+
+  for (const thread of [...target.threads, ...source.threads]) {
+    const normalizedThread = {
+      ...thread,
+      documentUri: documentUri.toString()
+    };
+    const existing = merged.get(thread.id);
+
+    if (!existing || timestamp(normalizedThread.updatedAt) >= timestamp(existing.updatedAt)) {
+      merged.set(thread.id, normalizedThread);
+    }
+  }
+
+  return {
+    documentUri: documentUri.toString(),
+    threads: [...merged.values()],
+    updatedAt: new Date().toISOString()
+  };
+}
+
+function upsertThread(threads: ReviewThread[], thread: ReviewThread): void {
+  const existingIndex = threads.findIndex(candidate => candidate.id === thread.id);
+
+  if (existingIndex >= 0) {
+    threads[existingIndex] = thread;
+  } else {
+    threads.push(thread);
+  }
 }
 
 function parseReviewDocument(documentUri: vscode.Uri, value: unknown): ReviewDocument {
@@ -377,4 +508,40 @@ function formatError(error: unknown): string {
   }
 
   return String(error);
+}
+
+function capitalize(value: string): string {
+  return value.length > 0 ? value[0].toUpperCase() + value.slice(1) : value;
+}
+
+function timestamp(value: string): number {
+  const parsed = Date.parse(value);
+  return Number.isNaN(parsed) ? 0 : parsed;
+}
+
+async function restoreFile(uri: vscode.Uri, bytes: Uint8Array | undefined): Promise<void> {
+  if (bytes === undefined) {
+    try {
+      await vscode.workspace.fs.delete(uri);
+    } catch (error) {
+      if (!isFileNotFoundError(error)) {
+        throw error;
+      }
+    }
+    return;
+  }
+
+  await vscode.workspace.fs.writeFile(uri, bytes);
+}
+
+async function readFileIfExists(uri: vscode.Uri): Promise<Uint8Array | undefined> {
+  try {
+    return await vscode.workspace.fs.readFile(uri);
+  } catch (error) {
+    if (isFileNotFoundError(error)) {
+      return undefined;
+    }
+
+    throw error;
+  }
 }

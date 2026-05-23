@@ -1,3 +1,10 @@
+import {
+  AGENT_COMMENTING_GUIDELINES,
+  AGENT_COLLABORATION_LOOP_GUIDELINES,
+  AGENT_CONTEXT_BOOTSTRAP_GUIDELINES,
+  AGENT_EDITING_GUIDELINES,
+  AGENT_THREAD_CREATION_CONTRACT
+} from './agentReviewPolicy';
 import type { ReviewDocument } from './types';
 
 export function renderFeedbackExport(reviewDocument: ReviewDocument): string {
@@ -20,16 +27,25 @@ export function renderFeedbackExport(reviewDocument: ReviewDocument): string {
   lines.push(
     `## Agent Editing Guidelines`,
     ``,
-    `- Treat the Markdown document and its review sidecar as one review state.`,
-    `- Work on open review threads only unless the user explicitly asks you to inspect closed history.`,
-    `- Preserve the document-level \`ai-review-anchors\` marker unless the user explicitly asks to clean stale anchors.`,
-    `- Preserve \`ai-review-log\` audit comments and sidecar files during normal document editing.`,
-    `- Prefer localized edits over whole-document rewrites so anchors can keep tracking nearby content.`,
-    `- When editing text with open feedback, keep enough nearby context stable for anchor recovery.`,
-    `- Do not silently delete or rewrite open review comments. If a comment no longer matches after your edit, call that out and leave it open for re-anchor.`,
-    `- Use replies to discuss, clarify, or challenge feedback. If you disagree, propose a reply or objection instead of ignoring the thread.`,
-    `- Do not mark a thread \`accepted\`, \`resolved\`, or \`rejected\` on behalf of the user unless they explicitly ask you to close it.`,
-    `- Report every handled \`rv_*\` ID in your response with an outcome: applied, partially applied, replied, needs user decision, or blocked.`,
+    ...AGENT_EDITING_GUIDELINES.map(line => `- ${line}`),
+    ``,
+    `## Agent Commenting Guidelines`,
+    ``,
+    ...AGENT_COMMENTING_GUIDELINES.map(line => `- ${line}`),
+    ``,
+    `## Agent Thread Creation Contract`,
+    ``,
+    ...AGENT_THREAD_CREATION_CONTRACT.map(line => `- ${line}`),
+    ``,
+    `## Human-AI Feedback Loop`,
+    ``,
+    ...AGENT_COLLABORATION_LOOP_GUIDELINES.map(line => `- ${line}`),
+    ``,
+    `## Initial Context Bootstrap`,
+    ``,
+    ...AGENT_CONTEXT_BOOTSTRAP_GUIDELINES.map(line => `- ${line}`),
+    ``,
+    `Use the linked policy files as canonical source material instead of copying full templates or examples into this export.`,
     ``
   );
 

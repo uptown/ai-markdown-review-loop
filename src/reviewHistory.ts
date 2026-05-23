@@ -7,17 +7,65 @@ export function getReviewHistoryAnchorStates(
   markdown: string,
   threads: ReviewThread[]
 ): Record<string, ReviewHistoryAnchorState> {
-  const normalizedMarkdown = normalizeAnchorText(markdown);
   const states: Record<string, ReviewHistoryAnchorState> = {};
 
   for (const thread of threads) {
-    const anchorText = normalizeAnchorText(thread.anchor.text);
-    states[thread.id] = anchorText && normalizedMarkdown.includes(anchorText)
+    states[thread.id] = hasLinkedHistoryAnchor(markdown, thread)
       ? 'linked'
       : 'outdated';
   }
 
   return states;
+}
+
+export function hasLinkedHistoryAnchor(markdown: string, thread: ReviewThread): boolean {
+  const anchorText = normalizeAnchorText(thread.anchor.text);
+
+  if (!anchorText) {
+    return false;
+  }
+
+  const lines = markdown.split(/\r?\n/);
+  const candidates = lines
+    .map((line, index) => ({
+      lineNumber: index + 1,
+      text: normalizeAnchorText(line)
+    }))
+    .filter(candidate => candidate.text.includes(anchorText));
+
+  if (candidates.length === 0) {
+    return false;
+  }
+
+  if (candidates.length === 1) {
+    return true;
+  }
+
+  const preferredLine = thread.anchor.lastLocatedLine ?? thread.anchor.lineStart;
+
+  if (preferredLine !== undefined && candidates.some(candidate => candidate.lineNumber === preferredLine)) {
+    return true;
+  }
+
+  const occurrence = normalizeOccurrence(thread.anchor.occurrence);
+
+  if (occurrence !== undefined && candidates[occurrence]) {
+    return true;
+  }
+
+  const contextBefore = normalizeAnchorText(thread.anchor.contextBefore || '');
+  const contextAfter = normalizeAnchorText(thread.anchor.contextAfter || '');
+
+  if (!contextBefore && !contextAfter) {
+    return false;
+  }
+
+  return candidates.some(candidate => {
+    const before = normalizeAnchorText(lines.slice(Math.max(0, candidate.lineNumber - 3), candidate.lineNumber - 1).join('\n'));
+    const after = normalizeAnchorText(lines.slice(candidate.lineNumber, Math.min(lines.length, candidate.lineNumber + 2)).join('\n'));
+    return (!contextBefore || before.includes(contextBefore))
+      && (!contextAfter || after.includes(contextAfter));
+  });
 }
 
 export function createRestoredReviewThread(
@@ -37,4 +85,12 @@ export function createRestoredReviewThread(
       }
     ]
   };
+}
+
+function normalizeOccurrence(value: number | undefined): number | undefined {
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    return undefined;
+  }
+
+  return Math.max(0, Math.floor(value));
 }

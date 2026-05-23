@@ -1,6 +1,12 @@
 import * as vscode from 'vscode';
+import {
+  openContextBootstrapGuide,
+  openContextBootstrapPrompt,
+  openOrCreateContextBrief
+} from './contextBootstrap';
 import { renderFeedbackExport } from './exportFeedback';
 import { findStaleInlineAnchorMarkers, insertInlineAnchorMarker } from './inlineMarkers';
+import { rebaseInlineReviewMetadataSidecars } from './inlineMarkerPayloads';
 import { createLocalReviewThreads } from './localReview';
 import { ReviewEditorProvider, reviewEditorViewType } from './reviewEditorProvider';
 import { ReviewStore } from './reviewStore';
@@ -15,6 +21,9 @@ export function activate(context: vscode.ExtensionContext): void {
       webviewOptions: {
         retainContextWhenHidden: true
       }
+    }),
+    vscode.workspace.onDidRenameFiles(event => {
+      void migrateRenamedMarkdownReviews(store, event.files);
     }),
     vscode.commands.registerCommand('aiMarkdownReviewLoop.openReviewPreview', async (targetUri?: vscode.Uri) => {
       const document = await resolveMarkdownDocument(provider, targetUri);
@@ -101,6 +110,23 @@ export function activate(context: vscode.ExtensionContext): void {
       });
 
       await vscode.window.showTextDocument(exportDocument, vscode.ViewColumn.Beside);
+    }),
+    vscode.commands.registerCommand('aiMarkdownReviewLoop.openContextBootstrapPrompt', async (targetUri?: vscode.Uri) => {
+      const opened = await openContextBootstrapPrompt(targetUri);
+
+      if (!opened) {
+        vscode.window.showWarningMessage('Open a workspace Markdown file before preparing an AI context bootstrap prompt.');
+      }
+    }),
+    vscode.commands.registerCommand('aiMarkdownReviewLoop.openContextBrief', async (targetUri?: vscode.Uri) => {
+      const opened = await openOrCreateContextBrief(targetUri);
+
+      if (!opened) {
+        vscode.window.showWarningMessage('Open a workspace Markdown file before opening or creating the AI context brief.');
+      }
+    }),
+    vscode.commands.registerCommand('aiMarkdownReviewLoop.openContextBootstrapGuide', async () => {
+      await openContextBootstrapGuide(context.extensionUri);
     })
   );
 }
@@ -159,4 +185,75 @@ function appendStorageWarning(
     '',
     `This Markdown file contains ${missingMarkers.length} stale ai-review-anchor marker(s) whose matching thread data is missing from ${sidecar} or no longer open. The original comment text is unavailable from inline anchors alone; clean stale anchors or restore the sidecar JSON before treating this export as complete.`
   ].join('\n');
+}
+
+async function migrateRenamedMarkdownReviews(
+  store: ReviewStore,
+  files: readonly { oldUri: vscode.Uri; newUri: vscode.Uri }[]
+): Promise<void> {
+  for (const file of files) {
+    if (!looksLikeMarkdownUri(file.newUri)) {
+      continue;
+    }
+
+    try {
+      await store.migrateDocument(file.oldUri, file.newUri);
+      await rebaseRenamedDocumentMetadata(store, file.oldUri, file.newUri);
+      await store.deleteDocumentSidecars(file.oldUri);
+    } catch (error) {
+      vscode.window.showWarningMessage(`AI Markdown Review could not migrate review state after rename: ${formatError(error)}`);
+    }
+  }
+}
+
+async function rebaseRenamedDocumentMetadata(
+  store: ReviewStore,
+  oldUri: vscode.Uri,
+  newUri: vscode.Uri
+): Promise<void> {
+  const document = await vscode.workspace.openTextDocument(newUri);
+
+  if (!isMarkdown(document)) {
+    return;
+  }
+
+  const [oldReviewUri, newReviewUri, oldResolvedUri, newResolvedUri] = await Promise.all([
+    store.getReviewFileUri(oldUri),
+    store.getReviewFileUri(newUri),
+    store.getResolvedReviewFileUri(oldUri),
+    store.getResolvedReviewFileUri(newUri)
+  ]);
+  const rewritten = rebaseInlineReviewMetadataSidecars(document.getText(), {
+    [vscode.workspace.asRelativePath(oldReviewUri, false)]: vscode.workspace.asRelativePath(newReviewUri, false),
+    [vscode.workspace.asRelativePath(oldResolvedUri, false)]: vscode.workspace.asRelativePath(newResolvedUri, false)
+  });
+
+  if (rewritten === document.getText()) {
+    return;
+  }
+
+  const edit = new vscode.WorkspaceEdit();
+  edit.replace(
+    document.uri,
+    new vscode.Range(document.positionAt(0), document.positionAt(document.getText().length)),
+    rewritten
+  );
+
+  if (!await vscode.workspace.applyEdit(edit)) {
+    throw new Error('Markdown metadata rewrite was rejected by VS Code.');
+  }
+
+  await document.save();
+}
+
+function looksLikeMarkdownUri(uri: vscode.Uri): boolean {
+  return uri.path.toLowerCase().endsWith('.md');
+}
+
+function formatError(error: unknown): string {
+  if (error instanceof Error) {
+    return error.message;
+  }
+
+  return String(error);
 }
