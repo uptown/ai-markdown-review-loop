@@ -21,4 +21,56 @@ describe('htmlBlockToMarkdown', () => {
   it('normalizes excessive blank lines from edited blocks', () => {
     assert.equal(htmlBlockToMarkdown('<p>First</p><p><br></p><p>Second</p>'), 'First\n\nSecond');
   });
+
+  it('drops empty invisible inline elements without joining surrounding words', () => {
+    assert.equal(
+      htmlBlockToMarkdown('<p>Use <a href="/ghost"></a> visible text <i></i>here.</p>'),
+      'Use visible text here.'
+    );
+  });
+
+  it('keeps fenced code block language metadata from common class names', () => {
+    assert.equal(
+      htmlBlockToMarkdown('<pre><code class="lang-ts">const value = 1;\nconsole.log(value);</code></pre>'),
+      ['```ts', 'const value = 1;', 'console.log(value);', '```'].join('\n')
+    );
+  });
+
+  it('uses a longer code fence and leaves code whitespace untouched when needed', () => {
+    assert.equal(
+      htmlBlockToMarkdown('<pre><code class="language-md">```js\n-   keep spacing\n```</code></pre>'),
+      ['````md', '```js', '-   keep spacing', '```', '````'].join('\n')
+    );
+  });
+
+  it('converts pasted HTML tables to Markdown pipe tables', () => {
+    assert.equal(
+      htmlBlockToMarkdown([
+        '<table>',
+        '<thead><tr><th style="text-align:left">Feature</th><th>Notes</th></tr></thead>',
+        '<tbody><tr><td>Tables</td><td>Cells with | pipes</td></tr></tbody>',
+        '</table>'
+      ].join('')),
+      [
+        '| Feature | Notes               |',
+        '| :---    | ---                 |',
+        '| Tables  | Cells with \\| pipes |'
+      ].join('\n')
+    );
+  });
+
+  it('normalizes list marker spacing and preserves task checkboxes', () => {
+    assert.equal(
+      htmlBlockToMarkdown('<ul><li><input type="checkbox" checked> Done</li><li>Next</li></ul>'),
+      ['- [x] Done', '- Next'].join('\n')
+    );
+    assert.equal(
+      htmlBlockToMarkdown('<ol><li>First</li><li>Second</li></ol>'),
+      ['1. First', '2. Second'].join('\n')
+    );
+  });
+
+  it('lets the HTML parser repair badly nested emphasis before Markdown conversion', () => {
+    assert.equal(htmlBlockToMarkdown('<p><b><i>Important</b></i></p>'), '***Important***');
+  });
 });
