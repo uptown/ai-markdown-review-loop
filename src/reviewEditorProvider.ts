@@ -1399,10 +1399,14 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
     }
     .block-edit-actions {
       position: absolute;
-      top: -12px;
-      left: -10px;
+      top: 0;
+      right: 0;
+      transform: translateY(calc(-100% - 4px));
       display: flex;
       gap: 4px;
+      padding: 2px;
+      border-radius: 5px;
+      background: var(--vscode-editorWidget-background);
       opacity: 0;
       transition: opacity 120ms ease;
       z-index: 5;
@@ -1411,6 +1415,13 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
     .editable-markdown-table:hover > .block-edit-actions,
     .block-edit-actions:focus-within {
       opacity: 1;
+    }
+    body.has-comment-overlay .editable-markdown-block:hover > .block-edit-actions,
+    body.has-comment-overlay .editable-markdown-table:hover > .block-edit-actions,
+    body.has-comment-overlay .block-edit-actions:focus-within,
+    body.has-comment-overlay .block-edit-actions {
+      opacity: 0;
+      pointer-events: none;
     }
     .block-edit-actions button {
       border: 1px solid var(--border);
@@ -3543,6 +3554,7 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
         bottom: rect.bottom
       }, 360);
       commentOverlay.style.display = 'block';
+      document.body.classList.add('has-comment-overlay');
     }
 
     function renderCommentOverlayItem(thread) {
@@ -3700,6 +3712,7 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
     function hideCommentOverlay() {
       commentOverlay.style.display = 'none';
       commentOverlay.innerHTML = '';
+      document.body.classList.remove('has-comment-overlay');
       delete commentOverlay.dataset.threadIds;
     }
 
