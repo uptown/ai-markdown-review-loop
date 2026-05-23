@@ -12,38 +12,22 @@ export function createContextBootstrapPrompt(input: ContextBootstrapPromptInput)
     ...input.availableSources,
     input.currentDocumentPath ?? ''
   ].filter(Boolean));
-  const sourceList = orderedSources.length > 0
-    ? orderedSources.map((source, index) => `${index + 1}. \`${source}\``).join('\n')
-    : '1. the current Markdown document under review';
-  const detectedSources = orderedSources.length > 0
-    ? orderedSources.map(source => `- \`${source}\``).join('\n')
-    : '- No repo context files were detected. Expect the AI to ask for the missing basics before it reviews or edits.';
-  const reviewTarget = input.currentDocumentPath
-    ? `Current review target: \`${input.currentDocumentPath}\``
-    : 'Current review target: the Markdown document you plan to review next';
+  const sourceList = formatSourceList(orderedSources);
+  const targetInstruction = input.currentDocumentPath
+    ? `The initial Markdown review target is \`${input.currentDocumentPath}\`. If I name a different target later, use the newer target.`
+    : 'Ask me which Markdown file to review or edit if the target is not already clear from the conversation.';
 
   return [
     '# AI Markdown Review Loop Bootstrap Prompt',
     '',
-    'Use this prompt with any AI agent before it reviews or edits Markdown in a repository that uses AI Markdown Review Loop. The goal is to give the agent enough context to use the review loop, preserve existing comments, and avoid destructive Markdown rewrites.',
-    '',
-    '## Detected Sources',
-    '',
-    detectedSources,
-    '',
-    reviewTarget,
-    '',
-    '## Prompt To Paste',
-    '',
-    '```md',
     'You are an AI agent working in a repository that uses AI Markdown Review Loop for Markdown review.',
     '',
-    'Bootstrap context first, then continue with the requested review or edit task in the same conversation unless you need missing information from the human.',
+    'Use this message as your bootstrap instructions before you review or edit Markdown. Continue with the requested review, reply, or edit task in the same conversation after bootstrapping unless required information is missing.',
     '',
-    'Read these files first, in order, if they exist:',
+    targetInstruction,
+    '',
+    'Read these repo context sources first, in order. Skip files that do not exist; do not treat a missing optional source as a blocker by itself:',
     sourceList,
-    '',
-    reviewTarget,
     '',
     'Context discovery:',
     '1. Extract what is already knowable about:',
@@ -77,14 +61,27 @@ export function createContextBootstrapPrompt(input: ContextBootstrapPromptInput)
     'After bootstrap:',
     '- Continue with the requested review, reply, or Markdown edit.',
     '- In your final response, list any `rv_*` threads you touched and whether each was preserved, replied to, edited near, moved, stale, blocked, or needs a human decision.',
-    '```',
     '',
-    '## Expected Agent Behavior',
-    '',
-    'The AI should not stop at creating a brief. It should use the bootstrapped context to operate through the review loop and keep review metadata intact while it reviews or edits Markdown.'
+    'Do not stop after creating or refreshing context. The goal is to use this context to operate through the review loop while keeping review metadata intact.'
   ].join('\n');
 }
 
 function dedupeStrings(values: readonly string[]): string[] {
   return [...new Set(values)];
+}
+
+function formatSourceList(sources: readonly string[]): string {
+  const effectiveSources = sources.length > 0
+    ? sources
+    : [
+      'docs/AI-CONTEXT-BRIEF.md',
+      'docs/PRD.md',
+      '.agent/PROJECT_STATE.md',
+      'README.md',
+      'the current Markdown document under review'
+    ];
+
+  return effectiveSources
+    .map((source, index) => `${index + 1}. \`${source}\``)
+    .join('\n');
 }

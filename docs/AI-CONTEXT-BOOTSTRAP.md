@@ -34,9 +34,11 @@ The review preview should expose one compact action:
 
 The preview should not show context readiness, detected brief status, `Open
 Brief`, or `How it works` as top-of-document chrome. The generated prompt is
-the handoff surface. It can mention `docs/AI-CONTEXT-BRIEF.md` as an optional
-durable context artifact, but the UI should not force the human into managing
-that file before review work can start.
+the handoff surface and should be copy-pasteable as-is. It should not wrap the
+actual prompt in a detected-source report, explanatory preface, or Markdown code
+fence. It can mention `docs/AI-CONTEXT-BRIEF.md` as an optional durable context
+artifact, but the UI should not force the human into managing that file before
+review work can start.
 
 ## Recommended Context Sources
 
@@ -94,6 +96,7 @@ context that the AI must know before it comments.
 
 The generated bootstrap prompt should tell the AI to:
 
+- treat the whole opened document as the prompt to follow
 - work in any AI agent that can read/edit repo files
 - read the repo sources in order
 - extract whatever context is already knowable

@@ -146,9 +146,10 @@ Canonical AI review contracts:
 For first-time setup in a repo, the recommended context injection path is:
 
 1. Use `AI Markdown Review: Open AI Context Bootstrap Prompt` or the preview's `Open Bootstrap Prompt` action.
-2. Paste that prompt into any AI agent so it reads the repo docs, uses AI Markdown Review Loop when available, and preserves `.ai-markdown-review/` sidecars plus inline review metadata during Markdown edits.
-3. Let the AI draft or refresh `docs/AI-CONTEXT-BRIEF.md` only when a durable context brief is useful; the bootstrap prompt is also the contract for immediate review and edit work.
-4. Use replies on threads to refine or correct AI assumptions instead of starting over with a new prompt each time.
+2. Copy the opened document as-is into any AI agent. The generated document is the prompt itself, not a source-detection report or a template that needs cleanup.
+3. Let the AI read the repo docs, use AI Markdown Review Loop when available, and preserve `.ai-markdown-review/` sidecars plus inline review metadata during Markdown edits.
+4. Let the AI draft or refresh `docs/AI-CONTEXT-BRIEF.md` only when a durable context brief is useful; the bootstrap prompt is also the contract for immediate review and edit work.
+5. Use replies on threads to refine or correct AI assumptions instead of starting over with a new prompt each time.
 
 Suggested replacement patches are treated as document edits, not just review decisions. `Apply Edit` replaces the matching Markdown text, refreshes affected sidecar anchors and context snippets, records an edit outcome reply, and then closes the target thread as `accepted`; if the original text is missing, duplicated ambiguously, or attached to a low-confidence anchor, the extension leaves the thread open.
 
