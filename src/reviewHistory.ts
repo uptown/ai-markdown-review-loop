@@ -75,6 +75,8 @@ export function createRestoredReviewThread(
   return {
     ...thread,
     status: 'open',
+    closedBy: undefined,
+    closedAt: undefined,
     updatedAt: now,
     thread: [
       ...thread.thread,

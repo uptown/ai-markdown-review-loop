@@ -540,7 +540,12 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
       resolvedReviewDocument,
       [{
         threadId,
-        update: { ...update, status }
+        update: {
+          ...update,
+          status,
+          closedBy: status === 'open' ? undefined : 'user',
+          closedAt: status === 'open' ? undefined : now
+        }
       }],
       now
     );
@@ -693,7 +698,8 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
         id: thread.threadId,
         status: thread.status,
         sidecar: resolvedSidecarPath,
-        updatedAt: now
+        updatedAt: thread.closedAt,
+        closedBy: thread.closedBy
       });
     }
 
@@ -946,6 +952,15 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
       border-style: dashed;
       border-color: var(--vscode-inputValidation-warningBorder, #cca700);
     }
+    .thread.is-closed.closed-accepted {
+      border-top: 3px solid rgba(138, 216, 63, 0.86);
+    }
+    .thread.is-closed.closed-resolved {
+      border-top: 3px solid rgba(77, 163, 255, 0.86);
+    }
+    .thread.is-closed.closed-rejected {
+      border-top: 3px solid rgba(255, 116, 116, 0.86);
+    }
     .thread.is-active {
       border-color: #8ad83f;
       box-shadow: inset 3px 0 0 #8ad83f;
@@ -987,6 +1002,7 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
     }
     .source-chip,
     .meta-chip,
+    .decision-chip,
     .anchor-state-chip {
       display: inline-flex;
       align-items: center;
@@ -1016,6 +1032,25 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
       border-color: rgba(215, 161, 0, 0.72);
       color: #ffe9a3;
       background: rgba(215, 161, 0, 0.22);
+    }
+    .decision-chip {
+      border-color: var(--border);
+      color: var(--muted);
+    }
+    .decision-chip.decision-accepted {
+      border-color: rgba(138, 216, 63, 0.72);
+      color: #dff9c3;
+      background: rgba(138, 216, 63, 0.2);
+    }
+    .decision-chip.decision-resolved {
+      border-color: rgba(77, 163, 255, 0.72);
+      color: #d8ecff;
+      background: rgba(77, 163, 255, 0.2);
+    }
+    .decision-chip.decision-rejected {
+      border-color: rgba(255, 116, 116, 0.72);
+      color: #ffd7d7;
+      background: rgba(255, 116, 116, 0.18);
     }
     .anchor-state-chip {
       border-color: rgba(138, 216, 63, 0.42);
@@ -2140,13 +2175,20 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
       for (const thread of threads) {
         const historyState = historyAnchorStates[thread.id] === 'linked' ? 'linked' : 'outdated';
         const element = document.createElement('section');
-        element.className = 'thread is-closed history-' + historyState + ' ' + sourceClass(thread);
+        element.className = [
+          'thread',
+          'is-closed',
+          'history-' + historyState,
+          'closed-' + String(thread.status || 'resolved'),
+          'closed-by-' + closedActorKind(thread),
+          sourceClass(thread)
+        ].join(' ');
         element.dataset.threadId = thread.id;
         element.title = historyState === 'linked'
           ? 'Closed thread. Click to jump to the matching content.'
           : 'Closed thread. The original anchor text no longer appears in this document.';
         element.innerHTML = [
-          '<header><span class="thread-meta">' + renderSourceChip(thread) + renderMetaChip('Status', thread.status) + renderMetaChip('Type', thread.type) + renderHistoryAnchorChip(historyState) + '</span>' + renderMetaChip('Updated', formatDate(thread.updatedAt)) + '</header>',
+          '<header><span class="thread-meta">' + renderSourceChip(thread) + renderDecisionChip(thread) + renderClosedByChip(thread) + renderMetaChip('Type', thread.type) + renderHistoryAnchorChip(historyState) + '</span>' + renderMetaChip('Closed', formatDate(thread.closedAt || thread.updatedAt)) + '</header>',
           '<blockquote>' + escapeHtml(thread.anchor.text || 'Document') + '</blockquote>',
           '<p>' + escapeHtml(thread.comment) + '</p>',
           renderReplies(thread),
@@ -3225,6 +3267,51 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
 
     function renderMetaChip(label, value) {
       return '<span class="meta-chip">' + escapeHtml(label) + ': ' + escapeHtml(formatMetaValue(value)) + '</span>';
+    }
+
+    function renderDecisionChip(thread) {
+      const status = String(thread.status || 'resolved');
+      return '<span class="decision-chip decision-' + escapeHtml(status) + '">' + escapeHtml(decisionLabel(status)) + '</span>';
+    }
+
+    function decisionLabel(status) {
+      if (status === 'accepted') {
+        return 'Accepted';
+      }
+
+      if (status === 'rejected') {
+        return 'Rejected';
+      }
+
+      return 'Resolved';
+    }
+
+    function renderClosedByChip(thread) {
+      const actor = closedActorKind(thread);
+      const actorClass = actor === 'assistant'
+        ? 'source-ai'
+        : actor === 'user'
+          ? 'source-human'
+          : '';
+      const className = actorClass ? 'meta-chip ' + actorClass : 'meta-chip';
+      return '<span class="' + className + '">' + escapeHtml('By: ' + closedActorLabel(actor)) + '</span>';
+    }
+
+    function closedActorKind(thread) {
+      const actor = String(thread?.closedBy || '');
+      return actor === 'user' || actor === 'assistant' ? actor : 'unknown';
+    }
+
+    function closedActorLabel(actor) {
+      if (actor === 'user') {
+        return 'You';
+      }
+
+      if (actor === 'assistant') {
+        return 'AI';
+      }
+
+      return 'Unknown';
     }
 
     function renderHistoryAnchorChip(state) {

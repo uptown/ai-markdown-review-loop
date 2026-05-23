@@ -1,5 +1,6 @@
 export type ReviewStatus = 'open' | 'accepted' | 'rejected' | 'resolved';
 export type ReviewSource = 'human' | 'ai' | 'local';
+export type ReviewActor = 'user' | 'assistant';
 export type ReviewType = 'fix' | 'question' | 'note' | 'risk' | 'suggestion';
 export type ReviewSeverity = 'low' | 'medium' | 'high';
 export type AnchorConfidence = 'exact' | 'recovered' | 'approximate' | 'missing' | 'ambiguous';
@@ -36,6 +37,8 @@ export interface ReviewThread {
   type: ReviewType;
   source: ReviewSource;
   status: ReviewStatus;
+  closedBy?: ReviewActor;
+  closedAt?: string;
   severity: ReviewSeverity;
   comment: string;
   suggestedPatch?: SuggestedPatch;

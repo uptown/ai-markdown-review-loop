@@ -14,6 +14,7 @@ This extension is built around repeated document-review loops between human auth
 - As an author, I want rendered-block edits and suggested patch application to use the same review-aware pipeline so sidecar anchors, context, and edit outcomes stay current.
 - As an author, I want to edit Mermaid diagram source from the rendered preview so diagram fixes stay in the same review loop as prose edits.
 - As a reviewer, I want accepted, resolved, and rejected threads to remain visible as history so I can audit decisions and restore one when discussion needs to continue.
+- As a reviewer, I want closed history to show how and by whom a thread was closed so accepted, resolved, rejected, human, and AI decisions are not visually flattened.
 - As an author, I want reply drafts in overlays to survive casual dismissal gestures so I do not lose in-progress review discussion.
 - As an author, I want rename or move operations on reviewed Markdown files to keep their review state attached.
 
@@ -122,9 +123,10 @@ Any future AI reviewer integration should use both:
 
 1. A user accepts, resolves, or rejects a thread.
 2. The thread moves into closed history with its final decision and discussion.
-3. If the original anchor text still exists, the history card is `Linked`; if the text disappeared, it is `Outdated`.
-4. The user clicks `Restore` when the decision needs more discussion.
-5. The extension moves the thread back to open feedback, removes the old closed audit pointer, writes a fresh open anchor index, and focuses the restored thread.
+3. The history card shows the final decision color and the actor who closed it when that metadata is available.
+4. If the original anchor text still exists, the history card is `Linked`; if the text disappeared, it is `Outdated`.
+5. The user clicks `Restore` when the decision needs more discussion.
+6. The extension moves the thread back to open feedback, removes the old closed audit pointer, writes a fresh open anchor index, clears the old closure actor metadata, and focuses the restored thread.
 
 ### Rename Without Losing Review State
 

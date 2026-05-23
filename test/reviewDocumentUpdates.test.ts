@@ -21,6 +21,8 @@ describe('review document updates', () => {
         threadId: 'rv_patch',
         update: {
           status: 'accepted',
+          closedBy: 'user',
+          closedAt: now,
           anchor: {
             text: 'new text',
             lineStart: 1,
@@ -41,8 +43,15 @@ describe('review document updates', () => {
 
     assert.deepEqual(result.reviewDocument.threads.map(item => item.id), ['rv_keep']);
     assert.deepEqual(result.resolvedReviewDocument.threads.map(item => item.id), ['rv_old', 'rv_patch']);
-    assert.deepEqual(result.closedThreads, [{ threadId: 'rv_patch', status: 'accepted' }]);
+    assert.deepEqual(result.closedThreads, [{
+      threadId: 'rv_patch',
+      status: 'accepted',
+      closedBy: 'user',
+      closedAt: now
+    }]);
     assert.equal(result.resolvedReviewDocument.threads[1].anchor.text, 'new text');
+    assert.equal(result.resolvedReviewDocument.threads[1].closedBy, 'user');
+    assert.equal(result.resolvedReviewDocument.threads[1].closedAt, now);
     assert.equal(result.resolvedReviewDocument.threads[1].updatedAt, now);
   });
 

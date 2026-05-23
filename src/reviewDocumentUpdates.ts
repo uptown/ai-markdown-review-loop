@@ -1,9 +1,11 @@
 import type { ReviewAwareThreadUpdate } from './reviewAwareEdits';
-import type { ReviewDocument, ReviewStatus, ReviewThread } from './types';
+import type { ReviewActor, ReviewDocument, ReviewStatus, ReviewThread } from './types';
 
 export interface ClosedReviewThreadUpdate {
   threadId: string;
   status: Exclude<ReviewStatus, 'open'>;
+  closedBy?: ReviewActor;
+  closedAt: string;
 }
 
 export interface ApplyReviewThreadUpdatesResult {
@@ -32,11 +34,18 @@ export function applyReviewThreadUpdatesToDocuments(
     const thread = mergeThreadUpdate(activeThreads[activeIndex], threadUpdate.update, now);
 
     if (thread.status !== 'open') {
+      const closedStatus = thread.status;
+      const closedThread = {
+        ...thread,
+        closedAt: thread.closedAt ?? now
+      };
       activeThreads.splice(activeIndex, 1);
-      upsertResolvedThread(resolvedThreads, thread);
+      upsertResolvedThread(resolvedThreads, closedThread);
       closedThreads.push({
-        threadId: thread.id,
-        status: thread.status
+        threadId: closedThread.id,
+        status: closedStatus,
+        closedBy: closedThread.closedBy,
+        closedAt: closedThread.closedAt
       });
       continue;
     }

@@ -14,6 +14,7 @@ export interface InlineReviewLogMarker {
   status: string;
   sidecar: string;
   updatedAt: string;
+  closedBy?: string;
 }
 
 export function createInlineAnchorBlockPattern(): RegExp {
@@ -329,7 +330,8 @@ function isInlineReviewLogMarker(value: unknown): value is InlineReviewLogMarker
     && typeof value.id === 'string'
     && typeof value.status === 'string'
     && typeof value.sidecar === 'string'
-    && typeof value.updatedAt === 'string';
+    && typeof value.updatedAt === 'string'
+    && optionalString(value.closedBy);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

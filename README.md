@@ -23,7 +23,7 @@ The first MVP focuses on a local workflow:
 - Apply suggested replacement patches from review threads when the patch still matches a reliable anchor.
 - Use `Accept` for agreement, `Resolve` for handled issues, and `Reject` for declined recommendations. These close the review thread but do not automatically patch the Markdown.
 - Click a thread in `Review Threads` to jump back to its highlighted content.
-- Review accepted, resolved, and rejected history from `Review Threads`, including whether the old anchor is still linked or now outdated.
+- Review accepted, resolved, and rejected history from `Review Threads`, including who closed the thread and whether the old anchor is still linked or now outdated.
 - Restore a closed review thread when a decision needs to be reopened.
 - Persist compact `ai-review-anchor` metadata in the Markdown file while storing full thread data in sidecar JSON.
 - Keep review sidecars and inline metadata aligned when a reviewed Markdown file is renamed.
@@ -130,7 +130,7 @@ When several review threads exist in one document, the extension rewrites them i
 
 Accepted, resolved, or rejected review threads move from `documents/` to `resolved/`. Their inline Markdown anchor metadata is removed so closed feedback does not leave stale `status:"open"` comments in the source, and a compact `ai-review-log` entry is appended at the end of the Markdown file as an audit pointer.
 
-The preview keeps closed feedback visible under `Review Threads` as history. Closed cards show the final status and whether the original anchor text is still `Linked` in the current Markdown or `Outdated` because the link target no longer appears. `Restore` reopens a closed thread, moves it back to `documents/`, removes the closed audit pointer, and writes a fresh open anchor index.
+The preview keeps closed feedback visible under `Review Threads` as history. Closed cards use different decision colors for accepted, resolved, and rejected feedback, show who closed the thread when that metadata is available, and show whether the original anchor text is still `Linked` in the current Markdown or `Outdated` because the link target no longer appears. `Restore` reopens a closed thread, moves it back to `documents/`, removes the closed audit pointer, and writes a fresh open anchor index.
 
 ## Agent Handoff
 

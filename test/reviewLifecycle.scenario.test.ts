@@ -90,6 +90,7 @@ describe('review lifecycle scenario', () => {
     assert.equal(threadUpdates.length, 1);
     assert.equal(threadUpdates[0].threadId, 'rv_patch');
     assert.equal(threadUpdates[0].update.status, 'accepted');
+    assert.equal(threadUpdates[0].update.closedBy, 'user');
     assert.equal(threadUpdates[0].update.anchor?.text, 'Requirement new');
     assert.match(threadUpdates[0].update.thread?.[0].text ?? '', /applied the suggested edit/);
 

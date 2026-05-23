@@ -459,6 +459,8 @@ function isReviewThread(value: unknown): value is ReviewThread {
     && isOneOf(value.type, ['fix', 'question', 'note', 'risk', 'suggestion'])
     && isOneOf(value.source, ['human', 'ai', 'local'])
     && isOneOf(value.status, ['open', 'accepted', 'rejected', 'resolved'])
+    && optionalOneOf(value.closedBy, ['user', 'assistant'])
+    && optionalString(value.closedAt)
     && isOneOf(value.severity, ['low', 'medium', 'high'])
     && typeof value.comment === 'string'
     && Array.isArray(value.thread)
@@ -490,6 +492,14 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function isOneOf(value: unknown, options: readonly string[]): boolean {
   return typeof value === 'string' && options.includes(value);
+}
+
+function optionalString(value: unknown): boolean {
+  return value === undefined || typeof value === 'string';
+}
+
+function optionalOneOf(value: unknown, options: readonly string[]): boolean {
+  return value === undefined || isOneOf(value, options);
 }
 
 function isFileNotFoundError(error: unknown): boolean {

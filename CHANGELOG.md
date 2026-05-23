@@ -34,6 +34,7 @@
 - Submits comment and reply textareas with Enter while keeping Shift+Enter for multi-line text.
 - Keeps the active comment overlay or review thread focused after saving a reply.
 - Shows accepted, resolved, and rejected review history with linked/outdated anchor state and a Restore action.
+- Colors closed history by accepted, resolved, or rejected decision and records who closed newly decided threads.
 - Dismisses an empty selected-text comment composer on outside click or Escape while preserving typed drafts.
 - Hides compact `ai-review-log` audit comments from the rendered Markdown review preview.
 - Fixes rendered-block edits so excluded following blocks are not accidentally deleted and partial comment anchors do not expand to the whole edited block.

@@ -138,12 +138,13 @@ describe('inline marker payloads', () => {
         id: 'rv_a',
         status: 'accepted',
         sidecar: '.ai-markdown-review/resolved/spec.json',
-        updatedAt: '2026-05-23T00:00:00.000Z'
+        updatedAt: '2026-05-23T00:00:00.000Z',
+        closedBy: 'user'
       }),
       [
         'Body',
         '<!-- ai-review-anchors:{"sidecar":".ai-markdown-review/documents/spec.json","ids":["rv_b"]} -->',
-        '<!-- ai-review-log:{"id":"rv_a","status":"accepted","sidecar":".ai-markdown-review/resolved/spec.json","updatedAt":"2026-05-23T00:00:00.000Z"} -->',
+        '<!-- ai-review-log:{"id":"rv_a","status":"accepted","sidecar":".ai-markdown-review/resolved/spec.json","updatedAt":"2026-05-23T00:00:00.000Z","closedBy":"user"} -->',
         ''
       ].join('\n')
     );

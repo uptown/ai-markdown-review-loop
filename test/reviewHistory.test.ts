@@ -28,6 +28,8 @@ describe('review history', () => {
     const restored = createRestoredReviewThread(thread('rv_done', 'Decision'), now);
 
     assert.equal(restored.status, 'open');
+    assert.equal(restored.closedBy, undefined);
+    assert.equal(restored.closedAt, undefined);
     assert.equal(restored.updatedAt, now);
     assert.equal(restored.thread.length, 2);
     assert.equal(restored.thread[1].role, 'user');
@@ -96,6 +98,8 @@ function thread(
     type: 'note',
     source: 'human',
     status: 'resolved',
+    closedBy: 'user',
+    closedAt: '2026-05-22T14:00:00.000Z',
     severity: 'medium',
     comment: 'Review this.',
     thread: [

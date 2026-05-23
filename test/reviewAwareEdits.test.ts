@@ -186,6 +186,8 @@ describe('review-aware edits', () => {
 
     assert.equal(updates.length, 1);
     assert.equal(updates[0].update.status, 'accepted');
+    assert.equal(updates[0].update.closedBy, 'user');
+    assert.equal(updates[0].update.closedAt, now);
     assert.equal(updates[0].update.anchor?.text, 'New sentence');
     assert.match(updates[0].update.thread?.[0].text ?? '', /applied the suggested edit/);
   });

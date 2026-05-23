@@ -145,6 +145,8 @@ export function buildReviewAwareThreadUpdates(
 
     if (thread.id === plan.targetThreadId && plan.closeTargetAs) {
       update.status = plan.closeTargetAs;
+      update.closedBy = plan.actor;
+      update.closedAt = now;
     }
 
     updates.push({
