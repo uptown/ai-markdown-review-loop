@@ -1,7 +1,22 @@
 import * as vscode from 'vscode';
 import { createHash } from 'crypto';
+import path from 'path';
 import { createRestoredReviewThread } from './reviewHistory';
-import { AnchorConfidence, ReviewDocument, ReviewReply, ReviewThread } from './types';
+import {
+  createEmptyReviewDocument,
+  createPortableReviewSidecarPayload,
+  mergeReviewDocuments,
+  parseLegacyReviewDocument,
+  parsePortableReviewSidecar,
+  upsertThread
+} from './reviewSidecarCodec';
+import {
+  LEGACY_CLOSED_REVIEW_FOLDER,
+  LEGACY_OPEN_REVIEW_FOLDER,
+  LEGACY_REVIEW_STORAGE_ROOT,
+  createColocatedReviewSidecarFileName
+} from './reviewSidecarPaths';
+import { AnchorConfidence, ReviewDocument, ReviewThread } from './types';
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder('utf-8');
@@ -14,6 +29,8 @@ interface AddThreadsResult {
 interface ReviewSidecarLocations {
   reviewUri: vscode.Uri;
   resolvedUri: vscode.Uri;
+  legacyReviewUri: vscode.Uri;
+  legacyResolvedUri: vscode.Uri;
 }
 
 export interface AnchorLocationUpdate {
@@ -28,13 +45,18 @@ export class ReviewStore {
   constructor(private readonly context: vscode.ExtensionContext) {}
 
   async load(documentUri: vscode.Uri): Promise<ReviewDocument> {
-    const { reviewUri } = await this.getSidecarLocations(documentUri);
-    return this.readReviewDocument(reviewUri, documentUri, 'review sidecar');
+    return (await this.readReviewDocuments(documentUri)).reviewDocument;
   }
 
   async save(documentUri: vscode.Uri, reviewDocument: ReviewDocument): Promise<void> {
     const { reviewUri } = await this.getSidecarLocations(documentUri);
-    await this.writeReviewDocument(reviewUri, documentUri, reviewDocument);
+    const { resolvedReviewDocument } = await this.readReviewDocuments(documentUri);
+    await this.writePortableReviewDocuments(
+      reviewUri,
+      documentUri,
+      reviewDocument,
+      resolvedReviewDocument
+    );
   }
 
   async saveBoth(
@@ -46,8 +68,12 @@ export class ReviewStore {
     const before = await this.captureSidecarBytes(reviewUri, resolvedUri);
 
     try {
-      await this.writeReviewDocument(reviewUri, documentUri, reviewDocument);
-      await this.writeReviewDocument(resolvedUri, documentUri, resolvedReviewDocument);
+      await this.writePortableReviewDocuments(
+        reviewUri,
+        documentUri,
+        reviewDocument,
+        resolvedReviewDocument
+      );
     } catch (error) {
       await this.restoreSidecarBytes(reviewUri, resolvedUri, before);
       throw error;
@@ -183,8 +209,7 @@ export class ReviewStore {
   }
 
   async loadResolved(documentUri: vscode.Uri): Promise<ReviewDocument> {
-    const { resolvedUri } = await this.getSidecarLocations(documentUri);
-    return this.readReviewDocument(resolvedUri, documentUri, 'resolved review sidecar');
+    return (await this.readReviewDocuments(documentUri)).resolvedReviewDocument;
   }
 
   async restoreThread(
@@ -226,99 +251,158 @@ export class ReviewStore {
     return resolvedUri;
   }
 
+  async getSidecarPathRewrites(
+    oldDocumentUri: vscode.Uri,
+    newDocumentUri: vscode.Uri
+  ): Promise<Record<string, string>> {
+    const oldLocations = await this.getSidecarLocations(oldDocumentUri);
+    const newLocations = await this.getSidecarLocations(newDocumentUri);
+
+    return {
+      [vscode.workspace.asRelativePath(oldLocations.reviewUri, false)]: vscode.workspace.asRelativePath(newLocations.reviewUri, false),
+      [vscode.workspace.asRelativePath(oldLocations.resolvedUri, false)]: vscode.workspace.asRelativePath(newLocations.resolvedUri, false),
+      [vscode.workspace.asRelativePath(oldLocations.legacyReviewUri, false)]: vscode.workspace.asRelativePath(newLocations.reviewUri, false),
+      [vscode.workspace.asRelativePath(oldLocations.legacyResolvedUri, false)]: vscode.workspace.asRelativePath(newLocations.resolvedUri, false)
+    };
+  }
+
   async migrateDocument(oldDocumentUri: vscode.Uri, newDocumentUri: vscode.Uri): Promise<{
     reviewMoved: boolean;
     resolvedMoved: boolean;
   }> {
-    const oldLocations = await this.getSidecarLocations(oldDocumentUri);
     const newLocations = await this.getSidecarLocations(newDocumentUri);
     const beforeNewSidecars = await this.captureSidecarBytes(newLocations.reviewUri, newLocations.resolvedUri);
-    let reviewMoved = false;
-    let resolvedMoved = false;
 
     try {
-      reviewMoved = await this.migrateSidecarFile(
-        oldLocations.reviewUri,
-        newLocations.reviewUri,
-        newDocumentUri
-      );
-      resolvedMoved = await this.migrateSidecarFile(
-        oldLocations.resolvedUri,
-        newLocations.resolvedUri,
-        newDocumentUri
-      );
+      const sourceDocuments = await this.readReviewDocuments(oldDocumentUri);
+      const targetDocuments = await this.readReviewDocuments(newDocumentUri);
+      const reviewMoved = sourceDocuments.reviewDocument.threads.length > 0;
+      const resolvedMoved = sourceDocuments.resolvedReviewDocument.threads.length > 0;
+
+      if (reviewMoved || resolvedMoved) {
+        await this.writePortableReviewDocuments(
+          newLocations.reviewUri,
+          newDocumentUri,
+          mergeReviewDocuments(
+            targetDocuments.reviewDocument,
+            sourceDocuments.reviewDocument,
+            newDocumentUri.toString()
+          ),
+          mergeReviewDocuments(
+            targetDocuments.resolvedReviewDocument,
+            sourceDocuments.resolvedReviewDocument,
+            newDocumentUri.toString()
+          )
+        );
+      }
+
+      return { reviewMoved, resolvedMoved };
     } catch (error) {
       await this.restoreSidecarBytes(newLocations.reviewUri, newLocations.resolvedUri, beforeNewSidecars);
       throw error;
     }
-
-    return { reviewMoved, resolvedMoved };
   }
 
   async deleteDocumentSidecars(documentUri: vscode.Uri): Promise<void> {
-    const { reviewUri, resolvedUri } = await this.getSidecarLocations(documentUri);
+    const { reviewUri, legacyReviewUri, legacyResolvedUri } = await this.getSidecarLocations(documentUri);
     await Promise.all([
       restoreFile(reviewUri, undefined),
-      restoreFile(resolvedUri, undefined)
+      restoreFile(legacyReviewUri, undefined),
+      restoreFile(legacyResolvedUri, undefined)
     ]);
   }
 
   async saveResolved(documentUri: vscode.Uri, reviewDocument: ReviewDocument): Promise<void> {
-    const { resolvedUri } = await this.getSidecarLocations(documentUri);
-    await this.writeReviewDocument(resolvedUri, documentUri, reviewDocument);
+    const { reviewUri } = await this.getSidecarLocations(documentUri);
+    const { reviewDocument: openReviewDocument } = await this.readReviewDocuments(documentUri);
+    await this.writePortableReviewDocuments(
+      reviewUri,
+      documentUri,
+      openReviewDocument,
+      reviewDocument
+    );
   }
 
   private async getSidecarLocations(documentUri: vscode.Uri): Promise<ReviewSidecarLocations> {
     const workspaceFolder = vscode.workspace.getWorkspaceFolder(documentUri);
     const root = workspaceFolder?.uri ?? this.context.globalStorageUri;
-    const documentsRoot = vscode.Uri.joinPath(root, '.ai-markdown-review', 'documents');
-    const resolvedRoot = vscode.Uri.joinPath(root, '.ai-markdown-review', 'resolved');
-    await Promise.all([
-      vscode.workspace.fs.createDirectory(documentsRoot),
-      vscode.workspace.fs.createDirectory(resolvedRoot)
-    ]);
+    const documentsRoot = vscode.Uri.joinPath(root, LEGACY_REVIEW_STORAGE_ROOT, LEGACY_OPEN_REVIEW_FOLDER);
+    const resolvedRoot = vscode.Uri.joinPath(root, LEGACY_REVIEW_STORAGE_ROOT, LEGACY_CLOSED_REVIEW_FOLDER);
+    const portableUri = createColocatedSidecarUri(documentUri);
 
     return {
-      reviewUri: vscode.Uri.joinPath(documentsRoot, `${hashText(documentUri.toString())}.json`),
-      resolvedUri: vscode.Uri.joinPath(resolvedRoot, `${hashText(documentUri.toString())}.json`)
+      reviewUri: portableUri,
+      resolvedUri: portableUri,
+      legacyReviewUri: vscode.Uri.joinPath(documentsRoot, `${hashText(documentUri.toString())}.json`),
+      legacyResolvedUri: vscode.Uri.joinPath(resolvedRoot, `${hashText(documentUri.toString())}.json`)
     };
   }
 
-  private async readReviewDocument(
+  private async readReviewDocuments(documentUri: vscode.Uri): Promise<{
+    reviewDocument: ReviewDocument;
+    resolvedReviewDocument: ReviewDocument;
+  }> {
+    const { reviewUri, legacyReviewUri, legacyResolvedUri } = await this.getSidecarLocations(documentUri);
+    const portableBytes = await readFileIfExists(reviewUri);
+
+    if (portableBytes) {
+      try {
+        return parsePortableReviewSidecar(
+          documentUri.toString(),
+          JSON.parse(decoder.decode(portableBytes))
+        );
+      } catch (error) {
+        throw new Error(`Review sidecar is invalid: ${formatError(error)}`);
+      }
+    }
+
+    return {
+      reviewDocument: await this.readLegacyReviewDocument(
+        legacyReviewUri,
+        documentUri,
+        'legacy review sidecar'
+      ),
+      resolvedReviewDocument: await this.readLegacyReviewDocument(
+        legacyResolvedUri,
+        documentUri,
+        'legacy resolved review sidecar'
+      )
+    };
+  }
+
+  private async readLegacyReviewDocument(
     uri: vscode.Uri,
     documentUri: vscode.Uri,
     label: string
   ): Promise<ReviewDocument> {
-    let bytes: Uint8Array;
+    const bytes = await readFileIfExists(uri);
 
-    try {
-      bytes = await vscode.workspace.fs.readFile(uri);
-    } catch (error) {
-      if (!isFileNotFoundError(error)) {
-        throw new Error(`Could not read ${label}: ${formatError(error)}`);
-      }
-
-      return createEmptyReviewDocument(documentUri);
+    if (!bytes) {
+      return createEmptyReviewDocument(documentUri.toString());
     }
 
     try {
-      return parseReviewDocument(documentUri, JSON.parse(decoder.decode(bytes)));
+      return parseLegacyReviewDocument(documentUri.toString(), JSON.parse(decoder.decode(bytes)));
     } catch (error) {
       throw new Error(`${capitalize(label)} is invalid: ${formatError(error)}`);
     }
   }
 
-  private async writeReviewDocument(
+  private async writePortableReviewDocuments(
     uri: vscode.Uri,
     documentUri: vscode.Uri,
-    reviewDocument: ReviewDocument
+    reviewDocument: ReviewDocument,
+    resolvedReviewDocument: ReviewDocument
   ): Promise<void> {
-    const payload: ReviewDocument = {
-      documentUri: documentUri.toString(),
-      threads: reviewDocument.threads,
-      updatedAt: new Date().toISOString()
-    };
+    const updatedAt = new Date().toISOString();
+    const payload = createPortableReviewSidecarPayload(
+      documentUri.toString(),
+      reviewDocument,
+      resolvedReviewDocument,
+      updatedAt
+    );
 
+    await vscode.workspace.fs.createDirectory(dirnameUri(uri));
     await vscode.workspace.fs.writeFile(
       uri,
       encoder.encode(`${JSON.stringify(payload, null, 2)}\n`)
@@ -351,122 +435,10 @@ export class ReviewStore {
       restoreFile(resolvedUri, snapshot.resolvedBytes)
     ]);
   }
-
-  private async migrateSidecarFile(
-    oldUri: vscode.Uri,
-    newUri: vscode.Uri,
-    newDocumentUri: vscode.Uri
-  ): Promise<boolean> {
-    const sourceBytes = await readFileIfExists(oldUri);
-
-    if (!sourceBytes) {
-      return false;
-    }
-
-    const sourceDocument = parseReviewDocument(
-      newDocumentUri,
-      JSON.parse(decoder.decode(sourceBytes))
-    );
-    const targetBytes = await readFileIfExists(newUri);
-    const targetDocument = targetBytes
-      ? parseReviewDocument(newDocumentUri, JSON.parse(decoder.decode(targetBytes)))
-      : createEmptyReviewDocument(newDocumentUri);
-    const mergedDocument = mergeReviewDocuments(targetDocument, sourceDocument, newDocumentUri);
-
-    await this.writeReviewDocument(newUri, newDocumentUri, mergedDocument);
-    return true;
-  }
 }
 
 export function hashText(value: string): string {
   return createHash('sha256').update(value).digest('hex').slice(0, 24);
-}
-
-function createEmptyReviewDocument(documentUri: vscode.Uri): ReviewDocument {
-  return {
-    documentUri: documentUri.toString(),
-    threads: [],
-    updatedAt: new Date().toISOString()
-  };
-}
-
-function mergeReviewDocuments(
-  target: ReviewDocument,
-  source: ReviewDocument,
-  documentUri: vscode.Uri
-): ReviewDocument {
-  const merged = new Map<string, ReviewThread>();
-
-  for (const thread of [...target.threads, ...source.threads]) {
-    const normalizedThread = {
-      ...thread,
-      documentUri: documentUri.toString()
-    };
-    const existing = merged.get(thread.id);
-
-    if (!existing || timestamp(normalizedThread.updatedAt) >= timestamp(existing.updatedAt)) {
-      merged.set(thread.id, normalizedThread);
-    }
-  }
-
-  return {
-    documentUri: documentUri.toString(),
-    threads: [...merged.values()],
-    updatedAt: new Date().toISOString()
-  };
-}
-
-function upsertThread(threads: ReviewThread[], thread: ReviewThread): void {
-  const existingIndex = threads.findIndex(candidate => candidate.id === thread.id);
-
-  if (existingIndex >= 0) {
-    threads[existingIndex] = thread;
-  } else {
-    threads.push(thread);
-  }
-}
-
-function parseReviewDocument(documentUri: vscode.Uri, value: unknown): ReviewDocument {
-  if (!isRecord(value)) {
-    throw new Error('Expected a JSON object.');
-  }
-
-  if (!Array.isArray(value.threads)) {
-    throw new Error('Expected "threads" to be an array.');
-  }
-
-  const invalidThread = value.threads.find(thread => !isReviewThread(thread));
-
-  if (invalidThread) {
-    throw new Error('Expected every thread to match the review thread schema.');
-  }
-
-  return {
-    documentUri: documentUri.toString(),
-    threads: value.threads,
-    updatedAt: typeof value.updatedAt === 'string' ? value.updatedAt : new Date().toISOString()
-  };
-}
-
-function isReviewThread(value: unknown): value is ReviewThread {
-  if (!isRecord(value) || !isRecord(value.anchor)) {
-    return false;
-  }
-
-  return typeof value.id === 'string'
-    && typeof value.documentUri === 'string'
-    && typeof value.anchor.text === 'string'
-    && isOneOf(value.type, ['fix', 'question', 'note', 'risk', 'suggestion'])
-    && isOneOf(value.source, ['human', 'ai', 'local'])
-    && isOneOf(value.status, ['open', 'accepted', 'rejected', 'resolved'])
-    && optionalOneOf(value.closedBy, ['user', 'assistant'])
-    && optionalString(value.closedAt)
-    && isOneOf(value.severity, ['low', 'medium', 'high'])
-    && typeof value.comment === 'string'
-    && Array.isArray(value.thread)
-    && value.thread.every(isReviewReply)
-    && typeof value.createdAt === 'string'
-    && typeof value.updatedAt === 'string';
 }
 
 function sameAnchorLocation(
@@ -479,27 +451,30 @@ function sameAnchorLocation(
     && left.lastLocatedLine === right.lastLocatedLine;
 }
 
-function isReviewReply(value: unknown): value is ReviewReply {
-  return isRecord(value)
-    && isOneOf(value.role, ['user', 'assistant'])
-    && typeof value.text === 'string'
-    && typeof value.createdAt === 'string';
+function createColocatedSidecarUri(documentUri: vscode.Uri): vscode.Uri {
+  const directoryPath = path.posix.dirname(documentUri.path);
+  const markdownFileName = path.posix.basename(documentUri.path);
+
+  return documentUri.with({
+    path: path.posix.join(
+      directoryPath,
+      createColocatedReviewSidecarFileName(markdownFileName)
+    ),
+    query: '',
+    fragment: ''
+  });
+}
+
+function dirnameUri(uri: vscode.Uri): vscode.Uri {
+  return uri.with({
+    path: path.posix.dirname(uri.path),
+    query: '',
+    fragment: ''
+  });
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
-}
-
-function isOneOf(value: unknown, options: readonly string[]): boolean {
-  return typeof value === 'string' && options.includes(value);
-}
-
-function optionalString(value: unknown): boolean {
-  return value === undefined || typeof value === 'string';
-}
-
-function optionalOneOf(value: unknown, options: readonly string[]): boolean {
-  return value === undefined || isOneOf(value, options);
 }
 
 function isFileNotFoundError(error: unknown): boolean {
@@ -522,11 +497,6 @@ function formatError(error: unknown): string {
 
 function capitalize(value: string): string {
   return value.length > 0 ? value[0].toUpperCase() + value.slice(1) : value;
-}
-
-function timestamp(value: string): number {
-  const parsed = Date.parse(value);
-  return Number.isNaN(parsed) ? 0 : parsed;
 }
 
 async function restoreFile(uri: vscode.Uri, bytes: Uint8Array | undefined): Promise<void> {

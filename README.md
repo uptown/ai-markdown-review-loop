@@ -28,7 +28,7 @@ The first MVP focuses on a local workflow:
 - Persist compact `ai-review-anchor` metadata in the Markdown file while storing full thread data in sidecar JSON.
 - Keep review sidecars and inline metadata aligned when a reviewed Markdown file is renamed.
 - Attach feedback directly to a Mermaid diagram source block.
-- Store review threads in a workspace-local sidecar file.
+- Store review threads in a hidden sidecar file beside each Markdown document.
 - Export unresolved feedback as Markdown for an AI coding agent.
 - Ship a repo-owned AI review policy and thread-creation schema for future AI reviewer integrations.
 - Document the human-AI collaboration loop and first-pass context bootstrap path.
@@ -104,33 +104,43 @@ Each diagram card includes:
 
 ## Storage
 
-MVP review data is stored under:
+Review data is stored beside each Markdown document in one hidden JSON sidecar:
 
 ```text
-.ai-markdown-review/
-  documents/
-    <document-hash>.json
-  resolved/
-    <document-hash>.json
+docs/spec.md
+docs/.spec.md.ai-review.json
 ```
+
+The sidecar stores open threads and closed history together:
+
+```json
+{
+  "schemaVersion": 2,
+  "documentUri": "file:///workspace/docs/spec.md",
+  "openThreads": [],
+  "closedThreads": []
+}
+```
+
+The extension still reads legacy workspace-root sidecars from `.ai-markdown-review/documents/` and `.ai-markdown-review/resolved/` so existing review state can migrate lazily on the next review write or rename.
 
 One compact document-level anchor index is also inserted into the Markdown source:
 
 ```md
-<!-- ai-review-anchors:{"sidecar":".ai-markdown-review/documents/...json","ids":["rv_...","rv_..."]} -->
+<!-- ai-review-anchors:{"sidecar":"docs/.spec.md.ai-review.json","ids":["rv_...","rv_..."]} -->
 ```
 
 The custom preview hides these anchors, but AI agents that read the Markdown can use them to connect document locations with sidecar review data.
 
 If the commented text changes and the original text snippet no longer matches, the preview falls back to sidecar context snippets and line hints so the review thread still appears near the edited block. When the preview finds the comment with high confidence, it refreshes the sidecar line hint after a short idle debounce for the next render. Thread cards show whether the anchor is `Located`, `Recovered`, `Approximate`, or `Needs re-anchor` so lost comments remain visible instead of silently disappearing. Approximate or missing matches are not auto-saved as new anchor locations.
 
-If the sidecar JSON is deleted or no longer contains matching thread data, the review preview and feedback export warn that inline anchors are stale. The original comment text cannot be rebuilt from the inline anchors alone; restore the sidecar JSON from backup/source control or use `Clean stale anchors` in the preview warning if the comments are no longer needed.
+If the sidecar JSON is deleted or no longer contains matching thread data, the review preview and feedback export warn that inline anchors are stale. The original comment text cannot be rebuilt from the inline anchors alone; restore the sidecar JSON from backup or use `Clean stale anchors` in the preview warning if the comments are no longer needed.
 
 When several review threads exist in one document, the extension rewrites them into that single grouped `ai-review-anchors` metadata comment instead of adding one metadata line per thread.
 
-Accepted, resolved, or rejected review threads move from `documents/` to `resolved/`. Their inline Markdown anchor metadata is removed so closed feedback does not leave stale `status:"open"` comments in the source, and a compact `ai-review-log` entry is appended at the end of the Markdown file as an audit pointer.
+Accepted, resolved, or rejected review threads move from `openThreads` to `closedThreads` inside the same sidecar. Their inline Markdown anchor metadata is removed so closed feedback does not leave stale `status:"open"` comments in the source, and a compact `ai-review-log` entry is appended at the end of the Markdown file as an audit pointer.
 
-The preview keeps closed feedback visible under `Review Threads` as history. Closed cards use different decision colors for accepted, resolved, and rejected feedback, show who closed the thread when that metadata is available, and show whether the original anchor text is still `Linked` in the current Markdown or `Outdated` because the link target no longer appears. `Restore` reopens a closed thread, moves it back to `documents/`, removes the closed audit pointer, and writes a fresh open anchor index.
+The preview keeps closed feedback visible under `Review Threads` as history. Closed cards use different decision colors for accepted, resolved, and rejected feedback, show who closed the thread when that metadata is available, and show whether the original anchor text is still `Linked` in the current Markdown or `Outdated` because the link target no longer appears. `Restore` reopens a closed thread, moves it back to `openThreads`, removes the closed audit pointer, and writes a fresh open anchor index.
 
 ## Agent Handoff
 
@@ -147,7 +157,7 @@ For first-time setup in a repo, the recommended context injection path is:
 
 1. Use `AI Markdown Review: Open AI Context Bootstrap Prompt` or the preview's `Open Bootstrap Prompt` action.
 2. Copy the opened document as-is into any AI agent. The generated document is the prompt itself, not a source-detection report or a template that needs cleanup.
-3. Let the AI read the repo docs, use AI Markdown Review Loop when available, and preserve `.ai-markdown-review/` sidecars plus inline review metadata during Markdown edits.
+3. Let the AI read the repo docs, use AI Markdown Review Loop when available, and preserve colocated `.ai-review.json` sidecars plus inline review metadata during Markdown edits.
 4. Let the AI draft or refresh `docs/AI-CONTEXT-BRIEF.md` only when a durable context brief is useful; the bootstrap prompt is also the contract for immediate review and edit work.
 5. Use replies on threads to refine or correct AI assumptions instead of starting over with a new prompt each time.
 
@@ -157,7 +167,7 @@ Rendered block edits use the same review-aware edit pipeline. The MVP editor is 
 
 Rendered Markdown tables get a dedicated grid editor instead of the generic block editor. Use `Edit Table` from the preview table controls to edit header/body cells, add or remove rows and columns, choose column alignment, and save back to pipe-table Markdown through the same review-aware edit and undo path.
 
-Review-aware edits, new comment anchors, review decisions, and restored threads register sidecar snapshots with the Markdown edit. Undo and redo restore the matching `.ai-markdown-review` sidecar state when the Markdown text rolls backward or forward.
+Review-aware edits, new comment anchors, review decisions, and restored threads register sidecar snapshots with the Markdown edit. Undo and redo restore the matching `.ai-review.json` sidecar state when the Markdown text rolls backward or forward.
 
 If a sidecar write fails during a review-aware change, the extension rolls the Markdown and sidecar files back together instead of leaving a half-applied review state behind.
 

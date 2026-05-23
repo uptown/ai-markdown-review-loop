@@ -48,6 +48,6 @@ describe('agent review policy', () => {
     assert.match(bootstrap, /Prompt First, Brief Optional/);
     assert.match(bootstrap, /Open Bootstrap Prompt/);
     assert.match(bootstrap, /docs\/AI-CONTEXT-BRIEF.md/);
-    assert.match(bootstrap, /\.ai-markdown-review\/` sidecars/);
+    assert.match(bootstrap, /colocated `\.<filename>\.ai-review\.json` sidecars/);
   });
 });

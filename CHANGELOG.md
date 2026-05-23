@@ -7,7 +7,7 @@
 - Compacts multiple inline review anchors at the same insertion point into one grouped marker.
 - Removes the text-only Review Document action from the editor title toolbar and keeps it in context menus/Command Palette.
 - Removes resolved or rejected review threads from inline Markdown anchor metadata.
-- Moves closed review threads to `.ai-markdown-review/resolved/` and appends a compact end-of-file audit log.
+- Moves closed review threads into closed history and appends a compact end-of-file audit log.
 - Adds a one-click cleanup action for stale inline anchors when their sidecar data is missing.
 - Trims inline anchor metadata to the minimum open-thread pointer shape and cleans closed stale anchors.
 - Keeps comments visible after the commented text changes by falling back to stored line hints.
@@ -35,6 +35,7 @@
 - Keeps the active comment overlay or review thread focused after saving a reply.
 - Shows accepted, resolved, and rejected review history with linked/outdated anchor state and a Restore action.
 - Colors closed history by accepted, resolved, or rejected decision and records who closed newly decided threads.
+- Stores new review state beside each Markdown file in one hidden `.<filename>.ai-review.json` sidecar while still reading legacy `.ai-markdown-review/` sidecars for migration.
 - Dismisses an empty selected-text comment composer on outside click or Escape while preserving typed drafts.
 - Hides compact `ai-review-log` audit comments from the rendered Markdown review preview.
 - Fixes rendered-block edits so excluded following blocks are not accidentally deleted and partial comment anchors do not expand to the whole edited block.

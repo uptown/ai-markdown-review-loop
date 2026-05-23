@@ -105,9 +105,9 @@ The generated bootstrap prompt should tell the AI to:
 - follow `docs/AI-REVIEW-POLICY.md`, `docs/AI-COLLABORATION-LOOP.md`, and
   `docs/agent-review-thread.schema.json` when direct plugin tools are not
   available
-- preserve `.ai-markdown-review/` sidecars, inline `ai-review-anchors`, inline
-  `ai-review-log` audit pointers, thread ids, replies, statuses, and decision
-  history during normal Markdown edits
+- preserve colocated `.<filename>.ai-review.json` sidecars, inline
+  `ai-review-anchors`, inline `ai-review-log` audit pointers, thread ids,
+  replies, statuses, and decision history during normal Markdown edits
 - prefer localized edits over whole-document rewrites
 - report every touched `rv_*` thread with an outcome
 - optionally draft or refresh `docs/AI-CONTEXT-BRIEF.md` if durable context is

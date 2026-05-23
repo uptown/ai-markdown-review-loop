@@ -21,7 +21,8 @@ describe('createContextBootstrapPrompt', () => {
     assert.match(prompt, /If `docs\/AI-CONTEXT-BRIEF.md` exists, treat it as durable context/i);
     assert.match(prompt, /# AI Context Brief/);
     assert.match(prompt, /use them as the review surface/i);
-    assert.match(prompt, /\.ai-markdown-review\/documents\/\*\.json/);
+    assert.match(prompt, /colocated hidden `\.<filename>\.ai-review\.json` sidecar/);
+    assert.match(prompt, /Legacy `\.ai-markdown-review\/documents\/\*\.json`/);
     assert.match(prompt, /Inline `ai-review-anchors` and `ai-review-log` comments are metadata pointers/);
     assert.match(prompt, /Do not mark threads `accepted`, `resolved`, or `rejected`/);
     assert.match(prompt, /list any `rv_\*` threads you touched/);

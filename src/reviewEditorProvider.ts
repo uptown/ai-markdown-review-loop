@@ -3983,13 +3983,13 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
       return '';
     }
 
-    const sidecar = missingMarkers.find(marker => marker.sidecar)?.sidecar ?? '.ai-markdown-review/documents/*.json';
+    const sidecar = missingMarkers.find(marker => marker.sidecar)?.sidecar ?? '.<filename>.ai-review.json';
     const markerLabel = missingMarkers.length === 1 ? 'anchor' : 'anchors';
     const markerIds = missingMarkers.map(marker => marker.id).join(',');
 
     return `<section class="storage-warning" role="status">
     <strong>Review anchors need cleanup.</strong>
-    <p>This Markdown file still contains ${missingMarkers.length} stale ai-review-anchor ${markerLabel}. The matching review thread data is missing from <code>${escapeHtml(sidecar)}</code> or no longer open. Comment text cannot be rebuilt from inline anchors; restore the sidecar JSON from backup/source control, or clean the stale anchors if the comments are no longer needed.</p>
+    <p>This Markdown file still contains ${missingMarkers.length} stale ai-review-anchor ${markerLabel}. The matching review thread data is missing from <code>${escapeHtml(sidecar)}</code> or no longer open. Comment text cannot be rebuilt from inline anchors; restore the sidecar JSON from backup, or clean the stale anchors if the comments are no longer needed.</p>
     <div class="storage-warning-actions">
       <button type="button" class="secondary compact" data-cleanup-stale-anchors data-thread-ids="${escapeHtml(markerIds)}">Clean stale anchors</button>
     </div>

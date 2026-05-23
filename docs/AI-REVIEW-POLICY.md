@@ -83,7 +83,7 @@ Use `low` for non-blocking improvements that still deserve review attention.
 
 - New AI-authored threads should start as `source: "ai"` and `status: "open"`.
 - AI must not close threads as `accepted`, `resolved`, or `rejected` unless the user explicitly asks for that decision.
-- AI should preserve inline review metadata and sidecar review files during normal edits.
+- AI should preserve inline review metadata and colocated `.<filename>.ai-review.json` sidecar review files during normal edits.
 
 ## Machine Contract
 

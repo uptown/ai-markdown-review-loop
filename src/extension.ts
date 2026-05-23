@@ -162,14 +162,14 @@ function appendStorageWarning(
     return exportText;
   }
 
-  const sidecar = missingMarkers.find(marker => marker.sidecar)?.sidecar ?? '.ai-markdown-review/documents/*.json';
+  const sidecar = missingMarkers.find(marker => marker.sidecar)?.sidecar ?? '.<filename>.ai-review.json';
 
   return [
     exportText,
     '',
     '## Review Storage Warning',
     '',
-    `This Markdown file contains ${missingMarkers.length} stale ai-review-anchor marker(s) whose matching thread data is missing from ${sidecar} or no longer open. The original comment text is unavailable from inline anchors alone; clean stale anchors or restore the sidecar JSON before treating this export as complete.`
+    `This Markdown file contains ${missingMarkers.length} stale ai-review-anchor marker(s) whose matching thread data is missing from ${sidecar} or no longer open. The original comment text is unavailable from inline anchors alone; clean stale anchors or restore the sidecar JSON from backup before treating this export as complete.`
   ].join('\n');
 }
 
@@ -203,16 +203,10 @@ async function rebaseRenamedDocumentMetadata(
     return;
   }
 
-  const [oldReviewUri, newReviewUri, oldResolvedUri, newResolvedUri] = await Promise.all([
-    store.getReviewFileUri(oldUri),
-    store.getReviewFileUri(newUri),
-    store.getResolvedReviewFileUri(oldUri),
-    store.getResolvedReviewFileUri(newUri)
-  ]);
-  const rewritten = rebaseInlineReviewMetadataSidecars(document.getText(), {
-    [vscode.workspace.asRelativePath(oldReviewUri, false)]: vscode.workspace.asRelativePath(newReviewUri, false),
-    [vscode.workspace.asRelativePath(oldResolvedUri, false)]: vscode.workspace.asRelativePath(newResolvedUri, false)
-  });
+  const rewritten = rebaseInlineReviewMetadataSidecars(
+    document.getText(),
+    await store.getSidecarPathRewrites(oldUri, newUri)
+  );
 
   if (rewritten === document.getText()) {
     return;

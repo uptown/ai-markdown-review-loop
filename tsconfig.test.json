@@ -15,6 +15,8 @@
     "src/reviewAwareEdits.ts",
     "src/reviewDocumentUpdates.ts",
     "src/reviewHistory.ts",
+    "src/reviewSidecarCodec.ts",
+    "src/reviewSidecarPaths.ts",
     "src/suggestedPatches.ts",
     "src/tableEdits.ts",
     "src/types.ts",

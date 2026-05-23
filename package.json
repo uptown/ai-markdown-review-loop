@@ -189,10 +189,10 @@
         "aiMarkdownReviewLoop.storageMode": {
           "type": "string",
           "enum": [
-            "sidecar"
+            "colocated"
           ],
-          "default": "sidecar",
-          "description": "Where review thread data is stored. MVP supports workspace-local sidecar storage."
+          "default": "colocated",
+          "description": "Where review thread data is stored. Review state is stored beside each Markdown file in a hidden .<filename>.ai-review.json sidecar. Legacy workspace .ai-markdown-review sidecars are still read for migration."
         }
       }
     }

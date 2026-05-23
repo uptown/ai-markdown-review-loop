@@ -131,7 +131,7 @@ Any future AI reviewer integration should use both:
 ### Rename Without Losing Review State
 
 1. A reviewed Markdown file is renamed or moved inside the workspace.
-2. The extension migrates open and resolved sidecar files to the new document identity.
+2. The extension migrates review state into the renamed document's colocated `.<filename>.ai-review.json` sidecar.
 3. Inline review metadata is rewritten to point at the new sidecar paths.
 4. Existing review threads remain available in the preview after the rename.
 
@@ -144,7 +144,7 @@ Any future AI reviewer integration should use both:
 
 ## Agent Behavior
 
-Agents should treat review sidecar data and inline review metadata as part of the document state. They should preserve review anchors and logs, prefer localized edits, keep nearby context stable where possible, and report every handled `rv_*` ID with an outcome. Agents should not close threads as `accepted`, `resolved`, or `rejected` unless the user explicitly asks them to make that review decision.
+Agents should treat review sidecar data and inline review metadata as part of the document state. Review sidecars live beside Markdown documents as hidden `.<filename>.ai-review.json` files, with legacy `.ai-markdown-review/` paths supported for older workspaces. Agents should preserve review anchors and logs, prefer localized edits, keep nearby context stable where possible, and report every handled `rv_*` ID with an outcome. Agents should not close threads as `accepted`, `resolved`, or `rejected` unless the user explicitly asks them to make that review decision.
 
 When an AI rewrite provider is added, it should emit a review-aware edit plan instead of rewriting Markdown directly. The plan should identify the selected range, actor, intent, target thread when applicable, and whether a user explicitly requested a status decision.
 

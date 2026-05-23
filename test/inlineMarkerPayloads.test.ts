@@ -170,6 +170,24 @@ describe('inline marker payloads', () => {
     );
   });
 
+  it('rebases legacy root sidecar paths to a colocated review sidecar', () => {
+    const markdown = [
+      '<!-- ai-review-anchors:{"sidecar":".ai-markdown-review/documents/old.json","ids":["rv_a"]} -->',
+      '<!-- ai-review-log:{"id":"rv_done","status":"resolved","sidecar":".ai-markdown-review/resolved/old.json","updatedAt":"2026-05-23T00:00:00.000Z"} -->'
+    ].join('\n');
+
+    assert.equal(
+      rebaseInlineReviewMetadataSidecars(markdown, {
+        '.ai-markdown-review/documents/old.json': 'docs/.renamed.md.ai-review.json',
+        '.ai-markdown-review/resolved/old.json': 'docs/.renamed.md.ai-review.json'
+      }),
+      [
+        '<!-- ai-review-anchors:{"sidecar":"docs/.renamed.md.ai-review.json","ids":["rv_a"]} -->',
+        '<!-- ai-review-log:{"id":"rv_done","status":"resolved","sidecar":"docs/.renamed.md.ai-review.json","updatedAt":"2026-05-23T00:00:00.000Z"} -->'
+      ].join('\n')
+    );
+  });
+
   it('rebases adjacent metadata comments even when logs share one line', () => {
     const markdown = [
       'Body',
