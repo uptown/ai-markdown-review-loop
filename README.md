@@ -171,8 +171,8 @@ For first-time setup in a repo, the recommended context injection path is:
 1. Use `AI Markdown Review: Open AI Context Bootstrap Prompt` or the preview's `Open Bootstrap Prompt` action.
 2. Copy the opened document as-is into any AI agent. The generated document is the prompt itself, not a source-detection report or a template that needs cleanup.
 3. Tell the AI which Markdown file to review or edit in the same conversation, or let it ask if the target is unclear. The bootstrap prompt stays generic and does not embed a generated target line.
-4. Let the AI read the repo docs, use AI Markdown Review Loop when available, and preserve colocated `.ai-review.json` sidecars plus inline review metadata during Markdown edits.
-5. Let the AI use `docs/AI-CONTEXT-BRIEF.md` when it exists, but create or refresh durable context only when the human asks for that.
+4. Let the AI discover only the repo context needed for the requested review or edit, use AI Markdown Review Loop when available, and preserve colocated `.ai-review.json` sidecars plus inline review metadata during Markdown edits.
+5. Treat durable context briefs as optional artifacts that the AI creates or refreshes only when the human asks for that.
 6. Use replies on threads to refine or correct AI assumptions instead of starting over with a new prompt each time.
 
 For active review iteration after bootstrap:

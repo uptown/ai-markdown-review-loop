@@ -4,16 +4,13 @@ import { createContextBootstrapPrompt } from '../src/contextBootstrapPrompt';
 
 describe('createContextBootstrapPrompt', () => {
   it('builds a concise generic agent prompt that preserves review state during reviews and edits', () => {
-    const prompt = createContextBootstrapPrompt({
-      recommendedBriefPath: 'docs/AI-CONTEXT-BRIEF.md'
-    });
+    const prompt = createContextBootstrapPrompt();
 
     assert.match(prompt, /# AI Markdown Review Loop Agent Prompt/);
     assert.match(prompt, /review or edit Markdown/i);
     assert.match(prompt, /Use the Markdown target named by the human or current conversation/);
-    assert.match(prompt, /README.md/);
-    assert.match(prompt, /docs\/AI-REVIEW-POLICY.md/);
-    assert.match(prompt, /docs\/AI-COLLABORATION-LOOP.md/);
+    assert.match(prompt, /Discover only the repo context needed/);
+    assert.match(prompt, /skip context discovery when the human already gave enough direction/);
     assert.match(prompt, /review session brief/);
     assert.match(prompt, /review goal, focus areas, non-goals, constraints/);
     assert.match(prompt, /ask at most 3 specific questions/i);
@@ -31,6 +28,11 @@ describe('createContextBootstrapPrompt', () => {
     assert.doesNotMatch(prompt, /Current Markdown target/);
     assert.doesNotMatch(prompt, /docs\/specs\/checkout.md/);
     assert.doesNotMatch(prompt, /Skip files that do not exist/);
+    assert.doesNotMatch(prompt, /README.md/);
+    assert.doesNotMatch(prompt, /docs\/AI-CONTEXT-BRIEF.md/);
+    assert.doesNotMatch(prompt, /docs\/AI-REVIEW-POLICY.md/);
+    assert.doesNotMatch(prompt, /docs\/AI-COLLABORATION-LOOP.md/);
+    assert.doesNotMatch(prompt, /docs\/agent-review-thread.schema.json/);
     assert.doesNotMatch(prompt, /docs\/PRD.md/);
     assert.doesNotMatch(prompt, /\.agent\/PROJECT_STATE.md/);
     assert.doesNotMatch(prompt, /openThreads/);
@@ -41,14 +43,16 @@ describe('createContextBootstrapPrompt', () => {
   });
 
   it('does not turn context discovery into a detected-source checklist', () => {
-    const prompt = createContextBootstrapPrompt({
-      recommendedBriefPath: 'docs/AI-CONTEXT-BRIEF.md'
-    });
+    const prompt = createContextBootstrapPrompt();
 
     assert.match(prompt, /ask which Markdown file to review or edit/);
     assert.doesNotMatch(prompt, /Read these repo context sources first/);
+    assert.doesNotMatch(prompt, /especially `README.md`/);
     assert.doesNotMatch(prompt, /1\. `README.md`/);
     assert.doesNotMatch(prompt, /1\. `docs\/AI-CONTEXT-BRIEF.md`/);
+    assert.doesNotMatch(prompt, /AI-CONTEXT-BRIEF/);
+    assert.doesNotMatch(prompt, /AI-REVIEW-POLICY/);
+    assert.doesNotMatch(prompt, /AI-COLLABORATION-LOOP/);
     assert.doesNotMatch(prompt, /docs\/PRD.md/);
     assert.doesNotMatch(prompt, /\.agent\/PROJECT_STATE.md/);
   });

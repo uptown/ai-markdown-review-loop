@@ -17,7 +17,7 @@ The first user-facing step should not be "fill out a blank context file."
 
 The first step should be a bootstrap prompt that tells the AI to:
 
-1. read the repo-owned docs that already exist
+1. discover only the repo context needed for the requested review or edit
 2. ask only for the missing context
 3. capture the human's current review session brief
 4. treat review threads as conversation state
@@ -37,10 +37,10 @@ The preview should not show context readiness, detected brief status, `Open
 Brief`, or `How it works` as top-of-document chrome. The generated prompt is
 the handoff surface and should be copy-pasteable as-is. It should not wrap the
 actual prompt in a detected-source report, explanatory preface, or Markdown code
-fence. It can mention `docs/AI-CONTEXT-BRIEF.md` as an optional durable context
-artifact, but the UI should not force the human into managing that file before
-review work can start. It should not embed the context brief template or
-sidecar schema internals in the generated prompt.
+fence. It should not enumerate repo-specific source files or force the human
+into managing a durable context file before review work can start. It should
+not embed the context brief template or sidecar schema internals in the
+generated prompt.
 
 After the first bootstrap, active review iteration should use a separate
 `Open Feedback Loop Prompt`. That prompt is for continuing existing Review
@@ -50,15 +50,10 @@ preserving review metadata.
 ## Context Discovery
 
 Before the first AI review pass, the bootstrap prompt should tell the AI to
-start from the current Markdown target, then read shared repo context that is
-available to an AI agent. Useful shared sources often include:
-
-- `README.md`
-- `docs/AI-CONTEXT-BRIEF.md`
-- `docs/AI-REVIEW-POLICY.md`
-- `docs/AI-COLLABORATION-LOOP.md`
-- `docs/agent-review-thread.schema.json`
-- nearby docs that explain the same feature, workflow, or product area
+start from the current Markdown target, then discover only the repo context
+needed for the requested review or edit. It should prefer nearby or canonical
+docs when they are relevant and skip context discovery when the human already
+gave enough direction.
 
 If the available context already answers the core questions, the AI can
 continue with the requested review or edit task. If not, it should ask for
@@ -91,9 +86,7 @@ from the latest human request and thread replies:
 ## Durable File Convention
 
 For teams that want repeatable AI review quality, the AI may create or refresh
-a repo-owned file at:
-
-- `docs/AI-CONTEXT-BRIEF.md`
+a repo-owned context brief when the human asks for one.
 
 This file should be short and durable. It is not meant to duplicate the entire
 PRD, and it is not a prerequisite for every review pass. It should capture the
@@ -139,7 +132,7 @@ The generated bootstrap prompt should tell the AI to:
 The export packet for AI agents should:
 
 - point to this bootstrap convention
-- tell the AI which files to read first
+- tell the AI how to discover only the context needed for the current task
 - tell the AI what to ask the human if the repo is missing context, and when
   that question should become a review thread
 - point users toward the bootstrap prompt instead of showing a persistent

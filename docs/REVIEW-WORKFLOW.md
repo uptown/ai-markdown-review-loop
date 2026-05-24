@@ -77,11 +77,11 @@ Any future AI reviewer integration should use these canonical inputs:
 
 1. A user installs the plugin in a repo with no prior AI review history.
 2. The review preview exposes `Open Bootstrap Prompt` for first-pass context and `Open Feedback Loop Prompt` for active thread iteration.
-3. The user opens a repo-aware bootstrap prompt. The prompt tells any AI agent what files to read, what missing context to ask for, how to use AI Markdown Review Loop when available, and how to preserve review metadata while editing Markdown.
+3. The user opens a repo-aware bootstrap prompt. The prompt tells any AI agent how to discover only the needed repo context, what missing context to ask for, how to use AI Markdown Review Loop when available, and how to preserve review metadata while editing Markdown.
 4. The AI captures the review session brief from the human request, including what this pass should optimize for and what is out of scope.
-5. The AI starts from the current Markdown target, then reads shared repo docs such as `README.md`, `docs/AI-CONTEXT-BRIEF.md`, and the AI Markdown Review Loop policy docs when they are relevant.
+5. The AI starts from the current Markdown target, then reads only the nearby or canonical repo docs that are relevant to the requested review or edit.
 6. If the available context still leaves key document questions unanswered, the AI creates or replies to focused `question` threads instead of guessing or stopping only in chat.
-7. If a durable brief would help, the AI drafts or refreshes `docs/AI-CONTEXT-BRIEF.md`.
+7. If a durable brief would help, the AI drafts or refreshes one only when the human asks for that artifact.
 8. The AI continues with the requested review or edit work and reports any touched `rv_*` thread outcomes.
 
 ### Human-AI Thread Loop

@@ -2,8 +2,6 @@ import * as vscode from 'vscode';
 import { createContextBootstrapPrompt } from './contextBootstrapPrompt';
 import { openReadOnlyMarkdownPrompt } from './promptDocuments';
 
-export const AI_CONTEXT_BRIEF_RELATIVE_PATH = 'docs/AI-CONTEXT-BRIEF.md';
-
 export async function openContextBootstrapPrompt(
   documentUri?: vscode.Uri
 ): Promise<vscode.TextDocument | undefined> {
@@ -13,9 +11,7 @@ export async function openContextBootstrapPrompt(
     return undefined;
   }
 
-  const prompt = createContextBootstrapPrompt({
-    recommendedBriefPath: AI_CONTEXT_BRIEF_RELATIVE_PATH
-  });
+  const prompt = createContextBootstrapPrompt();
   return openReadOnlyMarkdownPrompt('AI Context Bootstrap Prompt', prompt);
 }
 

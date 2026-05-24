@@ -46,6 +46,7 @@
 - Adds a durable AI/human review-loop session record and trace that capture AI comments, human replies, AI follow-ups, sidecar snapshots, closed improvements, and empty remaining feedback.
 - Treats the latest human request and thread replies as a review session brief in bootstrap prompts, feedback-loop prompts, and agent exports.
 - Keeps the bootstrap prompt OS-like and generic by removing generated target text from the prompt body.
+- Removes the repo-specific context-source checklist from the bootstrap prompt so it stays generic and copy-pasteable.
 - Submits comment and reply textareas with Enter while keeping Shift+Enter for multi-line text.
 - Keeps the active comment overlay or review thread focused after saving a reply.
 - Shows accepted, resolved, and rejected review history with linked/outdated anchor state and a Restore action.
