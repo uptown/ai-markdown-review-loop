@@ -44,6 +44,8 @@ export interface SimulationScenario {
 
 export interface SimulationSummary {
   fixturePath: string;
+  sessionRecordPath: string;
+  tracePath: string;
   scenarios: SimulationScenario[];
   totalTurns: number;
   reviewThreadCount: number;
@@ -54,6 +56,8 @@ export interface SimulationSummary {
 }
 
 const richFixturePath = 'test/fixtures/rich-review-loop-sample.md';
+const sessionRecordPath = 'test/fixtures/review-loop-session-record.json';
+const tracePath = 'docs/REVIEW-LOOP-SIMULATION-TRACE.md';
 const fixtureDocumentUri = `file:///workspace/${richFixturePath}`;
 const baseTime = Date.parse('2026-05-24T00:00:00.000Z');
 
@@ -64,6 +68,8 @@ export function runReviewLoopSimulations(): SimulationSummary {
 
   return {
     fixturePath: richFixturePath,
+    sessionRecordPath,
+    tracePath,
     scenarios,
     totalTurns: scenarios.reduce((sum, scenario) => sum + scenario.turns.length, 0),
     reviewThreadCount: reviewThreads.length,
@@ -79,6 +85,8 @@ export function renderReviewLoopSimulationReport(summary: SimulationSummary): st
     '# Review Loop Simulation Report',
     '',
     `Fixture: ${summary.fixturePath}`,
+    `Session record: ${summary.sessionRecordPath}`,
+    `Trace: ${summary.tracePath}`,
     `Scenarios run: ${summary.scenarios.length}`,
     `Turns simulated: ${summary.totalTurns}`,
     `Review threads simulated: ${summary.reviewThreadCount}`,

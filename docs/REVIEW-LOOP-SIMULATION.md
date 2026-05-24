@@ -9,9 +9,13 @@ The simulation models two working personas:
 
 The current dogfood target is `test/fixtures/rich-review-loop-sample.md`, a dense Markdown fixture with tables, ordered lists, task lists, Mermaid diagrams, code fences, repeated phrases, and long wrapping prose.
 
+The actual session record is stored in `test/fixtures/review-loop-session-record.json`, and the human-readable transcript is in `docs/REVIEW-LOOP-SIMULATION-TRACE.md`. Those files capture AI comments, human replies, AI follow-ups, sidecar snapshots, applied improvements, and the final empty `remainingFeedback` list.
+
 ## Summary
 
 - Scenarios run: 11
+- Session record: `test/fixtures/review-loop-session-record.json`
+- Trace: `docs/REVIEW-LOOP-SIMULATION-TRACE.md`
 - Turns simulated: 38
 - Review threads simulated: 11
 - Thread replies simulated: 26

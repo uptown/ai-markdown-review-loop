@@ -43,6 +43,8 @@
 - Shows safe-patch applicability text before `Apply Patch and Close` so users can see why the action will update Markdown and close the thread.
 - Adds previous/next review comment navigation through compact arrow buttons and Left/Right Arrow keys outside text entry.
 - Adds feedback-loop prompt guidance for revised patch replies and clarifies that `needs human decision` leaves the thread open.
+- Adds a durable AI/human review-loop session record and trace that capture AI comments, human replies, AI follow-ups, sidecar snapshots, closed improvements, and empty remaining feedback.
+- Treats the latest human request and thread replies as a review session brief in bootstrap prompts, feedback-loop prompts, and agent exports.
 - Submits comment and reply textareas with Enter while keeping Shift+Enter for multi-line text.
 - Keeps the active comment overlay or review thread focused after saving a reply.
 - Shows accepted, resolved, and rejected review history with linked/outdated anchor state and a Restore action.

@@ -19,6 +19,7 @@ This extension is built around repeated document-review loops between human auth
 - As an author, I want reply drafts in overlays to survive casual dismissal gestures so I do not lose in-progress review discussion.
 - As an author, I want to close wrong AI feedback as declined so I do not have to call an invalid suggestion resolved.
 - As an AI-agent user, I want to continue one exact `rv_*` thread with AI after replying so the next turn starts from the right discussion.
+- As an AI-agent user, I want my current review goal, focus, and non-goals to travel with the prompt/export so AI feedback follows this session instead of generic rules.
 - As an author, I want stale sidecar warnings to help me inspect or find review data before offering destructive cleanup.
 - As an author, I want rename or move operations on reviewed Markdown files to keep their review state attached.
 
@@ -41,6 +42,7 @@ This extension is built around repeated document-review loops between human auth
 - `Open expected sidecar` / `Find review sidecars`: recovery actions for stale inline anchors when sidecar JSON is missing or incomplete.
 - `Clean stale anchors`: remove broken metadata only after recovery options are exhausted; this is not a review decision.
 - `Export for Agent`: package open threads for AI work without mutating review state.
+- `Review Session Brief`: current human instructions for this pass, including review goal, focus areas, non-goals, constraints, preferred comment style, and done condition.
 
 ## AI Review Contracts
 
@@ -76,10 +78,11 @@ Any future AI reviewer integration should use these canonical inputs:
 1. A user installs the plugin in a repo with no prior AI review history.
 2. The review preview exposes `Open Bootstrap Prompt` for first-pass context and `Open Feedback Loop Prompt` for active thread iteration.
 3. The user opens a repo-aware bootstrap prompt. The prompt tells any AI agent what files to read, what missing context to ask for, how to use AI Markdown Review Loop when available, and how to preserve review metadata while editing Markdown.
-4. The AI starts from the current Markdown target, then reads shared repo docs such as `README.md`, `docs/AI-CONTEXT-BRIEF.md`, and the AI Markdown Review Loop policy docs when they are relevant.
-5. If the available context still leaves key document questions unanswered, the AI creates or replies to focused `question` threads instead of guessing or stopping only in chat.
-6. If a durable brief would help, the AI drafts or refreshes `docs/AI-CONTEXT-BRIEF.md`.
-7. The AI continues with the requested review or edit work and reports any touched `rv_*` thread outcomes.
+4. The AI captures the review session brief from the human request, including what this pass should optimize for and what is out of scope.
+5. The AI starts from the current Markdown target, then reads shared repo docs such as `README.md`, `docs/AI-CONTEXT-BRIEF.md`, and the AI Markdown Review Loop policy docs when they are relevant.
+6. If the available context still leaves key document questions unanswered, the AI creates or replies to focused `question` threads instead of guessing or stopping only in chat.
+7. If a durable brief would help, the AI drafts or refreshes `docs/AI-CONTEXT-BRIEF.md`.
+8. The AI continues with the requested review or edit work and reports any touched `rv_*` thread outcomes.
 
 ### Human-AI Thread Loop
 

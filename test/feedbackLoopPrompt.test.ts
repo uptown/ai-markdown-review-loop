@@ -10,6 +10,8 @@ describe('createFeedbackLoopPrompt', () => {
 
     assert.match(prompt, /# AI Markdown Review Loop Feedback Loop Prompt/);
     assert.match(prompt, /Current Markdown target: `docs\/specs\/checkout.md`/);
+    assert.match(prompt, /Recover the current review session brief/);
+    assert.match(prompt, /review goal, focus areas, non-goals, constraints/);
     assert.match(prompt, /Review Threads as conversation state/);
     assert.match(prompt, /Apply Patch and Close.*proposed Markdown change applied/);
     assert.match(prompt, /accept this suggestion/);
@@ -20,9 +22,11 @@ describe('createFeedbackLoopPrompt', () => {
     assert.match(prompt, /`Close as Declined` means the human judged the feedback wrong/);
     assert.match(prompt, /Suggested patch revision:/);
     assert.match(prompt, /fenced `diff` block/);
+    assert.match(prompt, /human changes the review goal, priority, or comment style/);
     assert.match(prompt, /`suggestion` or `fix` with a `suggestedPatch`/);
     assert.match(prompt, /Mermaid, table, or source-scoped suggestions/);
     assert.match(prompt, /List each touched `rv_\*` thread/);
+    assert.match(prompt, /Restate the review session brief if it changed/);
     assert.match(prompt, /replied - waiting for human decision/);
     assert.doesNotMatch(prompt, /docs\/PRD.md/);
     assert.doesNotMatch(prompt, /\.agent\/PROJECT_STATE.md/);

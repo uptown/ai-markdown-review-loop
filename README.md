@@ -24,6 +24,7 @@ The first MVP focuses on a local workflow:
 - Apply suggested replacement patches from review threads when the patch still matches a reliable anchor.
 - Use `Agree`, `Revise`, and `Disagree` as reply shortcuts that keep the thread open for discussion. Use `Resolve` when the issue is handled or no longer applies, or `Close as Declined` when the feedback is wrong or intentionally not applicable.
 - Continue one exact review thread with AI from the thread card or comment overlay so the feedback-loop prompt starts from that `rv_*` discussion.
+- Carry the current review session brief into prompts and exports so the AI follows the user's goal, focus, non-goals, constraints, comment style, and done condition for this pass.
 - Click a thread in `Review Threads` to jump back to its highlighted content.
 - Review accepted, resolved, and rejected history from `Review Threads`, including who closed the thread and whether the old anchor is still linked or now outdated.
 - Restore a closed review thread when a decision needs to be reopened.
@@ -154,12 +155,15 @@ Open thread actions are intentionally discussion-first. The reply shortcuts adap
 
 Feedback exports put open review threads first, followed by source labels, discussion history, anchor confidence, editing guidelines, commenting guidelines, and a future-facing thread-creation contract for AI agents. Agents are instructed to preserve review metadata, make localized edits, report each handled `rv_*` ID with an outcome, avoid closing review threads unless the user explicitly asks for an `accepted`, `resolved`, or `rejected` decision, and follow the repo policy when proposing new AI-authored review threads.
 
+AI prompts and exports also treat the latest human request and thread replies as a review session brief. If the user says this pass is about product/agent handoff rather than grammar, the next AI turn should prioritize handoff issues and avoid generic prose comments.
+
 Canonical AI review contracts:
 
 - [AI Review Policy](./docs/AI-REVIEW-POLICY.md)
 - [AI Collaboration Loop](./docs/AI-COLLABORATION-LOOP.md)
 - [AI Context Bootstrap](./docs/AI-CONTEXT-BOOTSTRAP.md)
 - [Review Loop Simulation](./docs/REVIEW-LOOP-SIMULATION.md)
+- [Review Loop Simulation Trace](./docs/REVIEW-LOOP-SIMULATION-TRACE.md)
 - [AI Review Thread Schema](./docs/agent-review-thread.schema.json)
 
 For first-time setup in a repo, the recommended context injection path is:

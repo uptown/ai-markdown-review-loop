@@ -16,9 +16,12 @@ describe('createContextBootstrapPrompt', () => {
     assert.match(prompt, /README.md/);
     assert.match(prompt, /docs\/AI-REVIEW-POLICY.md/);
     assert.match(prompt, /docs\/AI-COLLABORATION-LOOP.md/);
+    assert.match(prompt, /review session brief/);
+    assert.match(prompt, /review goal, focus areas, non-goals, constraints/);
     assert.match(prompt, /ask at most 3 specific questions/i);
     assert.match(prompt, /create or reply to a focused `question` thread/);
     assert.match(prompt, /Treat review threads as conversation state/);
+    assert.match(prompt, /session context for the next pass/);
     assert.match(prompt, /switch to the AI Feedback Loop Prompt/);
     assert.match(prompt, /Apply a suggested Markdown change only when the human explicitly asks/i);
     assert.match(prompt, /hidden `\.<filename>\.ai-review\.json` sidecars/);

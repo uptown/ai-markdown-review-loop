@@ -32,13 +32,21 @@ is safe for a human to close.
 ## Recommended Loop
 
 1. Bootstrap context from repo docs and the initial human packet.
-2. AI creates or replies to open review threads.
-3. Human replies, edits the Markdown, or leaves a decision.
-4. AI revisits only the affected threads and either:
+2. Capture the review session brief: the human's current goal, review focus,
+   non-goals, constraints, preferred comment style, and done condition.
+3. AI creates or replies to open review threads.
+4. Human replies, edits the Markdown, changes the review focus, or leaves a
+   decision.
+5. AI revisits only the affected threads and either:
    - proposes a localized edit
    - asks a sharper follow-up question
    - acknowledges the new context and stands down
-5. Human makes the closure decision or leaves the thread open for another pass.
+6. Human makes the closure decision or leaves the thread open for another pass.
+
+When the human changes review focus, that feedback is session context. It should
+shape the next AI pass before generic review rules. For example, "this pass is
+product/agent handoff, not grammar" should suppress grammar-only comments and
+raise agent handoff issues.
 
 ## When AI Should Reply Instead Of Opening A New Thread
 
@@ -82,6 +90,8 @@ to apply it.
 
 The most valuable human replies are:
 
+- what the current review pass should optimize for
+- which types of feedback are out of scope
 - why the current text exists
 - what constraint the AI missed
 - whether the issue is real but deferred

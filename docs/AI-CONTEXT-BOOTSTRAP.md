@@ -19,9 +19,10 @@ The first step should be a bootstrap prompt that tells the AI to:
 
 1. read the repo-owned docs that already exist
 2. ask only for the missing context
-3. treat review threads as conversation state
-4. preserve nearby review state while editing Markdown
-5. report every touched review thread outcome
+3. capture the human's current review session brief
+4. treat review threads as conversation state
+5. preserve nearby review state while editing Markdown
+6. report every touched review thread outcome
 
 That keeps onboarding lightweight for the human while still giving the repo a
 stable agent contract for review and edit passes.
@@ -77,6 +78,16 @@ For a strong first review pass, the human should provide:
 - current open decisions
 - review focus for this pass
 
+For an active review loop, the AI should also recover the review session brief
+from the latest human request and thread replies:
+
+- review goal for this pass
+- focus areas
+- non-goals
+- hard constraints
+- preferred comment style
+- done condition
+
 ## Durable File Convention
 
 For teams that want repeatable AI review quality, the AI may create or refresh
@@ -109,6 +120,8 @@ The generated bootstrap prompt should tell the AI to:
 - treat the whole opened document as the prompt to follow
 - work in any AI agent that can read/edit repo files
 - start from the current Markdown target and discover relevant shared repo docs
+- capture or recover the review session brief from the human request and recent
+  thread replies
 - ask at most 3 specific follow-up questions about missing context, using a
   focused `question` thread when the question belongs to the document
 - treat Review Threads as conversation state rather than disposable comments

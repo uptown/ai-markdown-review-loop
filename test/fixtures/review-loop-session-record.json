@@ -1,0 +1,411 @@
+{
+  "schemaVersion": 1,
+  "fixturePath": "test/fixtures/rich-review-loop-sample.md",
+  "documentUri": "file:///workspace/test/fixtures/rich-review-loop-sample.md",
+  "reviewSessionBrief": {
+    "humanGoal": "Use realistic AI reviewer and human author feedback loops to improve AI Markdown Review Loop until no actionable product feedback remains.",
+    "reviewFocus": [
+      "real thread continuity",
+      "session-level user instructions",
+      "patch apply semantics",
+      "anchor preservation after edits",
+      "agent handoff quality"
+    ],
+    "commentStyle": "Prefer concrete review threads with a question, suggested patch, or explicit blocker. Avoid broad style-only feedback.",
+    "doneWhen": "Every collected improvement is either implemented or converted into regression guidance; remainingFeedback is empty."
+  },
+  "rounds": [
+    {
+      "round": 1,
+      "name": "AI first pass leaves review comments",
+      "humanPrompt": "Review the rich Markdown fixture like a real AI reviewer. Leave comments that a human author can answer.",
+      "aiCommentsAdded": [
+        "rv_session_intent",
+        "rv_acceptance",
+        "rv_retry_policy",
+        "rv_owner"
+      ],
+      "humanInputs": [
+        {
+          "threadId": "rv_session_intent",
+          "text": "The reviewer needs my current review goal too. This pass is product/agent handoff, not grammar."
+        },
+        {
+          "threadId": "rv_acceptance",
+          "text": "Cover rendered block edits first, and report ordinary source edits as approximate unless confidence is high."
+        },
+        {
+          "threadId": "rv_retry_policy",
+          "text": "Apply the patch only if the target is exact; otherwise explain why it is blocked."
+        },
+        {
+          "threadId": "rv_owner",
+          "text": "ok"
+        }
+      ],
+      "aiFollowUps": [
+        {
+          "threadId": "rv_session_intent",
+          "text": "I will treat this as a session-level review instruction: product/agent handoff issues should outrank grammar comments."
+        },
+        {
+          "threadId": "rv_acceptance",
+          "text": "Then the criterion should name rendered edits as exact-preservation work and source edits as approximate-but-visible fallback."
+        },
+        {
+          "threadId": "rv_owner",
+          "text": "I cannot infer a launch owner from \"ok\"; this thread still needs human decision."
+        }
+      ],
+      "improvementsApplied": [
+        "Add a review session brief concept to prompts and export guidance.",
+        "Keep vague human replies visible as handoff warnings instead of treating them as decisions."
+      ]
+    },
+    {
+      "round": 2,
+      "name": "Human challenges AI feedback and AI revises in-thread",
+      "humanPrompt": "Continue the same threads. Do not open duplicates if my reply changes the interpretation.",
+      "aiCommentsAdded": [
+        "rv_remove_section",
+        "rv_stale_patch",
+        "rv_mermaid_branch"
+      ],
+      "humanInputs": [
+        {
+          "threadId": "rv_remove_section",
+          "text": "I disagree because the duplicate sentence is intentional test data for repeated-anchor matching."
+        },
+        {
+          "threadId": "rv_stale_patch",
+          "text": "I already edited that sentence. Revise the patch against the current source instead of telling me to refresh."
+        },
+        {
+          "threadId": "rv_mermaid_branch",
+          "text": "Please revise this patch so it names sidecar sync explicitly."
+        }
+      ],
+      "aiFollowUps": [
+        {
+          "threadId": "rv_remove_section",
+          "text": "Good catch. I should revise this as a test-data note instead of suggesting deletion."
+        },
+        {
+          "threadId": "rv_stale_patch",
+          "text": "Suggested patch revision:\n```diff\n- An AI suggested patch that no longer matches the source is shown as stale rather than as an applyable green button.\n+ An AI suggested patch that no longer matches the source is shown as stale, and a revised sidecar patch updates the preview without manual refresh.\n```"
+        },
+        {
+          "threadId": "rv_mermaid_branch",
+          "text": "Suggested patch revision:\n```diff\n- Human -->|Apply Patch| Patch[Review-aware edit]\n+ Human -->|Apply Patch| Patch[Review-aware Markdown and sidecar edit]\n```"
+        }
+      ],
+      "improvementsApplied": [
+        "Keep AI revised patch candidates as replies with a Suggested patch revision label and fenced diff.",
+        "Keep Apply Patch and Close gated on exact current Markdown targets."
+      ]
+    },
+    {
+      "round": 3,
+      "name": "Human edits Markdown and AI verifies review-state preservation",
+      "humanPrompt": "Now simulate real author edits: one rendered edit, one source edit, one table edit, and one Mermaid edit.",
+      "aiCommentsAdded": [
+        "rv_wording",
+        "rv_source_anchor",
+        "rv_table_owner"
+      ],
+      "humanInputs": [
+        {
+          "threadId": "rv_wording",
+          "text": "I changed the phrase to \"release rollback owner\" in the rendered block editor."
+        },
+        {
+          "threadId": "rv_source_anchor",
+          "text": "I edited this paragraph in Markdown source, not through the rendered editor."
+        },
+        {
+          "threadId": "rv_table_owner",
+          "text": "I changed the cell to Release Lead in the table grid editor."
+        }
+      ],
+      "aiFollowUps": [
+        {
+          "threadId": "rv_wording",
+          "text": "Continuing from the updated wording: the remaining question is whether Release or Platform owns the rollback decision."
+        },
+        {
+          "threadId": "rv_source_anchor",
+          "text": "rv_source_anchor is still visible with approximate confidence; final outcome should be needs human decision until the anchor is confirmed."
+        },
+        {
+          "threadId": "rv_table_owner",
+          "text": "The cell is clearer, but the next review question is whether Release Lead is a role or a named owner."
+        }
+      ],
+      "improvementsApplied": [
+        "Record approximate source-edit anchors as visible handoff state instead of dropping the comment.",
+        "Keep cell-level and Mermaid edit scenarios in the regression fixture."
+      ]
+    },
+    {
+      "round": 4,
+      "name": "AI reviewer reports final product feedback",
+      "humanPrompt": "Collect feedback from these simulated users and keep improving until there are no actionable improvement items left.",
+      "aiCommentsAdded": [],
+      "humanInputs": [
+        {
+          "threadId": "rv_retry_policy",
+          "text": "Apply Patch and Close is clear enough if the UI also says why the patch is safe."
+        },
+        {
+          "threadId": "rv_scope_question",
+          "text": "Resolved by human request: keep threads-first export as a fixture expectation."
+        }
+      ],
+      "aiFollowUps": [
+        {
+          "threadId": "rv_retry_policy",
+          "text": "Final outcome: rv_retry_policy applied patch; no further human decision needed."
+        },
+        {
+          "threadId": "rv_scope_question",
+          "text": "Acknowledged. Human owns final closure; I will not close additional threads without explicit intent."
+        }
+      ],
+      "improvementsApplied": [
+        "Document the simulation as a real round-by-round transcript.",
+        "Treat remaining recommendations as regression guardrails only."
+      ]
+    }
+  ],
+  "sidecarSnapshots": [
+    {
+      "label": "after_round_1_ai_comments_and_human_replies",
+      "payload": {
+        "schemaVersion": 2,
+        "documentUri": "file:///workspace/test/fixtures/rich-review-loop-sample.md",
+        "updatedAt": "2026-05-24T00:13:00.000Z",
+        "openThreads": [
+          {
+            "id": "rv_session_intent",
+            "documentUri": "file:///workspace/test/fixtures/rich-review-loop-sample.md",
+            "anchor": {
+              "text": "AI agent can continue from the exported thread history",
+              "lineStart": 9,
+              "lineEnd": 9,
+              "confidence": "exact"
+            },
+            "type": "question",
+            "source": "ai",
+            "status": "open",
+            "severity": "high",
+            "comment": "This fixture proves thread export, but it does not show how the human's current review goal changes the AI review pass.",
+            "thread": [
+              {
+                "role": "user",
+                "text": "The reviewer needs my current review goal too. This pass is product/agent handoff, not grammar.",
+                "createdAt": "2026-05-24T00:01:00.000Z"
+              },
+              {
+                "role": "assistant",
+                "text": "I will treat this as a session-level review instruction: product/agent handoff issues should outrank grammar comments.",
+                "createdAt": "2026-05-24T00:02:00.000Z"
+              }
+            ],
+            "createdAt": "2026-05-24T00:00:00.000Z",
+            "updatedAt": "2026-05-24T00:02:00.000Z"
+          },
+          {
+            "id": "rv_owner",
+            "documentUri": "file:///workspace/test/fixtures/rich-review-loop-sample.md",
+            "anchor": {
+              "text": "Owner",
+              "lineStart": 30,
+              "lineEnd": 30,
+              "confidence": "exact"
+            },
+            "type": "question",
+            "source": "ai",
+            "status": "open",
+            "severity": "medium",
+            "comment": "Several rows name Extension or Product, but the rollback row still needs one owner who can make the launch decision.",
+            "thread": [
+              {
+                "role": "user",
+                "text": "ok",
+                "createdAt": "2026-05-24T00:12:00.000Z"
+              },
+              {
+                "role": "assistant",
+                "text": "I cannot infer a launch owner from \"ok\"; this thread still needs human decision.",
+                "createdAt": "2026-05-24T00:13:00.000Z"
+              }
+            ],
+            "createdAt": "2026-05-24T00:00:00.000Z",
+            "updatedAt": "2026-05-24T00:13:00.000Z"
+          }
+        ],
+        "closedThreads": []
+      }
+    },
+    {
+      "label": "after_round_4_final_state",
+      "payload": {
+        "schemaVersion": 2,
+        "documentUri": "file:///workspace/test/fixtures/rich-review-loop-sample.md",
+        "updatedAt": "2026-05-24T00:24:00.000Z",
+        "openThreads": [
+          {
+            "id": "rv_session_intent",
+            "documentUri": "file:///workspace/test/fixtures/rich-review-loop-sample.md",
+            "anchor": {
+              "text": "AI agent can continue from the exported thread history",
+              "lineStart": 9,
+              "lineEnd": 9,
+              "confidence": "exact"
+            },
+            "type": "question",
+            "source": "ai",
+            "status": "open",
+            "severity": "high",
+            "comment": "This fixture proves thread export, but it does not show how the human's current review goal changes the AI review pass.",
+            "thread": [
+              {
+                "role": "user",
+                "text": "The reviewer needs my current review goal too. This pass is product/agent handoff, not grammar.",
+                "createdAt": "2026-05-24T00:01:00.000Z"
+              },
+              {
+                "role": "assistant",
+                "text": "I will treat this as a session-level review instruction: product/agent handoff issues should outrank grammar comments.",
+                "createdAt": "2026-05-24T00:02:00.000Z"
+              }
+            ],
+            "createdAt": "2026-05-24T00:00:00.000Z",
+            "updatedAt": "2026-05-24T00:02:00.000Z"
+          },
+          {
+            "id": "rv_source_anchor",
+            "documentUri": "file:///workspace/test/fixtures/rich-review-loop-sample.md",
+            "anchor": {
+              "text": "anchor visibility",
+              "lineStart": 110,
+              "lineEnd": 110,
+              "confidence": "approximate"
+            },
+            "type": "question",
+            "source": "ai",
+            "status": "open",
+            "severity": "medium",
+            "comment": "This phrase should still show its review thread even after a direct source edit changes nearby wording.",
+            "thread": [
+              {
+                "role": "user",
+                "text": "I edited this paragraph in Markdown source, not through the rendered editor.",
+                "createdAt": "2026-05-24T00:12:00.000Z"
+              },
+              {
+                "role": "assistant",
+                "text": "rv_source_anchor is still visible with approximate confidence; final outcome should be needs human decision until the anchor is confirmed.",
+                "createdAt": "2026-05-24T00:13:00.000Z"
+              }
+            ],
+            "createdAt": "2026-05-24T00:00:00.000Z",
+            "updatedAt": "2026-05-24T00:13:00.000Z"
+          }
+        ],
+        "closedThreads": [
+          {
+            "id": "rv_retry_policy",
+            "documentUri": "file:///workspace/test/fixtures/rich-review-loop-sample.md",
+            "anchor": {
+              "text": "suggested patches apply only when the target is safe",
+              "lineStart": 9,
+              "lineEnd": 9,
+              "confidence": "exact"
+            },
+            "type": "fix",
+            "source": "ai",
+            "status": "accepted",
+            "closedBy": "user",
+            "closedAt": "2026-05-24T00:07:00.000Z",
+            "severity": "medium",
+            "comment": "This should name the safety condition so authors know why some patches cannot be applied.",
+            "suggestedPatch": {
+              "mode": "replace",
+              "original": "suggested patches apply only when the target is safe",
+              "replacement": "suggested patches apply only when the original text has one exact current Markdown match"
+            },
+            "thread": [
+              {
+                "role": "user",
+                "text": "Apply Patch and Close is clear enough if the UI also says why the patch is safe.",
+                "createdAt": "2026-05-24T00:23:00.000Z"
+              },
+              {
+                "role": "assistant",
+                "text": "Final outcome: rv_retry_policy applied patch; no further human decision needed.",
+                "createdAt": "2026-05-24T00:24:00.000Z"
+              }
+            ],
+            "createdAt": "2026-05-24T00:00:00.000Z",
+            "updatedAt": "2026-05-24T00:24:00.000Z"
+          },
+          {
+            "id": "rv_scope_question",
+            "documentUri": "file:///workspace/test/fixtures/rich-review-loop-sample.md",
+            "anchor": {
+              "text": "Threads-first export guides agents",
+              "lineStart": 36,
+              "lineEnd": 36,
+              "confidence": "exact"
+            },
+            "type": "question",
+            "source": "ai",
+            "status": "resolved",
+            "closedBy": "user",
+            "closedAt": "2026-05-24T00:24:00.000Z",
+            "severity": "low",
+            "comment": "Is export ordering part of this fixture or just background context?",
+            "thread": [
+              {
+                "role": "assistant",
+                "text": "I found README guidance that exports should put open threads first, so this row is in scope.",
+                "createdAt": "2026-05-24T00:14:00.000Z"
+              },
+              {
+                "role": "user",
+                "text": "Resolved by human request: keep threads-first export as a fixture expectation.",
+                "createdAt": "2026-05-24T00:23:00.000Z"
+              },
+              {
+                "role": "assistant",
+                "text": "Acknowledged. Human owns final closure; I will not close additional threads without explicit intent.",
+                "createdAt": "2026-05-24T00:24:00.000Z"
+              }
+            ],
+            "createdAt": "2026-05-24T00:00:00.000Z",
+            "updatedAt": "2026-05-24T00:24:00.000Z"
+          }
+        ]
+      }
+    }
+  ],
+  "closedImprovementBacklog": [
+    {
+      "finding": "The simulation had no durable record of AI comments, human replies, and AI follow-up turns.",
+      "implementedAs": "test/fixtures/review-loop-session-record.json plus docs/REVIEW-LOOP-SIMULATION-TRACE.md",
+      "status": "closed"
+    },
+    {
+      "finding": "AI prompts described safety rules but did not explicitly treat human review focus as session context.",
+      "implementedAs": "Review session brief guidance in bootstrap prompt, feedback-loop prompt, export, and collaboration docs.",
+      "status": "closed"
+    },
+    {
+      "finding": "Feedback-loop simulations needed to prove source edits remain visible even when exact anchors cannot be maintained.",
+      "implementedAs": "rv_source_anchor approximate-confidence thread in the simulation record and tests.",
+      "status": "closed"
+    }
+  ],
+  "remainingFeedback": []
+}

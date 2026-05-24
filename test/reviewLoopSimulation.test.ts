@@ -6,12 +6,15 @@ import {
   renderReviewLoopSimulationReport,
   runReviewLoopSimulations
 } from '../src/reviewLoopSimulation';
+import { parsePortableReviewSidecar } from '../src/reviewSidecarCodec';
 
 describe('review-loop simulation', () => {
   it('runs AI reviewer and human author scenarios and collects actionable feedback', () => {
     const summary = runReviewLoopSimulations();
 
     assert.equal(summary.fixturePath, 'test/fixtures/rich-review-loop-sample.md');
+    assert.equal(summary.sessionRecordPath, 'test/fixtures/review-loop-session-record.json');
+    assert.equal(summary.tracePath, 'docs/REVIEW-LOOP-SIMULATION-TRACE.md');
     assert.equal(summary.scenarios.length, 11);
     assert.equal(summary.totalTurns, 38);
     assert.equal(summary.reviewThreadCount, 11);
@@ -54,6 +57,8 @@ describe('review-loop simulation', () => {
 
     assert.match(report, /# Review Loop Simulation Report/);
     assert.match(report, /Fixture: test\/fixtures\/rich-review-loop-sample\.md/);
+    assert.match(report, /Session record: test\/fixtures\/review-loop-session-record\.json/);
+    assert.match(report, /Trace: docs\/REVIEW-LOOP-SIMULATION-TRACE\.md/);
     assert.match(report, /Scenarios run: 11/);
     assert.match(report, /Turns simulated: 38/);
     assert.match(report, /Review threads simulated: 11/);
@@ -88,5 +93,68 @@ describe('review-loop simulation', () => {
     assert.match(fixture, /- \[ \] Open the review preview beside this fixture\./);
     assert.match(fixture, /type ReviewDecision = 'accepted' \| 'resolved' \| 'rejected';/);
     assert.match(fixture, /This final paragraph must remain present/);
+  });
+
+  it('keeps a durable session record of AI comments, human replies, AI follow-ups, and closed feedback', async () => {
+    const recordPath = path.join(process.cwd(), 'test/fixtures/review-loop-session-record.json');
+    const record = JSON.parse(await readFile(recordPath, 'utf8')) as {
+      fixturePath: string;
+      documentUri: string;
+      reviewSessionBrief: {
+        humanGoal: string;
+        reviewFocus: string[];
+        doneWhen: string;
+      };
+      rounds: Array<{
+        name: string;
+        aiCommentsAdded: string[];
+        humanInputs: Array<{ threadId: string; text: string }>;
+        aiFollowUps: Array<{ threadId: string; text: string }>;
+        improvementsApplied: string[];
+      }>;
+      sidecarSnapshots: Array<{ label: string; payload: unknown }>;
+      closedImprovementBacklog: Array<{ finding: string; implementedAs: string; status: string }>;
+      remainingFeedback: unknown[];
+    };
+
+    assert.equal(record.fixturePath, 'test/fixtures/rich-review-loop-sample.md');
+    assert.match(record.reviewSessionBrief.humanGoal, /realistic AI reviewer and human author feedback loops/);
+    assert.ok(record.reviewSessionBrief.reviewFocus.includes('session-level user instructions'));
+    assert.match(record.reviewSessionBrief.doneWhen, /remainingFeedback is empty/);
+    assert.equal(record.rounds.length, 4);
+    assert.ok(record.rounds.some(round => round.aiCommentsAdded.includes('rv_session_intent')));
+    assert.ok(record.rounds.every(round => round.humanInputs.length > 0));
+    assert.ok(record.rounds.every(round => round.aiFollowUps.length > 0));
+    assert.ok(record.rounds.some(round => round.aiFollowUps.some(reply => reply.text.includes('Suggested patch revision:'))));
+    assert.ok(record.closedImprovementBacklog.every(item => item.status === 'closed'));
+    assert.equal(record.remainingFeedback.length, 0);
+
+    const parsedSnapshots = record.sidecarSnapshots.map(snapshot => ({
+      label: snapshot.label,
+      ...parsePortableReviewSidecar(record.documentUri, snapshot.payload)
+    }));
+    const finalSnapshot = parsedSnapshots.find(snapshot => snapshot.label === 'after_round_4_final_state');
+
+    assert.ok(finalSnapshot);
+    assert.ok(finalSnapshot.reviewDocument.threads.some(thread => thread.id === 'rv_session_intent'
+      && thread.thread.some(reply => reply.role === 'user' && reply.text.includes('product/agent handoff'))));
+    assert.ok(finalSnapshot.reviewDocument.threads.some(thread => thread.id === 'rv_source_anchor'
+      && thread.anchor.confidence === 'approximate'));
+    assert.ok(finalSnapshot.resolvedReviewDocument.threads.some(thread => thread.id === 'rv_retry_policy'
+      && thread.status === 'accepted'
+      && thread.closedBy === 'user'));
+  });
+
+  it('documents the human-readable feedback loop trace beside the machine-readable record', async () => {
+    const tracePath = path.join(process.cwd(), 'docs/REVIEW-LOOP-SIMULATION-TRACE.md');
+    const trace = await readFile(tracePath, 'utf8');
+
+    assert.match(trace, /# Review Loop Simulation Trace/);
+    assert.match(trace, /AI comments:/);
+    assert.match(trace, /Human replies:/);
+    assert.match(trace, /AI follow-up:/);
+    assert.match(trace, /rv_session_intent/);
+    assert.match(trace, /rv_source_anchor/);
+    assert.match(trace, /remainingFeedback` is empty/);
   });
 });

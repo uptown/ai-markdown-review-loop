@@ -110,6 +110,10 @@ export function renderFeedbackExport(reviewDocument: ReviewDocument): string {
   );
 
   lines.push(
+    `## Review Session Context`,
+    ``,
+    `Treat the latest human replies and request text as the active review session brief. Capture review goal, focus areas, non-goals, constraints, preferred comment style, and done condition before adding or revising comments. If the human changes review priority mid-thread, apply that new session context to the next pass rather than repeating generic review rules.`,
+    ``,
     `## Acceptance Gate`,
     ``,
     `Do not mark the task complete until every open feedback item has an explicit outcome in your response. Do not close review threads unless the user explicitly asks you to mark them accepted, resolved, or rejected.`,

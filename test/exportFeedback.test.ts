@@ -80,6 +80,9 @@ describe('renderFeedbackExport', () => {
     assert.match(output, /## Agent Thread Creation Contract/);
     assert.match(output, /## Human-AI Feedback Loop/);
     assert.match(output, /## Initial Context Bootstrap/);
+    assert.match(output, /## Review Session Context/);
+    assert.match(output, /active review session brief/);
+    assert.match(output, /review goal, focus areas, non-goals, constraints/);
     assert.match(output, /Canonical review policy: docs\/AI-REVIEW-POLICY.md/);
     assert.match(output, /Canonical creation schema: docs\/agent-review-thread.schema.json/);
     assert.match(output, /Canonical collaboration loop: docs\/AI-COLLABORATION-LOOP.md/);
