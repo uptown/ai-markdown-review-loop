@@ -263,13 +263,26 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
         }
 
         if (message?.type === 'openFeedbackLoopPrompt') {
-          const opened = await openFeedbackLoopPrompt(document.uri);
+          const threadId = typeof message.threadId === 'string' ? message.threadId.trim() : undefined;
+          const opened = await openFeedbackLoopPrompt(document.uri, threadId);
 
           if (!opened) {
             vscode.window.showWarningMessage('Open a workspace Markdown file before preparing an AI feedback loop prompt.');
             return;
           }
 
+          return;
+        }
+
+        if (message?.type === 'openReviewSidecar') {
+          await this.openReviewSidecar(document.uri, typeof message.sidecarPath === 'string'
+            ? message.sidecarPath
+            : undefined);
+          return;
+        }
+
+        if (message?.type === 'findReviewSidecars') {
+          await this.findReviewSidecars(document.uri);
           return;
         }
 
@@ -595,6 +608,92 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
     }
   }
 
+  private async openReviewSidecar(
+    documentUri: vscode.Uri,
+    sidecarPath?: string
+  ): Promise<void> {
+    const sidecarUri = await this.resolveReviewSidecarUri(documentUri, sidecarPath);
+
+    try {
+      await vscode.workspace.fs.stat(sidecarUri);
+    } catch {
+      vscode.window.showWarningMessage(
+        `Review sidecar was not found: ${vscode.workspace.asRelativePath(sidecarUri, false)}`
+      );
+      return;
+    }
+
+    const sidecarDocument = await vscode.workspace.openTextDocument(sidecarUri);
+    await vscode.window.showTextDocument(sidecarDocument, { preview: true });
+  }
+
+  private async findReviewSidecars(documentUri: vscode.Uri): Promise<void> {
+    const workspaceFolder = vscode.workspace.getWorkspaceFolder(documentUri);
+
+    if (!workspaceFolder) {
+      vscode.window.showWarningMessage('Open a workspace Markdown file before searching for review sidecars.');
+      return;
+    }
+
+    const candidates = await vscode.workspace.findFiles(
+      new vscode.RelativePattern(workspaceFolder, '{**/.*.ai-review.json,.ai-markdown-review/**/*.json}'),
+      new vscode.RelativePattern(workspaceFolder, '{**/node_modules/**,**/.git/**}'),
+      50
+    );
+
+    if (candidates.length === 0) {
+      vscode.window.showWarningMessage('No review sidecar JSON files were found in this workspace.');
+      return;
+    }
+
+    const picked = await vscode.window.showQuickPick(
+      candidates
+        .sort((left, right) => left.fsPath.localeCompare(right.fsPath))
+        .map(uri => ({
+          label: vscode.workspace.asRelativePath(uri, false),
+          uri
+        })),
+      {
+        title: 'Open a review sidecar',
+        placeHolder: 'Choose a colocated or legacy review sidecar to inspect'
+      }
+    );
+
+    if (!picked) {
+      return;
+    }
+
+    const sidecarDocument = await vscode.workspace.openTextDocument(picked.uri);
+    await vscode.window.showTextDocument(sidecarDocument, { preview: true });
+  }
+
+  private async resolveReviewSidecarUri(
+    documentUri: vscode.Uri,
+    sidecarPath?: string
+  ): Promise<vscode.Uri> {
+    const trimmedPath = sidecarPath?.trim();
+
+    if (!trimmedPath || trimmedPath === '.<filename>.ai-review.json') {
+      return this.store.getReviewFileUri(documentUri);
+    }
+
+    if (path.isAbsolute(trimmedPath)) {
+      return vscode.Uri.file(trimmedPath);
+    }
+
+    const workspaceFolder = vscode.workspace.getWorkspaceFolder(documentUri);
+
+    if (workspaceFolder) {
+      return vscode.Uri.joinPath(workspaceFolder.uri, ...trimmedPath.split(/[\\/]+/).filter(Boolean));
+    }
+
+    if (documentUri.scheme === 'file') {
+      return vscode.Uri.file(path.resolve(path.dirname(documentUri.fsPath), trimmedPath));
+    }
+
+    return this.store.getReviewFileUri(documentUri);
+  }
+
   private async applyReviewAwareEdit(
     document: vscode.TextDocument,
     plan: ReviewAwareEditPlan
@@ -866,7 +965,7 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
     const previewMarkdown = stripInlineAnchorMarkers(documentText);
     const renderedMarkdown = this.markdown.render(previewMarkdown);
     const tables = collectMarkdownTables(previewMarkdown);
-    const contextBootstrapNotice = this.renderContextBootstrapPromptAction();
+    const contextBootstrapNotice = this.renderContextBootstrapPromptAction(reviewDocument);
     const storageWarning = this.renderStorageWarning(documentText, reviewDocument);
     const markerLineHints = this.getMarkerLineHints(reviewDocument);
     const historyAnchorStates = getReviewHistoryAnchorStates(
@@ -968,12 +1067,22 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
       margin: 0 0 16px;
       display: flex;
       align-items: center;
-      justify-content: flex-end;
+      justify-content: space-between;
+      gap: 12px;
     }
+    .review-navigation-actions,
     .context-bootstrap-actions {
       display: flex;
       gap: 8px;
       flex-wrap: wrap;
+    }
+    .review-navigation-actions button {
+      min-width: 32px;
+      font-size: 14px;
+      line-height: 1;
+    }
+    .context-bootstrap-actions {
+      justify-content: flex-end;
     }
     button {
       border: 0;
@@ -1153,6 +1262,11 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
       border-color: var(--vscode-inputValidation-warningBorder, #cca700);
       color: var(--vscode-editorWarning-foreground, #ffe9a3);
       background: var(--vscode-inputValidation-warningBackground, rgba(204, 167, 0, 0.16));
+    }
+    .anchor-state-chip.edit-outcome-chip {
+      border-color: rgba(77, 163, 255, 0.62);
+      color: #d8ecff;
+      background: rgba(77, 163, 255, 0.14);
     }
     .thread blockquote {
       margin: 8px 0;
@@ -1669,6 +1783,10 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
       .layout {
         grid-template-columns: 1fr;
       }
+      .context-bootstrap-bar {
+        align-items: flex-start;
+        flex-direction: column;
+      }
       aside {
         border-left: 0;
         border-top: 1px solid var(--border);
@@ -1981,6 +2099,15 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
         event.preventDefault();
         commentComposer.requestSubmit();
       }
+
+      if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
+        if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey || isTextEntryTarget(event.target)) {
+          return;
+        }
+
+        event.preventDefault();
+        navigateReviewThread(event.key === 'ArrowRight' ? 1 : -1);
+      }
     });
 
     commentComposer.addEventListener('submit', (event) => {
@@ -2022,6 +2149,8 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
         return;
       }
 
+      updateReplyQualityWarningForForm(target);
+
       vscode.postMessage({
         type: 'addReply',
         threadId: target.getAttribute('data-thread-id'),
@@ -2029,6 +2158,20 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
         origin: target.closest('#comment-overlay') ? 'overlay' : 'thread',
         text
       });
+    });
+
+    document.addEventListener('input', (event) => {
+      const target = event.target;
+
+      if (!(target instanceof HTMLTextAreaElement)) {
+        return;
+      }
+
+      const form = target.closest('[data-reply-form]');
+
+      if (form instanceof HTMLFormElement) {
+        updateReplyQualityWarningForForm(form);
+      }
     });
 
     document.addEventListener('click', (event) => {
@@ -2117,6 +2260,36 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
         return;
       }
 
+      const reviewNavigationButton = target.closest('[data-review-nav]');
+
+      if (reviewNavigationButton) {
+        event.preventDefault();
+        event.stopPropagation();
+        navigateReviewThread(reviewNavigationButton.getAttribute('data-review-nav') === 'previous' ? -1 : 1);
+        return;
+      }
+
+      const openReviewSidecarButton = target.closest('[data-open-review-sidecar]');
+
+      if (openReviewSidecarButton) {
+        event.preventDefault();
+        event.stopPropagation();
+        vscode.postMessage({
+          type: 'openReviewSidecar',
+          sidecarPath: openReviewSidecarButton.getAttribute('data-sidecar-path')
+        });
+        return;
+      }
+
+      const findReviewSidecarsButton = target.closest('[data-find-review-sidecars]');
+
+      if (findReviewSidecarsButton) {
+        event.preventDefault();
+        event.stopPropagation();
+        vscode.postMessage({ type: 'findReviewSidecars' });
+        return;
+      }
+
       const replyTemplateButton = target.closest('[data-reply-template]');
 
       if (replyTemplateButton) {
@@ -2140,7 +2313,10 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
       if (openFeedbackLoopPromptButton) {
         event.preventDefault();
         event.stopPropagation();
-        vscode.postMessage({ type: 'openFeedbackLoopPrompt' });
+        vscode.postMessage({
+          type: 'openFeedbackLoopPrompt',
+          threadId: openFeedbackLoopPromptButton.getAttribute('data-thread-id')
+        });
         return;
       }
 
@@ -2237,7 +2413,7 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
         element.dataset.threadId = thread.id;
         element.title = 'Jump to commented content';
         element.innerHTML = [
-          '<header><span class="thread-meta">' + renderSourceChip(thread) + renderMetaChip('Type', thread.type) + '<span class="anchor-state-chip" data-anchor-state>Locating</span></span>' + renderMetaChip('Severity', thread.severity) + '</header>',
+          '<header><span class="thread-meta">' + renderSourceChip(thread) + renderMetaChip('Type', thread.type) + '<span class="anchor-state-chip" data-anchor-state>Locating</span>' + renderEditOutcomeChip(thread) + '</span>' + renderMetaChip('Severity', thread.severity) + '</header>',
           '<blockquote>' + escapeHtml(thread.anchor.text || 'Document') + '</blockquote>',
           '<p>' + escapeHtml(thread.comment) + '</p>',
           renderCommentQualityWarning(thread.comment),
@@ -3389,13 +3565,47 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
       return '<span class="decision-chip decision-' + escapeHtml(status) + '">' + escapeHtml(decisionLabel(status)) + '</span>';
     }
 
+    function renderEditOutcomeChip(thread) {
+      const outcome = latestReviewUpdateOutcome(thread);
+
+      if (!outcome) {
+        return '';
+      }
+
+      return '<span class="anchor-state-chip edit-outcome-chip" title="' + escapeHtml(outcome.title) + '">' + escapeHtml(outcome.label) + '</span>';
+    }
+
+    function latestReviewUpdateOutcome(thread) {
+      const replies = Array.isArray(thread.thread) ? thread.thread : [];
+      const latest = replies.slice().reverse().find(isReviewUpdateReply);
+      const text = formatReplyText(latest?.text || '');
+
+      if (!text) {
+        return undefined;
+      }
+
+      if (text.includes('applied the suggested edit')) {
+        return { label: 'Patch applied', title: text };
+      }
+
+      if (text.includes('kept this comment attached') || text.includes('kept this thread attached')) {
+        return { label: 'Kept', title: text };
+      }
+
+      if (text.includes('restored this closed thread')) {
+        return { label: 'Restored', title: text };
+      }
+
+      return { label: 'Updated', title: text };
+    }
+
     function decisionLabel(status) {
       if (status === 'accepted') {
-        return 'Accepted';
+        return 'Patch Applied';
       }
 
       if (status === 'rejected') {
-        return 'Rejected';
+        return 'Declined';
       }
 
       return 'Resolved';
@@ -3623,6 +3833,7 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
         renderMetaChip('Type', thread.type || 'note'),
         renderMetaChip('Severity', thread.severity || 'medium'),
         renderMetaChip('Status', thread.status || 'open'),
+        renderEditOutcomeChip(thread),
         '</div>',
         '<p class="comment-overlay-comment">' + escapeHtml(thread.comment || '') + '</p>',
         renderCommentQualityWarning(thread.comment),
@@ -3643,9 +3854,10 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
 
       const patchResult = state.suggestedPatchResults?.[thread.id] || 'missingPatch';
       const canApplyPatch = patchResult === 'applied';
+      const patchStatus = '<p class="suggested-patch-status">' + escapeHtml(formatSuggestedPatchResult(patchResult)) + '</p>';
       const patchAction = canApplyPatch
-        ? '<button type="button" class="compact" title="Apply this replacement and close the thread as accepted." data-thread-id="' + escapeHtml(thread.id) + '" data-apply-suggested-patch>Apply Suggested Patch</button>'
-        : '<p class="suggested-patch-status">' + escapeHtml(formatSuggestedPatchResult(patchResult)) + '</p>';
+        ? patchStatus + '<button type="button" class="compact" title="Apply this replacement, refresh review anchors, and close the thread as Patch Applied." data-thread-id="' + escapeHtml(thread.id) + '" data-apply-suggested-patch>Apply Patch and Close</button>'
+        : patchStatus;
 
       return [
         '<details class="suggested-patch">',
@@ -3659,6 +3871,10 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
     }
 
     function formatSuggestedPatchResult(result) {
+      if (result === 'applied') {
+        return 'Ready: one exact Markdown target. Applying will update Markdown, refresh review anchors, and close this thread as Patch Applied.';
+      }
+
       if (result === 'ambiguous') {
         return 'Patch target matches multiple places. Reply with a narrower patch or re-anchor before applying.';
       }
@@ -3701,16 +3917,32 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
           '<div class="reply-item ' + replyRoleClass(reply) + '">',
           '<div class="reply-meta">' + renderReplyRoleChip(reply) + '<span>' + escapeHtml(formatDate(reply.createdAt)) + '</span></div>',
           '<p class="reply-text">' + escapeHtml(formatReplyText(reply.text || '')) + '</p>',
+          renderReplyQualityWarning(reply),
           '</div>'
         ].join('')),
         '</div>'
       ].join('');
     }
 
+    function renderReplyQualityWarning(reply) {
+      if (String(reply?.role || 'user') !== 'user' || isReviewUpdateReply(reply)) {
+        return '';
+      }
+
+      const warning = commentQualityWarningText(reply?.text || '');
+
+      if (!warning) {
+        return '';
+      }
+
+      return '<p class="quality-warning">Agent handoff warning: ' + escapeHtml(warning) + '</p>';
+    }
+
     function renderReplyForm(thread) {
       return [
         '<form class="reply-form" data-reply-form data-thread-id="' + escapeHtml(thread.id) + '">',
         '<textarea placeholder="Reply to this thread"></textarea>',
+        '<p class="quality-warning" data-reply-quality-warning hidden></p>',
         '<div class="reply-actions">',
         '<button type="submit" class="compact">Reply</button>',
         '</div>',
@@ -3722,7 +3954,9 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
       return [
         '<div class="thread-actions">',
         renderReplyShortcutButtons(thread, ''),
+        '<button class="secondary" title="Continue this exact thread with the AI feedback-loop prompt." data-thread-id="' + escapeHtml(thread.id) + '" data-open-feedback-loop-prompt>Continue with AI</button>',
         '<button class="secondary" title="Close this thread after the issue is handled or no longer applies." data-status="resolved">Resolve</button>',
+        '<button class="secondary" title="Close this thread as declined because the feedback is wrong or not applicable." data-status="rejected">Close as Declined</button>',
         '</div>'
       ].join('');
     }
@@ -3731,7 +3965,9 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
       return [
         '<div class="comment-overlay-actions">',
         renderReplyShortcutButtons(thread, ' compact'),
+        '<button class="secondary compact" title="Continue this exact thread with the AI feedback-loop prompt." data-thread-id="' + escapeHtml(thread.id) + '" data-open-feedback-loop-prompt>Continue with AI</button>',
         '<button class="secondary compact" title="Close this thread after the issue is handled or no longer applies." data-thread-id="' + escapeHtml(thread.id) + '" data-overlay-status="resolved">Resolve</button>',
+        '<button class="secondary compact" title="Close this thread as declined because the feedback is wrong or not applicable." data-thread-id="' + escapeHtml(thread.id) + '" data-overlay-status="rejected">Decline</button>',
         '</div>'
       ].join('');
     }
@@ -3860,6 +4096,89 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
       input?.focus();
     }
 
+    function navigateReviewThread(direction) {
+      const threadIds = getReviewNavigationIds();
+
+      if (threadIds.length === 0) {
+        return;
+      }
+
+      const currentThreadId = getCurrentReviewThreadId(threadIds);
+      const currentIndex = threadIds.indexOf(currentThreadId);
+      const baseIndex = currentIndex >= 0
+        ? currentIndex
+        : direction > 0
+          ? -1
+          : 0;
+      const nextIndex = (baseIndex + direction + threadIds.length) % threadIds.length;
+      revealReviewThread(threadIds[nextIndex]);
+    }
+
+    function getReviewNavigationIds() {
+      const ids = [];
+      const seen = new Set();
+      const addId = (threadId) => {
+        const id = String(threadId || '').trim();
+
+        if (!id || seen.has(id) || !findThread(id)) {
+          return;
+        }
+
+        seen.add(id);
+        ids.push(id);
+      };
+
+      markdownBody
+        .querySelectorAll('.review-badge, .review-anchor, .review-anchor-block, [data-mermaid-diagram].has-review')
+        .forEach((element) => {
+          getThreadIds(element).forEach(addId);
+        });
+
+      openThreads.map((thread) => thread.id).forEach(addId);
+      return ids;
+    }
+
+    function getCurrentReviewThreadId(threadIds) {
+      const overlayThreadIds = commentOverlay.style.display === 'block'
+        ? getThreadIds(commentOverlay)
+        : [];
+      const overlayThreadId = overlayThreadIds.find((threadId) => threadIds.includes(threadId));
+
+      if (overlayThreadId) {
+        return overlayThreadId;
+      }
+
+      const activeThread = document.querySelector('.thread.is-active[data-thread-id]:not(.is-closed)');
+      const activeThreadId = activeThread?.getAttribute('data-thread-id') || '';
+
+      if (threadIds.includes(activeThreadId)) {
+        return activeThreadId;
+      }
+
+      const activeAnchor = markdownBody.querySelector('.is-active[data-thread-id]');
+      const activeAnchorId = activeAnchor?.getAttribute('data-thread-id') || '';
+
+      if (threadIds.includes(activeAnchorId)) {
+        return activeAnchorId;
+      }
+
+      return '';
+    }
+
+    function revealReviewThread(threadId) {
+      const sourceElement = findOverlaySourceElement(threadId);
+
+      if (!sourceElement) {
+        focusThread(threadId, true);
+        return;
+      }
+
+      sourceElement.scrollIntoView({ behavior: 'auto', block: 'center', inline: 'nearest' });
+      const threadIds = getThreadIds(sourceElement);
+      openCommentOverlay(threadIds.length > 0 ? threadIds : [threadId], sourceElement);
+      focusThread(threadId, false);
+    }
+
     function focusThread(threadId, shouldScroll) {
       document.querySelectorAll('.is-active').forEach((element) => element.classList.remove('is-active'));
       document.querySelectorAll('[data-thread-id="' + cssEscape(threadId) + '"]').forEach((element) => {
@@ -3940,6 +4259,14 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
 
     function shouldSkipHighlightParent(element) {
       return Boolean(element.closest('button, textarea, pre, code, .review-anchor, .comment-composer, .selection-popover, .comment-overlay, .mermaid-source'));
+    }
+
+    function isTextEntryTarget(element) {
+      if (!(element instanceof HTMLElement)) {
+        return false;
+      }
+
+      return Boolean(element.closest('input, textarea, select, button, [contenteditable="true"], .block-editor, .mermaid-editor, .table-editor, .comment-composer, .comment-overlay'));
     }
 
     function normalizeInline(value) {
@@ -4205,6 +4532,25 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
       commentQualityWarning.textContent = 'Agent handoff warning: ' + warning;
     }
 
+    function updateReplyQualityWarningForForm(form) {
+      const textArea = form.querySelector('textarea');
+      const warningElement = form.querySelector('[data-reply-quality-warning]');
+      const warning = commentQualityWarningText(textArea?.value || '');
+
+      if (!warningElement) {
+        return;
+      }
+
+      if (!warning || !String(textArea?.value || '').trim()) {
+        warningElement.hidden = true;
+        warningElement.textContent = '';
+        return;
+      }
+
+      warningElement.hidden = false;
+      warningElement.textContent = 'Agent handoff warning: ' + warning;
+    }
+
     function commentQualityWarningText(comment) {
       const normalized = String(comment || '').trim().replace(/\\s+/g, ' ');
 
@@ -4218,6 +4564,10 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
 
       if (!/[\\p{L}\\p{N}]/u.test(normalized)) {
         return 'Comment has no readable words or numbers; add a concrete action or question.';
+      }
+
+      if (/:$/.test(normalized) || /\\bbecause$/i.test(normalized)) {
+        return 'Comment looks unfinished; finish the reason, decision, or requested action before handing it to an AI agent.';
       }
 
       return '';
@@ -4311,16 +4661,25 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
     const markerIds = missingMarkers.map(marker => marker.id).join(',');
 
     return `<section class="storage-warning" role="status">
-    <strong>Review anchors need cleanup.</strong>
-    <p>This Markdown file still contains ${missingMarkers.length} stale ai-review-anchor ${markerLabel}. The matching review thread data is missing from <code>${escapeHtml(sidecar)}</code> or no longer open. Comment text cannot be rebuilt from inline anchors; restore the sidecar JSON from backup, or clean the stale anchors if the comments are no longer needed.</p>
+    <strong>Review anchors need recovery.</strong>
+    <p>This Markdown file still contains ${missingMarkers.length} stale ai-review-anchor ${markerLabel}. The matching review thread data is missing from <code>${escapeHtml(sidecar)}</code> or no longer open. Comment text cannot be rebuilt from inline anchors, so inspect the expected sidecar or find a legacy backup before removing metadata.</p>
     <div class="storage-warning-actions">
+      <button type="button" class="secondary compact" data-open-review-sidecar data-sidecar-path="${escapeHtml(sidecar)}">Open expected sidecar</button>
+      <button type="button" class="secondary compact" data-find-review-sidecars>Find review sidecars</button>
       <button type="button" class="secondary compact" data-cleanup-stale-anchors data-thread-ids="${escapeHtml(markerIds)}">Clean stale anchors</button>
     </div>
   </section>`;
   }
 
-  private renderContextBootstrapPromptAction(): string {
+  private renderContextBootstrapPromptAction(reviewDocument: ReviewDocument): string {
+    const openThreadCount = reviewDocument.threads.filter(thread => thread.status === 'open').length;
+    const disabledAttribute = openThreadCount > 0 ? '' : ' disabled';
+
     return `<section class="context-bootstrap-bar" aria-label="AI prompt handoff">
+    <div class="review-navigation-actions" aria-label="Review comment navigation">
+      <button type="button" class="secondary compact" title="Previous comment (Left Arrow)" data-review-nav="previous"${disabledAttribute}>←</button>
+      <button type="button" class="secondary compact" title="Next comment (Right Arrow)" data-review-nav="next"${disabledAttribute}>→</button>
+    </div>
     <div class="context-bootstrap-actions">
       <button type="button" class="secondary compact" data-open-context-bootstrap-prompt>Open Bootstrap Prompt</button>
       <button type="button" class="secondary compact" data-open-feedback-loop-prompt>Open Feedback Loop Prompt</button>

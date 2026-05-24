@@ -15,13 +15,15 @@ The first MVP focuses on a local workflow:
 - Reply drafts inside the comment overlay also stay open until they are empty.
 - See saved comments as highlights and small badges in the rendered document.
 - Click a highlighted region or badge to inspect saved comments, draft discussion replies, resolve handled issues, or apply reliable suggested patches.
+- Navigate between review comments with the `←` and `→` buttons or the Left/Right Arrow keys when not typing.
 - Edit or rewrite a rendered Markdown block through a constrained block editor that keeps review anchors in sync.
 - Edit rendered Markdown tables through a grid editor with row, column, and alignment controls.
 - Edit Mermaid diagram source from the rendered diagram card through the same review-aware edit pipeline.
 - Reply under review comments with clear `You`/`AI` attribution for future AI handoff.
 - Distinguish user comments from AI-generated review comments with separate labels, badges, and highlight colors.
 - Apply suggested replacement patches from review threads when the patch still matches a reliable anchor.
-- Use `Agree`, `Revise`, and `Disagree` as reply shortcuts that keep the thread open for discussion. Use `Resolve` only when the issue is handled or no longer applies.
+- Use `Agree`, `Revise`, and `Disagree` as reply shortcuts that keep the thread open for discussion. Use `Resolve` when the issue is handled or no longer applies, or `Close as Declined` when the feedback is wrong or intentionally not applicable.
+- Continue one exact review thread with AI from the thread card or comment overlay so the feedback-loop prompt starts from that `rv_*` discussion.
 - Click a thread in `Review Threads` to jump back to its highlighted content.
 - Review accepted, resolved, and rejected history from `Review Threads`, including who closed the thread and whether the old anchor is still linked or now outdated.
 - Restore a closed review thread when a decision needs to be reopened.
@@ -136,9 +138,9 @@ One compact document-level anchor index is also inserted into the Markdown sourc
 
 The custom preview hides these anchors, but AI agents that read the Markdown can use them to connect document locations with sidecar review data.
 
-If the commented text changes and the original text snippet no longer matches, the preview falls back to sidecar context snippets and line hints so the review thread still appears near the edited block. When the preview finds the comment with high confidence, it refreshes the sidecar line hint after a short idle debounce for the next render. Thread cards show whether the anchor is `Located`, `Recovered`, `Approximate`, or `Needs re-anchor` so lost comments remain visible instead of silently disappearing. Approximate or missing matches are not auto-saved as new anchor locations.
+If the commented text changes and the original text snippet no longer matches, the preview falls back to sidecar context snippets and line hints so the review thread still appears near the edited block. When the preview finds the comment with high confidence, it refreshes the sidecar line hint after a short idle debounce for the next render. Thread cards show whether the anchor is `Located`, `Recovered`, `Approximate`, or `Needs re-anchor` so lost comments remain visible instead of silently disappearing. Review-aware edits also add outcome chips such as `Kept` or `Patch applied` when a thread was updated by the edit pipeline. Approximate or missing matches are not auto-saved as new anchor locations.
 
-If the sidecar JSON is deleted or no longer contains matching thread data, the review preview and feedback export warn that inline anchors are stale. The original comment text cannot be rebuilt from the inline anchors alone; restore the sidecar JSON from backup or use `Clean stale anchors` in the preview warning if the comments are no longer needed.
+If the sidecar JSON is deleted or no longer contains matching thread data, the review preview and feedback export warn that inline anchors are stale. The original comment text cannot be rebuilt from the inline anchors alone; the preview now offers recovery-first actions to open the expected sidecar or search colocated and legacy sidecars before `Clean stale anchors` removes broken metadata.
 
 When several review threads exist in one document, the extension rewrites them into that single grouped `ai-review-anchors` metadata comment instead of adding one metadata line per thread.
 
@@ -146,7 +148,7 @@ Accepted, resolved, or rejected review threads move from `openThreads` to `close
 
 The preview keeps closed feedback visible under `Review Threads` as history. Closed cards use different decision colors for accepted, resolved, and rejected feedback, show who closed the thread when that metadata is available, and show whether the original anchor text is still `Linked` in the current Markdown or `Outdated` because the link target no longer appears. `Restore` reopens a closed thread, moves it back to `openThreads`, removes the closed audit pointer, and writes a fresh open anchor index.
 
-Open thread actions are intentionally discussion-first. The reply shortcuts adapt to the thread type: questions offer answer/clarify/not-applicable drafts, risks offer acknowledge/mitigate/challenge drafts, and fixes or suggestions offer agree/revise/disagree drafts. These shortcuts prefill a reply instead of closing the thread. `Resolve` closes a thread after the issue is handled or no longer applies. For threads with a reliable suggested replacement, `Apply Suggested Patch` is the action that changes Markdown, refreshes anchors, records an edit outcome reply, and closes the thread as `accepted`.
+Open thread actions are intentionally discussion-first. The reply shortcuts adapt to the thread type: questions offer answer/clarify/not-applicable drafts, risks offer acknowledge/mitigate/challenge drafts, and fixes or suggestions offer agree/revise/disagree drafts. These shortcuts prefill a reply instead of closing the thread. Weak replies like `ok` show agent-handoff warnings because they can poison the next AI turn. `Continue with AI` opens a feedback-loop prompt focused on that exact `rv_*` thread. `Resolve` closes a thread after the issue is handled or no longer applies, while `Close as Declined` closes feedback that is wrong or intentionally not applicable. For threads with a reliable suggested replacement, `Apply Patch and Close` is the action that changes Markdown, refreshes anchors, records an edit outcome reply, and closes the thread as `accepted`.
 
 ## Agent Handoff
 
@@ -170,12 +172,14 @@ For first-time setup in a repo, the recommended context injection path is:
 
 For active review iteration after bootstrap:
 
-1. Use `AI Markdown Review: Open AI Feedback Loop Prompt` or the preview's `Open Feedback Loop Prompt` action.
+1. Use `AI Markdown Review: Open AI Feedback Loop Prompt`, the preview's global `Open Feedback Loop Prompt` action, or a thread's `Continue with AI` action.
 2. Copy the opened document into the AI agent that should continue the loop.
 3. Let the AI inspect open Review Threads, answer or challenge existing replies, and apply suggested patches only when explicitly requested.
 4. Require the AI to report every touched `rv_*` thread as replied, applied patch, edited nearby, preserved, stale, blocked, resolved by human request, or needing a human decision.
 
-Suggested replacement patches are treated as document edits, not just review decisions. `Apply Suggested Patch` replaces the matching Markdown text, refreshes affected sidecar anchors and context snippets, records an edit outcome reply, and then closes the target thread as `accepted`; if the original text is missing, duplicated ambiguously, or attached to a low-confidence anchor, the extension leaves the thread open.
+Suggested replacement patches are treated as document edits, not just review decisions. `Apply Patch and Close` replaces the matching Markdown text, refreshes affected sidecar anchors and context snippets, records an edit outcome reply, and then closes the target thread as `accepted`. The preview shows why a patch is safe before enabling that action; if the original text is missing, duplicated ambiguously, or attached to a low-confidence anchor, the extension leaves the thread open.
+
+When AI revises a patch in discussion, the feedback-loop prompt asks it to use a `Suggested patch revision:` label with a fenced `diff` block. That keeps revised patch candidates readable to humans without treating every reply as an immediately applyable edit.
 
 Rendered block edits use the same review-aware edit pipeline. The MVP editor is intentionally constrained to source-mapped Markdown blocks instead of replacing the whole file with a free-form WYSIWYG surface, so open comments can stay attached to the edited range and ordinary source edits still fall back to debounced re-anchoring.
 

@@ -17,6 +17,7 @@ describe('createContextBootstrapPrompt', () => {
     assert.match(prompt, /docs\/AI-REVIEW-POLICY.md/);
     assert.match(prompt, /docs\/AI-COLLABORATION-LOOP.md/);
     assert.match(prompt, /ask at most 3 specific questions/i);
+    assert.match(prompt, /create or reply to a focused `question` thread/);
     assert.match(prompt, /Treat review threads as conversation state/);
     assert.match(prompt, /switch to the AI Feedback Loop Prompt/);
     assert.match(prompt, /Apply a suggested Markdown change only when the human explicitly asks/i);

@@ -19,10 +19,10 @@
 - Debounces review anchor maintenance and only auto-saves high-confidence anchor relocations to the sidecar.
 - Labels review metadata chips as type, severity, and status instead of showing bare values.
 - Replaces open-thread Accept/Reject close buttons with type-aware reply shortcuts, leaving Resolve as the explicit handled-issue closure.
-- Shows suggested replacement patches with an `Apply Suggested Patch` action that updates Markdown only when the target is reliable.
-- Hides `Apply Suggested Patch` when the original patch target no longer matches the current Markdown and shows a stale-patch explanation instead.
+- Shows suggested replacement patches with an `Apply Patch and Close` action that updates Markdown only when the target is reliable.
+- Hides `Apply Patch and Close` when the original patch target no longer matches the current Markdown and shows a stale-patch explanation instead.
 - Refreshes the review preview when an AI agent or external editor updates the Markdown review sidecar, so revised suggested patches appear without reopening the preview.
-- Routes `Apply Suggested Patch` through a review-aware edit service that refreshes sidecar anchors/context and records edit outcome replies.
+- Routes `Apply Patch and Close` through a review-aware edit service that refreshes sidecar anchors/context and records edit outcome replies.
 - Adds a constrained rendered-block Markdown editor and rewrite path that use the same review-aware edit pipeline.
 - Uses Turndown for block-editor HTML-to-Markdown conversion instead of a hand-rolled serializer.
 - Hardens rendered-block HTML-to-Markdown conversion for empty inline tags, task lists, fenced code languages, pasted tables, and malformed emphasis.
@@ -37,6 +37,12 @@
 - Opens generated prompt and feedback-export documents as read-only virtual Markdown so VS Code does not wait to back up unsaved prompt editors during reload.
 - Clarifies feedback-loop prompt behavior for "accept this suggestion" so safe suggested patches are treated as apply requests instead of close-only decisions.
 - Adds a deterministic AI reviewer and human author simulation harness plus a review-loop feedback report.
+- Adds a rich Markdown review-loop fixture and expands AI/human simulation coverage with realistic comment transcripts, replies, stale-patch revision, table-cell, and Mermaid scenarios.
+- Adds recovery-first stale sidecar actions to open the expected sidecar or find legacy review sidecars before cleaning stale anchors.
+- Adds `Close as Declined`, thread-focused `Continue with AI`, reply handoff warnings, and post-edit outcome chips for active review threads.
+- Shows safe-patch applicability text before `Apply Patch and Close` so users can see why the action will update Markdown and close the thread.
+- Adds previous/next review comment navigation through compact arrow buttons and Left/Right Arrow keys outside text entry.
+- Adds feedback-loop prompt guidance for revised patch replies and clarifies that `needs human decision` leaves the thread open.
 - Submits comment and reply textareas with Enter while keeping Shift+Enter for multi-line text.
 - Keeps the active comment overlay or review thread focused after saving a reply.
 - Shows accepted, resolved, and rejected review history with linked/outdated anchor state and a Restore action.

@@ -93,6 +93,8 @@ describe('renderFeedbackExport', () => {
     assert.match(output, /- Anchor confidence: recovered/);
     assert.match(output, /- Allowed to close: no/);
     assert.match(output, /- Handoff quality: ready/);
+    assert.match(output, /Outcome vocabulary:/);
+    assert.match(output, /needs human decision means stop before deciding and leave the thread open/);
     assert.match(output, /## rv_vague/);
     assert.match(output, /- Handoff quality: needs_detail/);
     assert.match(output, /Comment is too short for reliable AI handoff/);

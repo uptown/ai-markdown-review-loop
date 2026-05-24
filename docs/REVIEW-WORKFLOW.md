@@ -11,11 +11,15 @@ This extension is built around repeated document-review loops between human auth
 - As an AI-agent user, I want open feedback exported with thread IDs, source labels, discussion history, anchor confidence, and suggested patches so an agent can work from the review queue.
 - As an AI-review user, I want AI-written comments to follow a stable policy and schema so review quality does not drift with the model.
 - As a collaborator, I want comments to remain visible after nearby edits so feedback does not silently disappear when wording changes.
+- As a reviewer, I want arrow-key and button navigation between comments so I can triage review feedback without hunting through the document.
 - As an author, I want rendered-block edits and suggested patch application to use the same review-aware pipeline so sidecar anchors, context, and edit outcomes stay current.
 - As an author, I want to edit Mermaid diagram source from the rendered preview so diagram fixes stay in the same review loop as prose edits.
 - As a reviewer, I want accepted, resolved, and rejected threads to remain visible as history so I can audit decisions and restore one when discussion needs to continue.
 - As a reviewer, I want closed history to show how and by whom a thread was closed so accepted, resolved, rejected, human, and AI decisions are not visually flattened.
 - As an author, I want reply drafts in overlays to survive casual dismissal gestures so I do not lose in-progress review discussion.
+- As an author, I want to close wrong AI feedback as declined so I do not have to call an invalid suggestion resolved.
+- As an AI-agent user, I want to continue one exact `rv_*` thread with AI after replying so the next turn starts from the right discussion.
+- As an author, I want stale sidecar warnings to help me inspect or find review data before offering destructive cleanup.
 - As an author, I want rename or move operations on reviewed Markdown files to keep their review state attached.
 
 ## Action Vocabulary
@@ -24,15 +28,18 @@ This extension is built around repeated document-review loops between human auth
 - `Agree`: draft a reply that records agreement without changing Markdown or closing the thread.
 - `Revise`: draft a reply asking for a sharper comment or safer suggested patch.
 - `Disagree`: draft a reply that records an objection without closing the thread.
+- `Suggested patch revision`: AI reply convention for a revised patch candidate. It should use a fenced `diff` block and wait for explicit apply/edit intent.
+- `Close as Declined`: close because the feedback is wrong, intentionally not applicable, or should be preserved as a declined review decision.
 - `Manual edit`: change the Markdown directly from source or a rendered editor. This does not close a thread by itself.
-- `Apply Suggested Patch`: extension action for a suggested replacement patch. It mutates the Markdown and closes the thread as `accepted` only when the original text has one reliable target.
+- `Apply Patch and Close`: extension action for a suggested replacement patch. It mutates the Markdown and closes the thread as `accepted` only when the original text has one exact current Markdown target.
 - `Edit block`: constrained rendered-preview Markdown editing for a source-mapped block. It mutates Markdown and refreshes overlapping thread anchors without deciding review status.
 - `Edit Mermaid`: source editor for a Mermaid fenced code block. It replaces only that fenced block and refreshes overlapping thread anchors without deciding review status.
 - `Rewrite block`: manual rewrite path that uses the same review-aware edit pipeline reserved for future AI rewrite integration.
 - `Resolve`: close because the underlying issue has been handled, superseded, or no longer applies.
 - `Restore`: reopen a closed thread, move it back to active feedback, and attach it to the current document again.
 - `Needs re-anchor`: state shown when the original anchor cannot be located reliably; reply, edit manually, restore context, or clean stale anchors rather than assuming the feedback disappeared.
-- `Clean stale anchors`: remove broken metadata only; this is not a review decision.
+- `Open expected sidecar` / `Find review sidecars`: recovery actions for stale inline anchors when sidecar JSON is missing or incomplete.
+- `Clean stale anchors`: remove broken metadata only after recovery options are exhausted; this is not a review decision.
 - `Export for Agent`: package open threads for AI work without mutating review state.
 
 ## AI Review Contracts
@@ -46,7 +53,7 @@ The canonical first-pass context injection guide lives in [`AI-CONTEXT-BOOTSTRAP
 The future machine-readable contract for AI-created review thread proposals lives
 in [`agent-review-thread.schema.json`](./agent-review-thread.schema.json).
 
-Any future AI reviewer integration should use both:
+Any future AI reviewer integration should use these canonical inputs:
 
 - the policy document for semantic rules
 - the collaboration loop doc for thread-level interaction rules
@@ -70,7 +77,7 @@ Any future AI reviewer integration should use both:
 2. The review preview exposes `Open Bootstrap Prompt` for first-pass context and `Open Feedback Loop Prompt` for active thread iteration.
 3. The user opens a repo-aware bootstrap prompt. The prompt tells any AI agent what files to read, what missing context to ask for, how to use AI Markdown Review Loop when available, and how to preserve review metadata while editing Markdown.
 4. The AI starts from the current Markdown target, then reads shared repo docs such as `README.md`, `docs/AI-CONTEXT-BRIEF.md`, and the AI Markdown Review Loop policy docs when they are relevant.
-5. If the available context still leaves key questions unanswered, the AI asks for the missing context packet instead of guessing.
+5. If the available context still leaves key document questions unanswered, the AI creates or replies to focused `question` threads instead of guessing or stopping only in chat.
 6. If a durable brief would help, the AI drafts or refreshes `docs/AI-CONTEXT-BRIEF.md`.
 7. The AI continues with the requested review or edit work and reports any touched `rv_*` thread outcomes.
 
@@ -93,7 +100,7 @@ Any future AI reviewer integration should use both:
 1. AI feedback includes a suggested replacement patch.
 2. The author opens the thread and reviews the diff.
 3. The extension checks that the original text still exists at a reliable anchor.
-4. The author clicks `Apply Suggested Patch`.
+4. The author clicks `Apply Patch and Close`.
 5. The extension replaces the Markdown text, refreshes affected sidecar anchors and context snippets, records edit outcome replies, removes the open target anchor, archives the target thread as `accepted`, and leaves an audit log pointer.
 6. If the text is missing, duplicated ambiguously, or attached to a low-confidence anchor, the thread remains open for reply, re-anchor, or manual editing.
 

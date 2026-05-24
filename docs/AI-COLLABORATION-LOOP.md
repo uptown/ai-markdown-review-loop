@@ -61,10 +61,22 @@ Open-thread UI should keep discussion cheaper than closure. Reply shortcuts
 adapt to the thread type: questions get answer/clarify/not-applicable drafts,
 risks get acknowledge/mitigate/challenge drafts, and fixes or suggestions get
 agree/revise/disagree drafts. `Resolve` is the normal close action for handled
-or no-longer-applicable issues.
-`Apply Suggested Patch` is separate from reply shortcuts: it mutates Markdown
+or no-longer-applicable issues. `Close as Declined` is the close action for
+feedback that is wrong, intentionally not applicable, or rejected after human
+review.
+`Apply Patch and Close` is separate from reply shortcuts: it mutates Markdown
 through the review-aware edit path and closes the target patch thread as
 `accepted` only after the edit succeeds.
+
+After a human replies, `Continue with AI` should keep the next AI turn focused on
+the exact `rv_*` thread rather than restarting a document-wide review. Vague
+replies such as `ok` should be treated as handoff risks until the human adds the
+decision, reason, or requested action.
+
+When AI revises a patch inside a reply, it should label the reply
+`Suggested patch revision:` and use a fenced `diff` block. That keeps a concrete
+replacement candidate distinct from ordinary discussion until the human chooses
+to apply it.
 
 ## Good Human Input
 

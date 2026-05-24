@@ -61,7 +61,9 @@ available to an AI agent. Useful shared sources often include:
 
 If the available context already answers the core questions, the AI can
 continue with the requested review or edit task. If not, it should ask for
-missing context instead of guessing.
+missing context instead of guessing. When the missing answer belongs to the
+document under review and review tools are available, the AI should create or
+reply to a focused `question` thread instead of stopping the loop in chat.
 
 ## Minimum Context Packet
 
@@ -107,7 +109,8 @@ The generated bootstrap prompt should tell the AI to:
 - treat the whole opened document as the prompt to follow
 - work in any AI agent that can read/edit repo files
 - start from the current Markdown target and discover relevant shared repo docs
-- ask at most 3 specific follow-up questions about missing context
+- ask at most 3 specific follow-up questions about missing context, using a
+  focused `question` thread when the question belongs to the document
 - treat Review Threads as conversation state rather than disposable comments
 - preserve nearby `.<filename>.ai-review.json` sidecars and inline
   `ai-review-*` metadata comments during normal Markdown edits
@@ -121,7 +124,8 @@ The export packet for AI agents should:
 
 - point to this bootstrap convention
 - tell the AI which files to read first
-- tell the AI what to ask the human if the repo is missing context
+- tell the AI what to ask the human if the repo is missing context, and when
+  that question should become a review thread
 - point users toward the bootstrap prompt instead of showing a persistent
   context status panel in the review preview
 - reinforce that Markdown edits must preserve review metadata and report

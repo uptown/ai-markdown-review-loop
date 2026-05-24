@@ -112,7 +112,9 @@ export function renderFeedbackExport(reviewDocument: ReviewDocument): string {
   lines.push(
     `## Acceptance Gate`,
     ``,
-    `Do not mark the task complete until every open feedback item has an explicit outcome in your response. Do not close review threads unless the user explicitly asks you to mark them accepted, resolved, or rejected.`
+    `Do not mark the task complete until every open feedback item has an explicit outcome in your response. Do not close review threads unless the user explicitly asks you to mark them accepted, resolved, or rejected.`,
+    ``,
+    `Outcome vocabulary: replied keeps the thread open with new context; applied patch means Markdown changed and the thread may close as accepted only after the edit succeeds; preserved means the thread stayed attached after nearby edits; stale or blocked means the thread stays open; needs human decision means stop before deciding and leave the thread open for the human.`
   );
 
   return lines.join('\n');
