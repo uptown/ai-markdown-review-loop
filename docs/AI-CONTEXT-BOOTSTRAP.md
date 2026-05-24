@@ -119,7 +119,10 @@ The generated bootstrap prompt should tell the AI to:
 
 - treat the whole opened document as the prompt to follow
 - work in any AI agent that can read/edit repo files
-- start from the current Markdown target and discover relevant shared repo docs
+- use the Markdown target named by the human or current conversation, asking
+  which Markdown file to review or edit only when it is unclear
+- stay generic and avoid embedding a generated target line inside the reusable
+  prompt body
 - capture or recover the review session brief from the human request and recent
   thread replies
 - ask at most 3 specific follow-up questions about missing context, using a

@@ -5,14 +5,12 @@ import { createContextBootstrapPrompt } from '../src/contextBootstrapPrompt';
 describe('createContextBootstrapPrompt', () => {
   it('builds a concise generic agent prompt that preserves review state during reviews and edits', () => {
     const prompt = createContextBootstrapPrompt({
-      currentDocumentPath: 'docs/specs/checkout.md',
       recommendedBriefPath: 'docs/AI-CONTEXT-BRIEF.md'
     });
 
     assert.match(prompt, /# AI Markdown Review Loop Agent Prompt/);
     assert.match(prompt, /review or edit Markdown/i);
-    assert.match(prompt, /Initial Markdown target: `docs\/specs\/checkout.md`/);
-    assert.match(prompt, /Read the current Markdown target first/);
+    assert.match(prompt, /Use the Markdown target named by the human or current conversation/);
     assert.match(prompt, /README.md/);
     assert.match(prompt, /docs\/AI-REVIEW-POLICY.md/);
     assert.match(prompt, /docs\/AI-COLLABORATION-LOOP.md/);
@@ -29,6 +27,9 @@ describe('createContextBootstrapPrompt', () => {
     assert.match(prompt, /List every touched `rv_\*` id/);
     assert.doesNotMatch(prompt, /Detected Sources/);
     assert.doesNotMatch(prompt, /Prompt To Paste/);
+    assert.doesNotMatch(prompt, /Initial Markdown target/);
+    assert.doesNotMatch(prompt, /Current Markdown target/);
+    assert.doesNotMatch(prompt, /docs\/specs\/checkout.md/);
     assert.doesNotMatch(prompt, /Skip files that do not exist/);
     assert.doesNotMatch(prompt, /docs\/PRD.md/);
     assert.doesNotMatch(prompt, /\.agent\/PROJECT_STATE.md/);
@@ -44,7 +45,7 @@ describe('createContextBootstrapPrompt', () => {
       recommendedBriefPath: 'docs/AI-CONTEXT-BRIEF.md'
     });
 
-    assert.match(prompt, /Ask me which Markdown file to review or edit/);
+    assert.match(prompt, /ask which Markdown file to review or edit/);
     assert.doesNotMatch(prompt, /Read these repo context sources first/);
     assert.doesNotMatch(prompt, /1\. `README.md`/);
     assert.doesNotMatch(prompt, /1\. `docs\/AI-CONTEXT-BRIEF.md`/);

@@ -13,11 +13,7 @@ export async function openContextBootstrapPrompt(
     return undefined;
   }
 
-  const currentDocumentPath = documentUri
-    ? vscode.workspace.asRelativePath(documentUri, false)
-    : undefined;
   const prompt = createContextBootstrapPrompt({
-    currentDocumentPath,
     recommendedBriefPath: AI_CONTEXT_BRIEF_RELATIVE_PATH
   });
   return openReadOnlyMarkdownPrompt('AI Context Bootstrap Prompt', prompt);

@@ -1,23 +1,17 @@
 export interface ContextBootstrapPromptInput {
-  currentDocumentPath?: string;
   recommendedBriefPath?: string;
 }
 
 export function createContextBootstrapPrompt(input: ContextBootstrapPromptInput): string {
   const recommendedBriefPath = input.recommendedBriefPath ?? 'docs/AI-CONTEXT-BRIEF.md';
-  const targetInstruction = input.currentDocumentPath
-    ? `Initial Markdown target: \`${input.currentDocumentPath}\`. If I name a different target later, use the newer target.`
-    : 'Ask me which Markdown file to review or edit if the target is not already clear from the conversation.';
 
   return [
     '# AI Markdown Review Loop Agent Prompt',
     '',
     'You are helping review or edit Markdown in a repository that uses AI Markdown Review Loop.',
     '',
-    targetInstruction,
-    '',
     'Work style:',
-    '1. Read the current Markdown target first.',
+    '1. Use the Markdown target named by the human or current conversation. If it is unclear, ask which Markdown file to review or edit.',
     `2. Skim nearby docs and shared repo docs when useful, especially \`README.md\`, \`${recommendedBriefPath}\`, \`docs/AI-REVIEW-POLICY.md\`, and \`docs/AI-COLLABORATION-LOOP.md\` if they exist.`,
     '3. Capture the human review session brief before reviewing when it is not already clear: review goal, focus areas, non-goals, constraints, preferred comment style, and what would count as done.',
     '4. If missing context would change your review or edit, ask at most 3 specific questions. When review tools are available and the question belongs to the document, create or reply to a focused `question` thread instead of stopping in chat. Otherwise continue with the requested work.',
