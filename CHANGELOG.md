@@ -4,6 +4,13 @@
 
 - None.
 
+## 0.0.12 - 2026-05-26
+
+- Hides YAML front matter from the rendered review preview while preserving source line mapping for anchors and edits.
+- Hides AI-response reply shortcuts on human-only review threads until AI or automated review has joined the discussion.
+- Improves repeated-text anchor placement so comments prefer the original line, occurrence, and surrounding context instead of jumping to another matching word.
+- Prevents review threads on the same repeated text from being grouped together unless their anchor identity matches.
+
 ## 0.0.11 - 2026-05-25
 
 - Makes colocated `.<filename>.ai-review.json` sidecars the source of truth for new comments, replies, decisions, restores, and local review feedback without inserting inline Markdown metadata.

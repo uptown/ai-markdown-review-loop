@@ -16,6 +16,7 @@ import {
 import {
   stripInlineAnchorMarkers
 } from './inlineMarkers';
+import { createPreviewMarkdown } from './previewMarkdown';
 import { applyReviewThreadUpdatesToDocuments } from './reviewDocumentUpdates';
 import { ReviewStore } from './reviewStore';
 import {
@@ -26,6 +27,8 @@ import {
   ReviewAwareEditIntent,
   ReviewAwareEditPlan
 } from './reviewAwareEdits';
+import { createReviewAnchorIdentityKey } from './reviewAnchorIdentity';
+import { getReplyShortcutDescriptors } from './replyShortcuts';
 import { createRestoredReviewThread, getReviewHistoryAnchorStates } from './reviewHistory';
 import { restoreReviewSidecarSnapshot, ReviewUndoController } from './reviewUndo';
 import {
@@ -982,7 +985,7 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
   ): string {
     const nonce = randomUUID();
     const documentText = document.getText();
-    const previewMarkdown = stripInlineAnchorMarkers(documentText);
+    const previewMarkdown = createPreviewMarkdown(stripInlineAnchorMarkers(documentText));
     const renderedMarkdown = this.markdown.render(previewMarkdown, {
       documentUri: document.uri,
       webview
@@ -1005,6 +1008,12 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
       historyAnchorStates,
       suggestedPatchResults,
       markerLineHints,
+      anchorIdentityByThreadId: Object.fromEntries(
+        reviewDocument.threads.map(thread => [thread.id, createReviewAnchorIdentityKey(thread)])
+      ),
+      replyShortcutsByThreadId: Object.fromEntries(
+        reviewDocument.threads.map(thread => [thread.id, getReplyShortcutDescriptors(thread)])
+      ),
       tables,
       documentVersion: document.version,
       restoreState: restoreState ?? {}
@@ -1950,6 +1959,8 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
     const vscode = acquireVsCodeApi();
     const state = ${state};
     const markerLineHints = state.markerLineHints || {};
+    const anchorIdentityByThreadId = state.anchorIdentityByThreadId || {};
+    const replyShortcutsByThreadId = state.replyShortcutsByThreadId || {};
     const markdownTables = Array.isArray(state.tables) ? state.tables : [];
     const documentVersion = Number(state.documentVersion);
     const restoreState = state.restoreState || {};
@@ -3180,7 +3191,8 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
             : NodeFilter.FILTER_SKIP;
         }
       });
-      let remaining = getAnchorOccurrence(thread);
+      const candidates = [];
+      let occurrenceIndex = 0;
       let node = walker.nextNode();
 
       while (node?.nodeValue) {
@@ -3189,67 +3201,65 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
         let index = normalizedNode.indexOf(anchorText, searchStart);
 
         while (index >= 0) {
-          if (remaining > 0) {
-            remaining -= 1;
+          const rawIndex = findRawIndexForNormalizedText(node.nodeValue, anchorText, index);
+
+          if (rawIndex < 0) {
             searchStart = index + anchorText.length;
             index = normalizedNode.indexOf(anchorText, searchStart);
             continue;
           }
 
-          const rawIndex = findRawIndexForNormalizedText(node.nodeValue, anchorText, index);
-
-          if (rawIndex < 0) {
-            return false;
-          }
-
           const matchLength = findRawLengthForNormalizedText(node.nodeValue.slice(rawIndex), anchorText);
 
-          if (matchLength <= 0) {
-            return false;
+          if (matchLength > 0) {
+            candidates.push({
+              node,
+              rawIndex,
+              matchLength,
+              occurrenceIndex,
+              element: node.parentElement
+            });
           }
 
-          const matchNode = node.splitText(rawIndex);
-          const afterNode = matchNode.splitText(matchLength);
-          const marker = document.createElement('span');
-          marker.className = 'review-anchor ' + sourceClass(thread);
-          marker.dataset.threadId = thread.id;
-          marker.title = sourceLabel(thread) + ' comment';
-          marker.textContent = matchNode.nodeValue;
-
-          const badge = createReviewBadge(thread, '', sourceBadgeLabel(thread));
-          marker.appendChild(badge);
-          matchNode.parentNode?.insertBefore(marker, matchNode);
-          matchNode.remove();
-          afterNode.parentElement?.normalize();
-          setAnchorState(thread, 'exact', marker);
-          reportLocatedAnchor(marker, thread, 'exact');
-          return true;
+          occurrenceIndex += 1;
+          searchStart = index + anchorText.length;
+          index = normalizedNode.indexOf(anchorText, searchStart);
         }
 
         node = walker.nextNode();
       }
 
-      return false;
+      const selected = selectTextMatchCandidate(thread, candidates, anchorText);
+
+      if (!selected) {
+        return false;
+      }
+
+      const matchNode = selected.node.splitText(selected.rawIndex);
+      const afterNode = matchNode.splitText(selected.matchLength);
+      const marker = document.createElement('span');
+      marker.className = 'review-anchor ' + sourceClass(thread);
+      marker.dataset.threadId = thread.id;
+      marker.title = sourceLabel(thread) + ' comment';
+      marker.textContent = matchNode.nodeValue;
+
+      const badge = createReviewBadge(thread, '', sourceBadgeLabel(thread));
+      marker.appendChild(badge);
+      matchNode.parentNode?.insertBefore(marker, matchNode);
+      matchNode.remove();
+      afterNode.parentElement?.normalize();
+      setAnchorState(thread, 'exact', marker);
+      reportLocatedAnchor(marker, thread, 'exact');
+      return true;
     }
 
     function highlightContainingBlock(thread, anchorText) {
       const candidates = Array.from(markdownBody.querySelectorAll('p, li, h1, h2, h3, h4, h5, h6, td, th, blockquote, [data-markdown-image]'));
-      let remaining = getAnchorOccurrence(thread);
-      let target;
-
-      for (const element of candidates) {
-        if (shouldSkipHighlightParent(element) || !normalizeInline(getSearchableElementText(element)).includes(anchorText)) {
-          continue;
-        }
-
-        if (remaining > 0) {
-          remaining -= 1;
-          continue;
-        }
-
-        target = element;
-        break;
-      }
+      const matches = candidates.filter((element) => {
+        return !shouldSkipHighlightParent(element)
+          && normalizeInline(getSearchableElementText(element)).includes(anchorText);
+      });
+      const target = selectElementMatchCandidate(thread, matches, anchorText);
 
       if (!target) {
         return false;
@@ -3257,6 +3267,65 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
 
       attachThreadToAnchorElement(target, thread, 'review-block-badge', 'exact');
       return true;
+    }
+
+    function selectTextMatchCandidate(thread, candidates, anchorText) {
+      if (candidates.length === 0) {
+        return undefined;
+      }
+
+      if (candidates.length === 1) {
+        return candidates[0];
+      }
+
+      return candidates
+        .map((candidate, index) => ({
+          candidate,
+          index,
+          score: scoreTextMatchCandidate(candidate, thread, anchorText)
+        }))
+        .sort((left, right) => right.score - left.score || left.index - right.index)[0]?.candidate;
+    }
+
+    function selectElementMatchCandidate(thread, candidates, anchorText) {
+      if (candidates.length === 0) {
+        return undefined;
+      }
+
+      if (candidates.length === 1) {
+        return candidates[0];
+      }
+
+      return candidates
+        .map((candidate, index) => ({
+          candidate,
+          index,
+          score: scoreElementMatchCandidate(candidate, thread, anchorText, index)
+        }))
+        .sort((left, right) => right.score - left.score || left.index - right.index)[0]?.candidate;
+    }
+
+    function scoreTextMatchCandidate(candidate, thread, anchorText) {
+      const occurrence = getAnchorOccurrence(thread);
+      const occurrenceDistance = Math.abs(candidate.occurrenceIndex - occurrence);
+      const element = candidate.element;
+      let score = Math.max(0, 8 - occurrenceDistance);
+
+      if (element) {
+        score += scoreLineDistance(element, thread);
+        score += scoreAnchorCandidate(element, thread, anchorText);
+      }
+
+      score += scoreMatchLocalContext(candidate, thread);
+      return score;
+    }
+
+    function scoreElementMatchCandidate(element, thread, anchorText, occurrenceIndex) {
+      const occurrence = getAnchorOccurrence(thread);
+      const occurrenceDistance = Math.abs(occurrenceIndex - occurrence);
+      return Math.max(0, 8 - occurrenceDistance)
+        + scoreLineDistance(element, thread)
+        + scoreAnchorCandidate(element, thread, anchorText);
     }
 
     function highlightContextBlock(thread, anchorText) {
@@ -3312,12 +3381,45 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
         score += 3;
       }
 
-      const sourceLine = Number(element.getAttribute('data-source-line'));
-      const lineHint = Number(markerLineHints[thread.id]);
+      score += scoreLineDistance(element, thread) / 8;
 
-      if (Number.isFinite(sourceLine) && Number.isFinite(lineHint)) {
-        const distance = Math.abs(sourceLine - lineHint);
-        score += Math.max(0, 1.5 - Math.min(distance, 30) / 20);
+      return score;
+    }
+
+    function scoreLineDistance(element, thread) {
+      const preferredLine = preferredAnchorLine(thread);
+
+      if (!Number.isFinite(preferredLine) || preferredLine < 1) {
+        return 0;
+      }
+
+      const distance = sourceLineDistance(element, preferredLine);
+
+      if (!Number.isFinite(distance)) {
+        return 0;
+      }
+
+      return distance === 0 ? 32 : Math.max(0, 12 - Math.min(distance, 12));
+    }
+
+    function preferredAnchorLine(thread) {
+      return Number(thread.anchor?.lastLocatedLine || markerLineHints[thread.id] || thread.anchor?.lineStart || 0);
+    }
+
+    function scoreMatchLocalContext(candidate, thread) {
+      const text = String(candidate.node?.nodeValue || '');
+      const beforeText = normalizeInline(text.slice(Math.max(0, candidate.rawIndex - 140), candidate.rawIndex));
+      const afterText = normalizeInline(text.slice(candidate.rawIndex + candidate.matchLength, candidate.rawIndex + candidate.matchLength + 140));
+      const before = normalizeInline(thread.anchor?.contextBefore || '');
+      const after = normalizeInline(thread.anchor?.contextAfter || '');
+      let score = 0;
+
+      if (before && contextMatches(beforeText, before, 'tail')) {
+        score += 10;
+      }
+
+      if (after && contextMatches(afterText, after, 'head')) {
+        score += 10;
       }
 
       return score;
@@ -3546,10 +3648,17 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
       }
 
       const baseText = normalizeInline(baseThread.anchor?.text || '');
+      const baseIdentity = anchorIdentityByThreadId[baseThread.id];
+
+      if (!baseText || !baseIdentity) {
+        return [];
+      }
 
       return threads.filter((thread) => {
         const anchorText = normalizeInline(thread.anchor?.text || '');
-        return anchorText && anchorText === baseText;
+        return thread.id !== baseThread.id
+          && anchorText === baseText
+          && anchorIdentityByThreadId[thread.id] === baseIdentity;
       });
     }
 
@@ -4129,37 +4238,8 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
     }
 
     function replyShortcutDescriptors(thread) {
-      const type = String(thread.type || 'note');
-
-      if (type === 'question') {
-        return [
-          { template: 'answer', label: 'Answer', title: 'Draft an answer reply without closing this question.' },
-          { template: 'clarify', label: 'Clarify', title: 'Draft a request for a sharper question or missing context.' },
-          { template: 'not-applicable', label: 'Not Applicable', title: 'Draft a reply explaining why this question no longer applies.' }
-        ];
-      }
-
-      if (type === 'risk') {
-        return [
-          { template: 'acknowledge-risk', label: 'Acknowledge', title: 'Draft a reply acknowledging the risk without closing it.' },
-          { template: 'mitigate-risk', label: 'Mitigate', title: 'Draft a mitigation reply for this risk.' },
-          { template: 'challenge', label: 'Challenge', title: 'Draft a reply challenging this risk without closing it.' }
-        ];
-      }
-
-      if (type === 'fix' || type === 'suggestion') {
-        return [
-          { template: 'agree', label: 'Agree', title: 'Draft an agreement reply without closing this thread.' },
-          { template: 'revise', label: thread.suggestedPatch ? 'Revise Patch' : 'Revise', title: 'Draft a request for a sharper comment or patch.' },
-          { template: 'disagree', label: 'Disagree', title: 'Draft a disagreement reply without closing this thread.' }
-        ];
-      }
-
-      return [
-        { template: 'acknowledge', label: 'Acknowledge', title: 'Draft an acknowledgement reply without closing this note.' },
-        { template: 'revise', label: 'Revise', title: 'Draft a request for a sharper note.' },
-        { template: 'disagree', label: 'Disagree', title: 'Draft a disagreement reply without closing this note.' }
-      ];
+      const shortcuts = replyShortcutsByThreadId[thread.id];
+      return Array.isArray(shortcuts) ? shortcuts : [];
     }
 
     function formatDate(value) {
