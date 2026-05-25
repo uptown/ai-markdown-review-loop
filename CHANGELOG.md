@@ -4,6 +4,13 @@
 
 - None.
 
+## 0.0.10 - 2026-05-25
+
+- Renders local Markdown images in the review preview through VS Code-safe webview URIs.
+- Adds image-level `Feedback` actions, badges, overlays, replies, and agent-export matching for image review threads.
+- Blocks remote `http` and `https` image loading by default and shows a reviewable placeholder/link instead.
+- Updates release guidance so every versioned change gets a release-manager metadata pass.
+
 ## 0.0.9 - 2026-05-25
 
 - Adds Marketplace-ready package metadata, icon, gallery banner, README visuals, and support links.

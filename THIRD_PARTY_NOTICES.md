@@ -49,7 +49,7 @@ Generated from installed production npm dependency metadata with `license-checke
 | @types/geojson@7946.0.16 | MIT | https://github.com/DefinitelyTyped/DefinitelyTyped | node_modules/@types/geojson/LICENSE |
 | @types/trusted-types@2.0.7 | MIT | https://github.com/DefinitelyTyped/DefinitelyTyped | node_modules/@types/trusted-types/LICENSE |
 | @upsetjs/venn.js@2.0.0 | MIT | https://github.com/upsetjs/venn.js | node_modules/@upsetjs/venn.js/LICENSE |
-| ai-markdown-review-loop@0.0.9 | MIT | https://github.com/uptown/ai-markdown-review-loop | LICENSE |
+| ai-markdown-review-loop@0.0.10 | MIT | https://github.com/uptown/ai-markdown-review-loop | LICENSE |
 | argparse@2.0.1 | Python-2.0 | https://github.com/nodeca/argparse | node_modules/argparse/LICENSE |
 | commander@7.2.0 | MIT | https://github.com/tj/commander.js | node_modules/d3-dsv/node_modules/commander/LICENSE |
 | commander@8.3.0 | MIT | https://github.com/tj/commander.js | node_modules/katex/node_modules/commander/LICENSE |
@@ -539,7 +539,7 @@ SOFTWARE.
 
 ### License Text 9
 
-Packages: ai-markdown-review-loop@0.0.7
+Packages: ai-markdown-review-loop@0.0.10
 
 ```text
 MIT License

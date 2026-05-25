@@ -9,6 +9,11 @@ import { createAnchor } from './anchors';
 import { htmlBlockToMarkdown } from './htmlToMarkdown';
 import { createMermaidFenceReplacement } from './mermaidEdits';
 import {
+  createMarkdownImageAnchorText,
+  isRemoteMarkdownImageSource,
+  markdownImageReviewLabel
+} from './markdownImageAnchors';
+import {
   findStaleInlineAnchorMarkers,
   removeInlineAnchorMarkers,
   stripInlineAnchorMarkers
@@ -105,6 +110,46 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
       };
     }
 
+    this.markdown.renderer.rules.image = (tokens, index, _options, env) => {
+      const token = tokens[index];
+      const src = token.attrGet('src') ?? '';
+      const alt = token.content ?? token.attrGet('alt') ?? '';
+      const title = token.attrGet('title') ?? '';
+      const label = markdownImageReviewLabel({ alt, src, title });
+      const anchorText = createMarkdownImageAnchorText({ alt, src, title });
+
+      if (isRemoteMarkdownImageSource(src)) {
+        return `<span class="markdown-image markdown-image-remote" data-markdown-image data-image-anchor="${escapeHtml(anchorText)}" data-image-src="${escapeHtml(src)}" data-image-alt="${escapeHtml(alt)}">
+  <span class="markdown-image-placeholder">
+    <strong>${escapeHtml(label)}</strong>
+    <span>Remote image preview is blocked by default.</span>
+    <a href="${escapeHtml(src)}" rel="noreferrer noopener">Open image</a>
+    <button type="button" class="secondary compact" data-image-feedback>Feedback</button>
+  </span>
+</span>`;
+      }
+
+      const resolvedSrc = this.resolveMarkdownImageSrc(src, env);
+
+      if (!resolvedSrc) {
+        return `<span class="markdown-image markdown-image-missing" data-markdown-image data-image-anchor="${escapeHtml(anchorText)}" data-image-src="${escapeHtml(src)}" data-image-alt="${escapeHtml(alt)}">
+  <span class="markdown-image-placeholder">
+    <strong>${escapeHtml(label)}</strong>
+    <span>Image source could not be resolved.</span>
+    <button type="button" class="secondary compact" data-image-feedback>Feedback</button>
+  </span>
+</span>`;
+      }
+
+      const titleAttribute = title ? ` title="${escapeHtml(title)}"` : '';
+      return `<span class="markdown-image" data-markdown-image data-image-anchor="${escapeHtml(anchorText)}" data-image-src="${escapeHtml(src)}" data-image-alt="${escapeHtml(alt)}">
+  <img src="${escapeHtml(resolvedSrc)}" alt="${escapeHtml(alt)}"${titleAttribute}>
+  <span class="markdown-image-actions">
+    <button type="button" class="secondary compact" data-image-feedback>Feedback</button>
+  </span>
+</span>`;
+    };
+
     this.markdown.renderer.rules.fence = (tokens, index, options, env, self) => {
       const token = tokens[index];
       const language = token.info.trim().split(/\s+/)[0]?.toLowerCase();
@@ -129,6 +174,50 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
     return this.currentDocumentUri;
   }
 
+  private getLocalResourceRoots(documentUri: vscode.Uri): vscode.Uri[] {
+    const roots = [this.context.extensionUri];
+    const workspaceFolder = vscode.workspace.getWorkspaceFolder(documentUri);
+
+    if (workspaceFolder) {
+      roots.push(workspaceFolder.uri);
+    }
+
+    if (documentUri.scheme === 'file') {
+      roots.push(vscode.Uri.file(path.dirname(documentUri.fsPath)));
+    }
+
+    return Array.from(new Map(roots.map(root => [root.toString(), root])).values());
+  }
+
+  private resolveMarkdownImageSrc(src: string, env: unknown): string | undefined {
+    const value = src.trim();
+
+    if (!value || /^data:/i.test(value) || isRemoteMarkdownImageSource(value)) {
+      return value || undefined;
+    }
+
+    const renderContext = env as { documentUri?: vscode.Uri; webview?: vscode.Webview };
+
+    if (!renderContext.documentUri || !renderContext.webview || renderContext.documentUri.scheme !== 'file') {
+      return undefined;
+    }
+
+    const withoutQuery = value.split(/[?#]/)[0] || value;
+    const imagePath = decodeMarkdownImagePath(withoutQuery);
+
+    if (/^[a-z][a-z0-9+.-]*:/i.test(imagePath) && !/^file:/i.test(imagePath)) {
+      return undefined;
+    }
+
+    const imageUri = /^file:/i.test(imagePath)
+      ? vscode.Uri.parse(imagePath)
+      : vscode.Uri.file(path.isAbsolute(imagePath)
+        ? imagePath
+        : path.resolve(path.dirname(renderContext.documentUri.fsPath), imagePath));
+
+    return renderContext.webview.asWebviewUri(imageUri).toString();
+  }
+
   async resolveCustomTextEditor(
     document: vscode.TextDocument,
     webviewPanel: vscode.WebviewPanel,
@@ -137,7 +226,7 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
     this.currentDocumentUri = document.uri;
     webviewPanel.webview.options = {
       enableScripts: true,
-      localResourceRoots: [this.context.extensionUri]
+      localResourceRoots: this.getLocalResourceRoots(document.uri)
     };
 
     const render = async (restoreState?: PreviewRestoreState) => {
@@ -963,7 +1052,10 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
     const nonce = randomUUID();
     const documentText = document.getText();
     const previewMarkdown = stripInlineAnchorMarkers(documentText);
-    const renderedMarkdown = this.markdown.render(previewMarkdown);
+    const renderedMarkdown = this.markdown.render(previewMarkdown, {
+      documentUri: document.uri,
+      webview
+    });
     const tables = collectMarkdownTables(previewMarkdown);
     const contextBootstrapNotice = this.renderContextBootstrapPromptAction(reviewDocument);
     const storageWarning = this.renderStorageWarning(documentText, reviewDocument);
@@ -1032,6 +1124,58 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
     }
     #markdown-body code {
       font-family: var(--vscode-editor-font-family);
+    }
+    #markdown-body img {
+      max-width: 100%;
+      height: auto;
+    }
+    .markdown-image {
+      position: relative;
+      display: inline-flex;
+      max-width: 100%;
+      margin: 8px 0;
+      vertical-align: middle;
+    }
+    .markdown-image img {
+      max-width: 100%;
+      height: auto;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: var(--vscode-editor-background);
+    }
+    .markdown-image-actions {
+      position: absolute;
+      top: 8px;
+      right: 8px;
+      display: none;
+      gap: 6px;
+    }
+    .markdown-image:hover .markdown-image-actions,
+    .markdown-image:focus-within .markdown-image-actions {
+      display: inline-flex;
+    }
+    .markdown-image.has-review img,
+    .markdown-image.review-anchor-block img {
+      border-color: #d7a100;
+      box-shadow: 0 0 0 1px rgba(215, 161, 0, 0.34);
+    }
+    .markdown-image-placeholder {
+      display: grid;
+      gap: 6px;
+      padding: 12px;
+      border: 1px dashed var(--border);
+      border-radius: 6px;
+      color: var(--muted);
+      background: var(--vscode-textCodeBlock-background);
+    }
+    .markdown-image-placeholder a {
+      color: var(--vscode-textLink-foreground);
+    }
+    .image-review-badge {
+      position: absolute;
+      top: -8px;
+      right: -8px;
+      z-index: 1;
     }
     aside {
       border-left: 1px solid var(--border);
@@ -2379,6 +2523,30 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
         }
       }
 
+      const imageFeedbackButton = target.closest('[data-image-feedback]');
+
+      if (imageFeedbackButton) {
+        event.preventDefault();
+        event.stopPropagation();
+        const image = imageFeedbackButton.closest('[data-markdown-image]');
+
+        if (image) {
+          activeSelectionText = getImageReviewAnchor(image);
+          activeSelectionOccurrence = 0;
+          activeSourceLine = getSourceLine(image);
+          const rect = image.getBoundingClientRect();
+          activeSelectionRect = {
+            left: rect.left,
+            right: rect.right,
+            top: rect.top,
+            bottom: rect.bottom
+          };
+          openComposer();
+        }
+
+        return;
+      }
+
       const commentTarget = target.closest('.review-badge, .review-anchor, .review-anchor-block, [data-mermaid-diagram].has-review');
 
       if (commentTarget) {
@@ -2446,6 +2614,7 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
     }
 
     renderClosedHistory(closedThreads);
+    decorateImageReviewBadges(openThreads);
     decorateReviewAnchors(openThreads);
     decorateMermaidReviewBadges(openThreads);
     attachRelatedThreadIds(openThreads);
@@ -2514,6 +2683,27 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
     function getMermaidSource(figure) {
       const sourceElement = figure.querySelector('.mermaid-source code');
       return String(sourceElement?.textContent || '').trim();
+    }
+
+    function getImageReviewAnchor(image) {
+      return String(
+        image?.getAttribute('data-image-anchor')
+        || image?.getAttribute('data-image-alt')
+        || image?.getAttribute('data-image-src')
+        || ''
+      ).trim();
+    }
+
+    function getSearchableElementText(element) {
+      if (element?.matches?.('[data-markdown-image]')) {
+        return [
+          element.getAttribute('data-image-anchor') || '',
+          element.getAttribute('data-image-alt') || '',
+          element.getAttribute('data-image-src') || ''
+        ].join(' ');
+      }
+
+      return element?.textContent || '';
     }
 
     function getSourceLine(element) {
@@ -3035,7 +3225,10 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
       for (const thread of threads) {
         const anchorText = normalizeInline(thread.anchor?.text || '');
 
-        if (!anchorText || anchorText.length < 2 || looksLikeMermaidSource(anchorText)) {
+        if (!anchorText
+          || anchorText.length < 2
+          || looksLikeMermaidSource(anchorText)
+          || looksLikeMarkdownImageAnchor(anchorText)) {
           continue;
         }
 
@@ -3113,12 +3306,12 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
     }
 
     function highlightContainingBlock(thread, anchorText) {
-      const candidates = Array.from(markdownBody.querySelectorAll('p, li, h1, h2, h3, h4, h5, h6, td, th, blockquote'));
+      const candidates = Array.from(markdownBody.querySelectorAll('p, li, h1, h2, h3, h4, h5, h6, td, th, blockquote, [data-markdown-image]'));
       let remaining = getAnchorOccurrence(thread);
       let target;
 
       for (const element of candidates) {
-        if (shouldSkipHighlightParent(element) || !normalizeInline(element.textContent || '').includes(anchorText)) {
+        if (shouldSkipHighlightParent(element) || !normalizeInline(getSearchableElementText(element)).includes(anchorText)) {
           continue;
         }
 
@@ -3140,7 +3333,7 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
     }
 
     function highlightContextBlock(thread, anchorText) {
-      const candidates = Array.from(markdownBody.querySelectorAll('[data-source-line], p, li, h1, h2, h3, h4, h5, h6, td, th, blockquote'));
+      const candidates = Array.from(markdownBody.querySelectorAll('[data-source-line], p, li, h1, h2, h3, h4, h5, h6, td, th, blockquote, [data-markdown-image]'));
       let best;
       let bestScore = 0;
 
@@ -3205,9 +3398,9 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
 
     function getElementContextText(element) {
       return [
-        element.previousElementSibling?.textContent || '',
-        element.textContent || '',
-        element.nextElementSibling?.textContent || ''
+        getSearchableElementText(element.previousElementSibling),
+        getSearchableElementText(element),
+        getSearchableElementText(element.nextElementSibling)
       ].join(' ');
     }
 
@@ -3343,6 +3536,34 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
         for (const thread of matches) {
           setAnchorState(thread, 'exact', figure);
           reportLocatedAnchor(figure, thread, 'exact');
+        }
+      }
+    }
+
+    function decorateImageReviewBadges(threads) {
+      const images = Array.from(document.querySelectorAll('[data-markdown-image]'));
+
+      for (const image of images) {
+        const imageAnchor = normalizeInline(getImageReviewAnchor(image));
+        const imageAlt = normalizeInline(image.getAttribute('data-image-alt') || '');
+        const imageSrc = normalizeInline(image.getAttribute('data-image-src') || '');
+        const matches = threads.filter((thread) => {
+          const anchorText = normalizeInline(thread.anchor?.text || '');
+
+          return Boolean(anchorText)
+            && (anchorText === imageAnchor
+              || anchorText === imageAlt
+              || anchorText === imageSrc);
+        });
+
+        if (matches.length === 0) {
+          continue;
+        }
+
+        image.classList.add('has-review');
+
+        for (const thread of matches) {
+          attachThreadToAnchorElement(image, thread, 'image-review-badge', 'exact');
         }
       }
     }
@@ -4233,9 +4454,9 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
         return undefined;
       }
 
-      const candidates = Array.from(markdownBody.querySelectorAll('p, li, h1, h2, h3, h4, h5, h6, td, th, blockquote, [data-source-line]')).filter((element) => {
+      const candidates = Array.from(markdownBody.querySelectorAll('p, li, h1, h2, h3, h4, h5, h6, td, th, blockquote, [data-source-line], [data-markdown-image]')).filter((element) => {
         return !shouldSkipHighlightParent(element)
-          && normalizeInline(element.textContent || '').includes(anchorText);
+          && normalizeInline(getSearchableElementText(element)).includes(anchorText);
       });
 
       if (candidates.length === 0) {
@@ -4249,7 +4470,7 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
           .map((element) => ({
             element,
             lineDistance: sourceLineDistance(element, preferredLine),
-            exactness: normalizeInline(element.textContent || '') === anchorText ? 0 : 1
+            exactness: normalizeInline(getSearchableElementText(element)) === anchorText ? 0 : 1
           }))
           .sort((left, right) => left.lineDistance - right.lineDistance || left.exactness - right.exactness)[0]?.element;
       }
@@ -4307,6 +4528,10 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
 
     function looksLikeMermaidSource(value) {
       return /\\b(flowchart|graph|sequenceDiagram|classDiagram|stateDiagram|erDiagram|journey|gantt|pie|mindmap|timeline|gitGraph)\\b/i.test(value);
+    }
+
+    function looksLikeMarkdownImageAnchor(value) {
+      return /^!\\[[^\\]]*\\]\\(.+\\)$/.test(String(value).trim());
     }
 
     function getAnchorOccurrence(thread) {
@@ -4752,6 +4977,14 @@ function escapeHtml(value: string): string {
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#039;');
+}
+
+function decodeMarkdownImagePath(value: string): string {
+  try {
+    return decodeURI(value);
+  } catch {
+    return value;
+  }
 }
 
 function parseOccurrence(value: unknown): number | undefined {

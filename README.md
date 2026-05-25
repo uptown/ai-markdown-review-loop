@@ -27,6 +27,7 @@ choose.
 ## Highlights
 
 - Rendered Markdown review preview with visible comment highlights and badges.
+- Local Markdown images render inside the review preview with image-level feedback buttons and badges.
 - Split review command for source and rendered preview side by side.
 - Read-only comment overlays from highlighted regions or badges.
 - Review thread replies with consistent `You` and `AI` attribution.
@@ -37,6 +38,21 @@ choose.
 - Anchor confidence states such as `Located`, `Recovered`, `Approximate`, and `Needs re-anchor`.
 - Generic bootstrap and feedback-loop prompts for AI agents that need to preserve review metadata.
 - Threads-first feedback export for agent handoff.
+
+## Images
+
+Local Markdown images render in the review preview through VS Code-safe webview
+URIs, so images next to a spec can be reviewed without leaving the loop:
+
+```md
+![Launch architecture](./assets/launch-architecture.png "Draft architecture")
+```
+
+Each rendered image can receive feedback from its `Feedback` button. Open image
+threads show the same badges, overlays, replies, history, and agent export
+behavior as text, table, and Mermaid feedback. Remote `http` and `https` images
+are not loaded automatically; the preview shows a reviewable placeholder with an
+external link instead.
 
 ## Install And Use
 

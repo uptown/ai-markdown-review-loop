@@ -12,6 +12,11 @@ This file is for maintainers preparing a Visual Studio Marketplace release.
 
 ## Version And Changelog
 
+Before every versioned change, attach a release manager review agent or run an
+equivalent release-manager pass. That pass owns version metadata, changelog
+accuracy, Marketplace-facing README/package copy, notice coverage, package
+hygiene, and whether visual assets need regeneration.
+
 1. Move user-facing entries from `Unreleased` into a dated version section.
 2. Run `npm version <version> --no-git-tag-version`.
 3. Do not let `vsce publish` create a version commit/tag automatically unless
