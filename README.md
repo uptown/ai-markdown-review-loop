@@ -173,7 +173,7 @@ Suggested replacement patches are treated as document edits, not just review dec
 
 When AI revises a patch in discussion, the feedback-loop prompt asks it to use a `Suggested patch revision:` label with a fenced `diff` block. That keeps revised patch candidates readable to humans without treating every reply as an immediately applyable edit.
 
-Rendered block edits use the same review-aware edit pipeline. The editor is intentionally constrained to source-mapped Markdown blocks instead of replacing the whole file with a free-form WYSIWYG surface, so open comments can stay attached to the edited range and ordinary source edits still fall back to debounced re-anchoring.
+Rendered block edits use the same review-aware edit pipeline. The editor is intentionally constrained to source-mapped Markdown blocks instead of replacing the whole file with a free-form WYSIWYG surface, so open comments can stay attached to the edited range and ordinary source edits still fall back to debounced re-anchoring. Use the block controls to edit, rewrite, add a block below, delete a block, or switch to raw Markdown when the original source syntax matters.
 
 Rendered Markdown tables get a dedicated grid editor instead of the generic block editor. Use `Edit Table` from the preview table controls to edit header/body cells, add or remove rows and columns, choose column alignment, and save back to pipe-table Markdown through the same review-aware edit and undo path.
 

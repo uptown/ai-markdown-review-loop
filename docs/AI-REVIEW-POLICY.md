@@ -84,6 +84,8 @@ Use `low` for non-blocking improvements that still deserve review attention.
 - New AI-authored threads should start as `source: "ai"` and `status: "open"`.
 - AI must not close threads as `accepted`, `resolved`, or `rejected` unless the user explicitly asks for that decision.
 - AI should preserve colocated `.<filename>.ai-review.json` sidecar review files during normal edits.
+- The sidecar is extension-owned persistence. Do not validate, strip, or rewrite existing `openThreads` or `closedThreads` with the proposed-thread schema.
+- If a normal Markdown edit touches nearby review state, preserve full sidecar thread objects and all anchor metadata, including `hash`, `confidence`, `lastLocatedLine`, `lastLocatedAt`, `contextBefore`, and `contextAfter`.
 - AI should not create inline `ai-review-*` metadata comments. Older inline metadata is legacy recovery data and should only be cleaned when the user asks.
 
 ## Machine Contract
@@ -95,6 +97,11 @@ Future AI-created thread proposals should conform to:
 The host system assigns `id`, `documentUri`, `createdAt`, and `updatedAt`.
 AI proposals should provide the semantic payload: anchor, type, severity,
 comment, and optional suggested patch.
+
+This is a proposal schema, not the sidecar persistence schema. Existing
+`openThreads` and `closedThreads` are full host-owned thread records and may
+contain richer anchor fields than the proposal schema allows. Preserving those
+fields is required for reliable re-anchoring and review history.
 
 ## Example Good Thread
 

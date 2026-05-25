@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://uptown.github.io/ai-markdown-review-loop/schemas/agent-review-thread.schema.json",
   "title": "AI Proposed Review Thread",
-  "description": "Machine-readable payload for a future AI-generated review thread proposal before the host assigns ids and timestamps.",
+  "description": "Machine-readable payload for a future AI-generated open review thread proposal before the host assigns ids and timestamps. This is not the sidecar persistence schema and must not be used to validate, strip, or rewrite existing openThreads or closedThreads.",
   "type": "object",
   "additionalProperties": false,
   "required": [

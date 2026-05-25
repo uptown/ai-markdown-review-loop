@@ -21,6 +21,8 @@ export function createContextBootstrapPrompt(): string {
     'Editing rules:',
     '- Prefer small, localized Markdown edits over whole-document rewrites.',
     '- Preserve nearby hidden `.<filename>.ai-review.json` sidecars. They are the review source of truth; do not create inline `ai-review-*` metadata comments.',
+    '- Do not rewrite or normalize sidecar JSON by hand. The host extension owns existing thread and history records; preserve full thread objects and all anchor metadata if the file is touched by normal Markdown edits.',
+    '- The proposed-thread schema is only for proposing new AI-authored open feedback to a host. Never use that proposal schema to validate, strip, or rewrite existing sidecar records.',
     '- If an edit moves, changes, or invalidates a commented span, keep the thread visible and report the affected `rv_*` id instead of silently deleting it.',
     '',
     'Final response:',

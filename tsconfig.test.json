@@ -7,6 +7,7 @@
   },
   "include": [
     "src/anchorText.ts",
+    "src/anchorMatching.ts",
     "src/agentReviewPolicy.ts",
     "src/exportFeedback.ts",
     "src/htmlToMarkdown.ts",
@@ -21,6 +22,7 @@
     "src/reviewSidecarCodec.ts",
     "src/reviewSidecarPaths.ts",
     "src/replyShortcuts.ts",
+    "src/sourceMappedMarkdown.ts",
     "src/suggestedPatches.ts",
     "src/tableEdits.ts",
     "src/types.ts",

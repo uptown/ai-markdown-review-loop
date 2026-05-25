@@ -2,7 +2,7 @@
   "name": "ai-markdown-review-loop",
   "displayName": "AI Markdown Review Loop",
   "description": "Turn Markdown specs into review threads: comment on rendered text, images, tables, and diagrams while preserving AI/human feedback.",
-  "version": "0.0.12",
+  "version": "0.0.13",
   "publisher": "uptown",
   "license": "MIT",
   "repository": {

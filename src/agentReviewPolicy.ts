@@ -7,6 +7,8 @@ export const AGENT_EDITING_GUIDELINES = [
   'Treat the Markdown document and its review sidecar as one review state.',
   'Work on open review threads only unless the user explicitly asks you to inspect closed history.',
   'Treat the colocated hidden `.<filename>.ai-review.json` sidecar as the canonical review state.',
+  'The sidecar is extension-owned persistence. Do not validate, strip, or rewrite existing `openThreads` or `closedThreads` using the AI proposed-thread schema.',
+  'If a sidecar is touched during normal Markdown edits, preserve full thread objects and all anchor fields, including hash, confidence, last-located line data, context snippets, replies, closedBy, and closedAt.',
   'Do not create inline `ai-review-*` metadata comments; older inline metadata is legacy recovery data and should only be cleaned when the user asks.',
   'Prefer localized edits over whole-document rewrites so anchors can keep tracking nearby content.',
   'When editing text with open feedback, keep enough nearby context stable for anchor recovery.',
@@ -30,6 +32,8 @@ export const AGENT_COMMENTING_GUIDELINES = [
 export const AGENT_THREAD_CREATION_CONTRACT = [
   `Canonical review policy: ${AGENT_REVIEW_POLICY_DOC_PATH}`,
   `Canonical creation schema: ${AGENT_REVIEW_THREAD_SCHEMA_PATH}`,
+  'This schema is only for proposing new AI-authored open review threads before the host creates full sidecar records.',
+  'Do not apply this schema to existing sidecar `openThreads` or `closedThreads`; those records intentionally contain host-owned fields and richer anchor metadata.',
   'When proposing a new AI-authored review thread, emit one JSON object per proposed thread.',
   'The host system owns `id`, `documentUri`, `createdAt`, and `updatedAt`; do not invent or guess those values.',
   'Always set `source` to `ai` and `status` to `open`.',

@@ -123,6 +123,11 @@ The generated bootstrap prompt should tell the AI to:
 - treat Review Threads as conversation state rather than disposable comments
 - preserve nearby `.<filename>.ai-review.json` sidecars during normal Markdown
   edits and avoid creating inline `ai-review-*` metadata comments
+- avoid rewriting sidecar `openThreads` or `closedThreads` by hand; if a
+  sidecar is touched, preserve full thread objects and all anchor metadata
+- treat `docs/agent-review-thread.schema.json` as a proposal schema for new
+  AI-authored open feedback only, not as the schema for existing sidecar
+  history
 - prefer localized edits over whole-document rewrites
 - apply suggested Markdown changes only when the human explicitly asks
 - report every touched `rv_*` thread with an outcome

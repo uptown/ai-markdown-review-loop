@@ -7,6 +7,8 @@ const contextRadius = 180;
 export type ReviewAwareEditActor = 'user' | 'assistant';
 export type ReviewAwareEditIntent =
   | 'apply_suggestion'
+  | 'delete_block'
+  | 'insert_block'
   | 'manual_block_edit'
   | 'manual_table_edit'
   | 'manual_mermaid_edit'
@@ -23,6 +25,7 @@ export interface ReviewAwareEditPlan {
   intent: ReviewAwareEditIntent;
   targetThreadId?: string;
   closeTargetAs?: ClosingReviewStatus;
+  affectsExistingThreads?: boolean;
 }
 
 export interface CreateOffsetEditPlanInput {
@@ -43,6 +46,20 @@ export interface CreateLineRangeEditPlanInput {
   intent: ReviewAwareEditIntent;
   targetThreadId?: string;
   closeTargetAs?: ClosingReviewStatus;
+}
+
+export interface CreateLineRangeDeletePlanInput {
+  lineStart: number;
+  lineEnd: number;
+  actor: ReviewAwareEditActor;
+  intent: Extract<ReviewAwareEditIntent, 'delete_block'>;
+}
+
+export interface CreateLineInsertionEditPlanInput {
+  afterLine: number;
+  replacement: string;
+  actor: ReviewAwareEditActor;
+  intent: Extract<ReviewAwareEditIntent, 'insert_block'>;
 }
 
 export interface ReviewAwareThreadUpdate {
@@ -95,6 +112,55 @@ export function createLineRangeEditPlan(
     intent: input.intent,
     targetThreadId: input.targetThreadId,
     closeTargetAs: input.closeTargetAs
+  };
+}
+
+export function createLineRangeDeletePlan(
+  markdown: string,
+  input: CreateLineRangeDeletePlanInput
+): ReviewAwareEditPlan {
+  const lineStart = normalizeLineNumber(input.lineStart);
+  const lineEnd = Math.max(lineStart, normalizeLineNumber(input.lineEnd));
+  const start = lineStartOffset(markdown, lineStart);
+  const end = lineEndOffsetIncludingFollowingNewline(markdown, lineEnd);
+  const deletionStart = end === markdown.length
+    ? lineStartOffsetIncludingPreviousNewline(markdown, start)
+    : start;
+
+  return {
+    start: deletionStart,
+    end,
+    replacement: '',
+    lineStart,
+    lineEnd,
+    actor: input.actor,
+    intent: input.intent
+  };
+}
+
+export function createLineInsertionEditPlan(
+  markdown: string,
+  input: CreateLineInsertionEditPlanInput
+): ReviewAwareEditPlan {
+  const afterLine = normalizeLineNumber(input.afterLine);
+  const start = lineEndOffset(markdown, afterLine);
+  const normalizedReplacement = normalizeInsertionBlock(markdown, input.replacement);
+  const replacement = createInsertionReplacement(markdown, start, normalizedReplacement);
+  const insertedLineCount = Math.max(
+    1,
+    countLineBreaks(normalizedReplacement) + (normalizedReplacement ? 1 : 0)
+  );
+  const lineStart = markdown.length === 0 ? 1 : afterLine + 1;
+
+  return {
+    start,
+    end: start,
+    replacement,
+    lineStart,
+    lineEnd: lineStart + insertedLineCount - 1,
+    actor: input.actor,
+    intent: input.intent,
+    affectsExistingThreads: false
   };
 }
 
@@ -336,6 +402,10 @@ function isAffectedThread(thread: ReviewThread, plan: ReviewAwareEditPlan): bool
     return true;
   }
 
+  if (plan.affectsExistingThreads === false) {
+    return false;
+  }
+
   const threadLineStart = thread.anchor.lastLocatedLine ?? thread.anchor.lineStart;
 
   if (!threadLineStart) {
@@ -370,6 +440,14 @@ function createOutcomeReplyText(thread: ReviewThread, plan: ReviewAwareEditPlan)
 
   if (plan.intent === 'manual_mermaid_edit') {
     return 'Review update: edited the Mermaid source and kept this comment attached.';
+  }
+
+  if (plan.intent === 'delete_block') {
+    return 'Review update: deleted the reviewed block; this comment now needs re-anchor or closure.';
+  }
+
+  if (plan.intent === 'insert_block') {
+    return 'Review update: inserted a new Markdown block near this comment.';
   }
 
   if (plan.intent === 'manual_table_edit') {
@@ -433,6 +511,77 @@ function lineEndOffset(text: string, oneBasedLine: number): number {
   }
 
   return text.length;
+}
+
+function createInsertionReplacement(markdown: string, offset: number, normalizedReplacement: string): string {
+  const eol = detectLineEnding(markdown);
+
+  if (!normalizedReplacement) {
+    return '';
+  }
+
+  if (markdown.length === 0) {
+    return normalizedReplacement;
+  }
+
+  const prefix = offset > 0 ? eol : '';
+  return `${prefix}${normalizedReplacement}`;
+}
+
+function normalizeInsertionBlock(markdown: string, replacement: string): string {
+  const eol = detectLineEnding(markdown);
+  return stripOuterLineBreaks(replacement).replace(/\r\n|\r|\n/g, eol);
+}
+
+function detectLineEnding(text: string): string {
+  const match = text.match(/\r\n|\r|\n/);
+  return match?.[0] ?? '\n';
+}
+
+function stripOuterLineBreaks(value: string): string {
+  return value.replace(/^(?:\r\n|\r|\n)+|(?:\r\n|\r|\n)+$/g, '');
+}
+
+function countLineBreaks(value: string): number {
+  return (value.match(/\r\n|\r|\n/g) ?? []).length;
+}
+
+function lineEndOffsetIncludingFollowingNewline(text: string, lineEnd: number): number {
+  const end = lineEndOffset(text, lineEnd);
+
+  if (end < text.length) {
+    const char = text.charCodeAt(end);
+
+    if (char === 13 && text.charCodeAt(end + 1) === 10) {
+      return end + 2;
+    }
+
+    if (char === 10 || char === 13) {
+      return end + 1;
+    }
+  }
+
+  return end;
+}
+
+function lineStartOffsetIncludingPreviousNewline(text: string, start: number): number {
+  if (start <= 0) {
+    return 0;
+  }
+
+  const previous = text.charCodeAt(start - 1);
+
+  if (previous === 10) {
+    return start >= 2 && text.charCodeAt(start - 2) === 13
+      ? start - 2
+      : start - 1;
+  }
+
+  if (previous === 13) {
+    return start - 1;
+  }
+
+  return start;
 }
 
 function normalizeLineNumber(value: number): number {

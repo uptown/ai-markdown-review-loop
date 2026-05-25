@@ -34,6 +34,9 @@ This extension is built around repeated document-review loops between human auth
 - `Manual edit`: change the Markdown directly from source or a rendered editor. This does not close a thread by itself.
 - `Apply Patch and Close`: extension action for a suggested replacement patch. It mutates the Markdown and closes the thread as `accepted` only when the original text has one exact current Markdown target.
 - `Edit block`: constrained rendered-preview Markdown editing for a source-mapped block. It mutates Markdown and refreshes overlapping thread anchors without deciding review status.
+- `Raw block edit`: source-level mode inside the rendered block editor for list markers, indentation, and other Markdown syntax that should not be reconstructed from HTML.
+- `Add block`: insert a new Markdown block below a source-mapped block without treating existing review threads as edited.
+- `Delete block`: remove a source-mapped block through the review-aware edit pipeline and keep affected comments visible as needing re-anchor or closure.
 - `Edit Mermaid`: source editor for a Mermaid fenced code block. It replaces only that fenced block and refreshes overlapping thread anchors without deciding review status.
 - `Rewrite block`: manual rewrite path that uses the same review-aware edit pipeline reserved for future AI rewrite integration.
 - `Resolve`: close because the underlying issue has been handled, superseded, or no longer applies.
@@ -110,10 +113,11 @@ Any future AI reviewer integration should use these canonical inputs:
 ### Rendered Block Edit
 
 1. A paragraph has one or more open comments attached.
-2. The author opens the block editor from the rendered preview.
-3. The extension replaces only the source-mapped Markdown lines for that block.
-4. Overlapping open threads receive refreshed anchor text, line hints, hash, context snippets, and an edit outcome reply.
-5. Ordinary source edits outside this pipeline still use debounced re-anchor fallback and only persist high-confidence locations.
+2. The author opens the block editor from the rendered preview, optionally switches to raw Markdown mode, or inserts a new block below the current block.
+3. The extension replaces or inserts only the source-mapped Markdown lines for that operation.
+4. Overlapping open threads receive refreshed anchor text, line hints, hash, context snippets, and an edit outcome reply; inserted blocks do not mark existing threads as edited.
+5. Deleting a reviewed block keeps affected comments visible with missing-anchor state instead of silently dropping them.
+6. Ordinary source edits outside this pipeline still use debounced re-anchor fallback and only persist high-confidence locations.
 
 ### Mermaid Source Edit
 

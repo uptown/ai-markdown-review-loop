@@ -85,6 +85,10 @@ describe('renderFeedbackExport', () => {
     assert.match(output, /review goal, focus areas, non-goals, constraints/);
     assert.match(output, /Canonical review policy: docs\/AI-REVIEW-POLICY.md/);
     assert.match(output, /Canonical creation schema: docs\/agent-review-thread.schema.json/);
+    assert.match(output, /sidecar is extension-owned persistence/i);
+    assert.match(output, /Do not validate, strip, or rewrite existing `openThreads` or `closedThreads`/);
+    assert.match(output, /only for proposing new AI-authored open review threads/);
+    assert.match(output, /Do not apply this schema to existing sidecar `openThreads` or `closedThreads`/);
     assert.match(output, /Canonical collaboration loop: docs\/AI-COLLABORATION-LOOP.md/);
     assert.match(output, /Canonical context bootstrap: docs\/AI-CONTEXT-BOOTSTRAP.md/);
     assert.match(output, /bootstrap prompt, not from a status panel or a blank context file/);

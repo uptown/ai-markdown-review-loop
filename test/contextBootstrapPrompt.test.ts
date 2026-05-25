@@ -21,6 +21,11 @@ describe('createContextBootstrapPrompt', () => {
     assert.match(prompt, /Apply a suggested Markdown change only when the human explicitly asks/i);
     assert.match(prompt, /hidden `\.<filename>\.ai-review\.json` sidecars/);
     assert.match(prompt, /review source of truth/);
+    assert.match(prompt, /Do not rewrite or normalize sidecar JSON by hand/);
+    assert.match(prompt, /extension owns existing thread and history records/);
+    assert.match(prompt, /preserve full thread objects and all anchor metadata/);
+    assert.match(prompt, /proposed-thread schema is only for proposing new AI-authored open feedback/);
+    assert.match(prompt, /Never use that proposal schema to validate, strip, or rewrite existing sidecar records/);
     assert.match(prompt, /do not create inline `ai-review-\*` metadata comments/);
     assert.match(prompt, /List every touched `rv_\*` id/);
     assert.doesNotMatch(prompt, /Detected Sources/);

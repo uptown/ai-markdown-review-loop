@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import { selectAnchorMatch } from './anchorMatching';
 import { hashAnchor, normalizeAnchorText } from './anchorText';
 import type { ReviewAnchor } from './types';
 
@@ -7,6 +8,7 @@ export { hashAnchor, normalizeAnchorText } from './anchorText';
 interface AnchorOptions {
   occurrence?: number;
   lineHint?: number;
+  lineEndHint?: number;
 }
 
 const contextRadius = 180;
@@ -21,12 +23,21 @@ export function createAnchor(
   const fullText = document.getText();
   const occurrence = normalizeOccurrence(options.occurrence);
   const lineHint = normalizeLineHint(document, options.lineHint);
+  const lineEndHint = normalizeLineEndHint(document, lineHint, options.lineEndHint);
   let match = exact.length > 0
-    ? pickOccurrence(document, findAllMatches(fullText, exact), occurrence, lineHint)
+    ? selectAnchorMatch(fullText, exact, {
+      occurrence,
+      lineStartHint: lineHint,
+      lineEndHint
+    })
     : undefined;
 
   if (!match && normalized.length > 0) {
-    match = pickOccurrence(document, findAllMatches(fullText, normalized), occurrence, lineHint);
+    match = selectAnchorMatch(fullText, normalized, {
+      occurrence,
+      lineStartHint: lineHint,
+      lineEndHint
+    });
   }
 
   if (!match) {
@@ -74,58 +85,18 @@ function normalizeLineHint(document: vscode.TextDocument, value: number | undefi
   return Math.max(1, Math.min(document.lineCount, Math.floor(value)));
 }
 
-function findAllMatches(
-  text: string,
-  needle: string,
-  startOffset = 0
-): Array<{ index: number; length: number }> {
-  const matches: Array<{ index: number; length: number }> = [];
-  let index = text.indexOf(needle, startOffset);
-
-  while (index >= 0) {
-    matches.push({ index, length: needle.length });
-    index = text.indexOf(needle, index + Math.max(1, needle.length));
-  }
-
-  return matches;
-}
-
-function pickOccurrence(
+function normalizeLineEndHint(
   document: vscode.TextDocument,
-  matches: Array<{ index: number; length: number }>,
-  occurrence: number,
-  lineHint?: number
-): { index: number; length: number } | undefined {
-  if (matches.length === 0) {
-    return undefined;
+  lineStart: number | undefined,
+  value: number | undefined
+): number | undefined {
+  const lineEnd = normalizeLineHint(document, value);
+
+  if (!lineStart || !lineEnd) {
+    return lineEnd;
   }
 
-  const requestedMatch = matches[Math.min(occurrence, matches.length - 1)];
-
-  if (lineHint === undefined) {
-    return requestedMatch;
-  }
-
-  if (lineForMatch(document, requestedMatch) === lineHint) {
-    return requestedMatch;
-  }
-
-  const lineMatches = matches.filter(match => lineForMatch(document, match) === lineHint);
-
-  if (lineMatches.length > 0) {
-    return lineMatches[Math.min(occurrence, lineMatches.length - 1)];
-  }
-
-  const lineStartOffset = document.offsetAt(new vscode.Position(lineHint - 1, 0));
-  const laterMatch = matches.find(match => match.index >= lineStartOffset);
-  return laterMatch ?? requestedMatch;
-}
-
-function lineForMatch(
-  document: vscode.TextDocument,
-  match: { index: number; length: number }
-): number {
-  return document.positionAt(match.index).line + 1;
+  return Math.max(lineStart, lineEnd);
 }
 
 function createOffsetContext(

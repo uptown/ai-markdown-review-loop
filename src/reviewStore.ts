@@ -374,7 +374,7 @@ export class ReviewStore {
           JSON.parse(decoder.decode(portableBytes))
         );
       } catch (error) {
-        throw new Error(`Review sidecar is invalid: ${formatError(error)}`);
+        throw new Error(`Review sidecar is invalid: ${formatError(error)} If this happened after an AI edit, undo or restore the sidecar, and do not validate, strip, or rewrite existing openThreads or closedThreads with docs/agent-review-thread.schema.json; that schema is only for new AI-authored thread proposals.`);
       }
     }
 

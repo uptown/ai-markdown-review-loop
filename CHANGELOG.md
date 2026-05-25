@@ -4,6 +4,15 @@
 
 - None.
 
+## 0.0.13 - 2026-05-26
+
+- Adds rendered-preview block insertion below a source-mapped block through the review-aware edit path.
+- Adds raw Markdown mode to the rendered block editor so list markers and other source syntax can be edited directly.
+- Adds rendered-block deletion with affected comment anchors preserved as missing instead of silently dropped.
+- Highlights the currently selected draft comment range while the selected-text composer is open.
+- Improves multiline list selection source-line capture so comments attach to the selected list rows instead of a nearby header.
+- Clarifies AI prompts and policy docs so agents do not confuse the new-thread proposal schema with the full sidecar `openThreads`/`closedThreads` persistence format.
+
 ## 0.0.12 - 2026-05-26
 
 - Hides YAML front matter from the rendered review preview while preserving source line mapping for anchors and edits.

@@ -35,7 +35,18 @@ describe('agent review policy', () => {
     );
     assert.ok(schema.properties?.anchor);
     assert.ok(schema.properties?.suggestedPatch);
+    assert.match(String((schema as { description?: string }).description), /not the sidecar persistence schema/);
     assert.match(policy, /Schema: \[`docs\/agent-review-thread.schema.json`\]/);
+    assert.match(policy, /proposal schema, not the sidecar persistence schema/);
+    assert.match(policy, /Existing\s+`openThreads` and `closedThreads` are full host-owned thread records/);
+    assert.match(
+      AGENT_EDITING_GUIDELINES.join('\n'),
+      /Do not validate, strip, or rewrite existing `openThreads` or `closedThreads`/
+    );
+    assert.match(
+      AGENT_THREAD_CREATION_CONTRACT.join('\n'),
+      /Do not apply this schema to existing sidecar `openThreads` or `closedThreads`/
+    );
   });
 
   it('ships collaboration-loop and context-bootstrap docs for first-pass grounding', () => {
@@ -51,6 +62,8 @@ describe('agent review policy', () => {
     assert.match(bootstrap, /discover only the repo context needed/);
     assert.match(bootstrap, /nearby `\.<filename>\.ai-review\.json` sidecars/);
     assert.match(bootstrap, /avoid creating inline `ai-review-\*` metadata comments/);
+    assert.match(bootstrap, /avoid rewriting sidecar `openThreads` or `closedThreads` by hand/);
+    assert.match(bootstrap, /proposal schema for new\s+AI-authored open feedback only/);
     assert.match(bootstrap, /not embed the context brief template/);
     assert.doesNotMatch(bootstrap, /docs\/AI-CONTEXT-BRIEF.md/);
     assert.doesNotMatch(bootstrap, /docs\/PRD.md/);

@@ -22,6 +22,8 @@ import { ReviewStore } from './reviewStore';
 import {
   applyReviewAwareEditToMarkdown,
   buildReviewAwareThreadUpdates,
+  createLineInsertionEditPlan,
+  createLineRangeDeletePlan,
   createLineRangeEditPlan,
   createOffsetEditPlan,
   ReviewAwareEditIntent,
@@ -31,6 +33,7 @@ import { createReviewAnchorIdentityKey } from './reviewAnchorIdentity';
 import { getReplyShortcutDescriptors } from './replyShortcuts';
 import { createRestoredReviewThread, getReviewHistoryAnchorStates } from './reviewHistory';
 import { restoreReviewSidecarSnapshot, ReviewUndoController } from './reviewUndo';
+import { applySourceLineMapping } from './sourceMappedMarkdown';
 import {
   ApplyPatchResult,
   getSuggestedPatchResults,
@@ -69,38 +72,7 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
     this.anchorMaintenance = new AnchorMaintenanceController(store);
     this.reviewUndo = new ReviewUndoController(store);
     const defaultFence = this.markdown.renderer.rules.fence;
-    const sourceMappedRules = [
-      'paragraph_open',
-      'heading_open',
-      'blockquote_open',
-      'list_item_open',
-      'table_open',
-      'tr_open'
-    ];
-
-    for (const ruleName of sourceMappedRules) {
-      const defaultRule = this.markdown.renderer.rules[ruleName];
-
-      this.markdown.renderer.rules[ruleName] = (tokens, index, options, env, self) => {
-        const token = tokens[index];
-        const sourceLine = token.map?.[0];
-        const sourceLineEnd = token.map?.[1];
-
-        if (typeof sourceLine === 'number') {
-          token.attrSet('data-source-line', String(sourceLine + 1));
-        }
-
-        if (typeof sourceLineEnd === 'number') {
-          token.attrSet('data-source-line-end', String(sourceLineEnd));
-        }
-
-        if (defaultRule) {
-          return defaultRule(tokens, index, options, env, self);
-        }
-
-        return self.renderToken(tokens, index, options);
-      };
-    }
+    applySourceLineMapping(this.markdown);
 
     this.markdown.renderer.rules.image = (tokens, index, _options, env) => {
       const token = tokens[index];
@@ -278,9 +250,10 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
             document,
             String(message.anchorText ?? ''),
             typeof message.comment === 'string' ? message.comment : undefined,
-          parseOccurrence(message.anchorOccurrence),
-          parseSourceLine(message.sourceLine)
-        );
+            parseOccurrence(message.anchorOccurrence),
+            parseSourceLine(message.sourceLine),
+            parseSourceLine(message.sourceLineEnd)
+          );
           await render();
         }
 
@@ -430,13 +403,16 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
             return;
           }
 
-          const replacementMarkdown = htmlBlockToMarkdown(String(message.html ?? ''), {
-            sourceMarkdown: document.getText(),
-            oneBasedLineStart: lineStart
-          });
+          const sourceMarkdown = document.getText();
+          const replacementMarkdown = createMarkdownBlockReplacement(message, sourceMarkdown, lineStart);
+
+          if (!replacementMarkdown.trim()) {
+            vscode.window.showWarningMessage('Markdown block edit is empty. Use Delete to remove a block.');
+            return;
+          }
 
           await this.anchorMaintenance.flush(document);
-          const plan = createLineRangeEditPlan(document.getText(), {
+          const plan = createLineRangeEditPlan(sourceMarkdown, {
             lineStart,
             lineEnd,
             replacement: replacementMarkdown,
@@ -451,6 +427,77 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
           }
 
           vscode.window.showInformationMessage('Updated Markdown and refreshed affected review anchors.');
+          await render();
+        }
+
+        if (message?.type === 'insertMarkdownBlock') {
+          const afterLine = parseSourceLine(message.afterLine);
+
+          if (!afterLine) {
+            vscode.window.showWarningMessage('Ignored invalid Markdown block insert.');
+            return;
+          }
+
+          const sourceMarkdown = document.getText();
+          const replacementMarkdown = createMarkdownBlockReplacement(message, sourceMarkdown, afterLine + 1);
+
+          if (!replacementMarkdown.trim()) {
+            vscode.window.showWarningMessage('Markdown block insert is empty.');
+            return;
+          }
+
+          await this.anchorMaintenance.flush(document);
+          const plan = createLineInsertionEditPlan(sourceMarkdown, {
+            afterLine,
+            replacement: replacementMarkdown,
+            actor: 'user',
+            intent: 'insert_block'
+          });
+          const applied = await this.applyReviewAwareEdit(document, plan);
+
+          if (!applied) {
+            vscode.window.showWarningMessage('Markdown block insert could not be applied.');
+            return;
+          }
+
+          vscode.window.showInformationMessage('Inserted Markdown block.');
+          await render();
+        }
+
+        if (message?.type === 'deleteMarkdownBlock') {
+          const lineStart = parseSourceLine(message.lineStart);
+          const lineEnd = parseSourceLine(message.lineEnd);
+
+          if (!lineStart || !lineEnd || lineEnd < lineStart) {
+            vscode.window.showWarningMessage('Ignored invalid Markdown block delete.');
+            return;
+          }
+
+          const confirmed = await vscode.window.showWarningMessage(
+            `Delete Markdown block lines ${lineStart}-${lineEnd}?`,
+            { modal: true },
+            'Delete'
+          );
+
+          if (confirmed !== 'Delete') {
+            return;
+          }
+
+          await this.anchorMaintenance.flush(document);
+          const plan = createLineRangeDeletePlan(document.getText(), {
+            lineStart,
+            lineEnd,
+            actor: 'user',
+            intent: 'delete_block'
+          });
+          const applied = await this.applyReviewAwareEdit(document, plan);
+
+          if (!applied) {
+            vscode.window.showWarningMessage('Markdown block could not be deleted.');
+            return;
+          }
+
+          vscode.window.showInformationMessage('Deleted Markdown block and refreshed affected review anchors.');
           await render();
         }
 
@@ -562,7 +609,8 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
     selectedText: string,
     providedComment?: string,
     anchorOccurrence?: number,
-    sourceLine?: number
+    sourceLine?: number,
+    sourceLineEnd?: number
   ): Promise<void> {
     const normalizedSelection = selectedText.trim();
 
@@ -587,7 +635,8 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
       documentUri: document.uri.toString(),
       anchor: createAnchor(document, normalizedSelection, {
         occurrence: anchorOccurrence,
-        lineHint: sourceLine
+        lineHint: sourceLine,
+        lineEndHint: sourceLineEnd
       }),
       type: 'note',
       source: 'human',
@@ -985,6 +1034,7 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
   ): string {
     const nonce = randomUUID();
     const documentText = document.getText();
+    const sourceLineEnding = detectLineEnding(documentText);
     const previewMarkdown = createPreviewMarkdown(stripInlineAnchorMarkers(documentText));
     const renderedMarkdown = this.markdown.render(previewMarkdown, {
       documentUri: document.uri,
@@ -1015,6 +1065,8 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
         reviewDocument.threads.map(thread => [thread.id, getReplyShortcutDescriptors(thread)])
       ),
       tables,
+      sourceLines: documentText.split(/\r\n|\r|\n/),
+      sourceLineEnding,
       documentVersion: document.version,
       restoreState: restoreState ?? {}
     }).replace(/</g, '\\u003c');
@@ -1184,6 +1236,10 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
     button.compact {
       padding: 4px 8px;
       font-size: 12px;
+    }
+    button.compact-active {
+      color: var(--buttonFg);
+      background: var(--button);
     }
     .thread {
       border: 1px solid var(--border);
@@ -1529,18 +1585,34 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
       flex-wrap: wrap;
       border-bottom: 1px solid var(--border);
     }
-    .block-editor-surface {
+    .block-editor-surface,
+    .block-editor-raw {
       box-sizing: border-box;
+      width: 100%;
       min-height: 140px;
       max-height: min(420px, calc(100vh - 220px));
       overflow: auto;
+      border: 0;
       padding: 12px;
       color: var(--vscode-input-foreground);
       background: var(--vscode-input-background);
       outline: none;
       line-height: 1.6;
     }
-    .block-editor-surface:focus {
+    .block-editor-raw {
+      display: none;
+      resize: vertical;
+      font-family: var(--vscode-editor-font-family);
+      line-height: 1.45;
+    }
+    .block-editor-raw.is-visible {
+      display: block;
+    }
+    .block-editor-surface.is-hidden {
+      display: none;
+    }
+    .block-editor-surface:focus,
+    .block-editor-raw:focus {
       box-shadow: inset 0 0 0 1px var(--vscode-focusBorder);
     }
     .editable-list-item {
@@ -1676,6 +1748,16 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
     .block-edit-actions button {
       border: 1px solid var(--border);
       box-shadow: 0 2px 8px rgba(0, 0, 0, 0.18);
+    }
+    .block-edit-actions button.danger {
+      color: var(--vscode-errorForeground);
+      border-color: var(--vscode-errorForeground);
+    }
+    button.danger {
+      color: var(--vscode-errorForeground);
+    }
+    .block-editor-actions .danger {
+      margin-right: auto;
     }
     .comment-overlay-item + .comment-overlay-item {
       margin-top: 12px;
@@ -1819,6 +1901,22 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
       outline: 2px solid rgba(138, 216, 63, 0.9);
       box-shadow: inset 0 -2px 0 #8ad83f;
     }
+    ::highlight(ai-review-draft-selection) {
+      background: rgba(138, 216, 63, 0.34);
+      color: inherit;
+    }
+    .draft-selection-highlight-layer {
+      position: fixed;
+      inset: 0;
+      z-index: 12;
+      pointer-events: none;
+    }
+    .draft-selection-highlight-rect {
+      position: fixed;
+      border-radius: 3px;
+      background: rgba(138, 216, 63, 0.34);
+      box-shadow: inset 0 -2px 0 rgba(138, 216, 63, 0.9);
+    }
     .history-anchor-target.is-active {
       border-radius: 4px;
       outline: 2px solid rgba(138, 216, 63, 0.9);
@@ -1921,11 +2019,14 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
       <button type="button" class="secondary compact" data-inline-format="bold" title="Bold">B</button>
       <button type="button" class="secondary compact" data-inline-format="italic" title="Italic">I</button>
       <button type="button" class="secondary compact" data-inline-format="code" title="Inline code">Code</button>
+      <button type="button" class="secondary compact" id="block-editor-raw-toggle" title="Edit raw Markdown for this block">Raw</button>
     </div>
     <div id="block-editor-surface" class="block-editor-surface" contenteditable="true"></div>
+    <textarea id="block-editor-raw" class="block-editor-raw" spellcheck="false"></textarea>
     <div class="block-editor-actions">
+      <button type="button" id="block-editor-delete" class="secondary compact danger">Delete</button>
       <button type="button" id="block-editor-cancel" class="secondary compact">Cancel</button>
-      <button type="submit" class="compact">Save</button>
+      <button type="submit" id="block-editor-submit" class="compact">Save</button>
     </div>
   </form>
   <form id="mermaid-editor" class="mermaid-editor" aria-label="Mermaid source editor">
@@ -1962,6 +2063,8 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
     const anchorIdentityByThreadId = state.anchorIdentityByThreadId || {};
     const replyShortcutsByThreadId = state.replyShortcutsByThreadId || {};
     const markdownTables = Array.isArray(state.tables) ? state.tables : [];
+    const sourceLines = Array.isArray(state.sourceLines) ? state.sourceLines : [];
+    const sourceLineEnding = typeof state.sourceLineEnding === 'string' ? state.sourceLineEnding : '\\n';
     const documentVersion = Number(state.documentVersion);
     const restoreState = state.restoreState || {};
     const markdownBody = document.getElementById('markdown-body');
@@ -1976,7 +2079,11 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
     const blockEditorTitle = document.getElementById('block-editor-title');
     const blockEditorLines = document.getElementById('block-editor-lines');
     const blockEditorSurface = document.getElementById('block-editor-surface');
+    const blockEditorRaw = document.getElementById('block-editor-raw');
+    const blockEditorRawToggle = document.getElementById('block-editor-raw-toggle');
     const blockEditorCancel = document.getElementById('block-editor-cancel');
+    const blockEditorDelete = document.getElementById('block-editor-delete');
+    const blockEditorSubmit = document.getElementById('block-editor-submit');
     const mermaidEditor = document.getElementById('mermaid-editor');
     const mermaidEditorLines = document.getElementById('mermaid-editor-lines');
     const mermaidEditorSource = document.getElementById('mermaid-editor-source');
@@ -1990,11 +2097,17 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
     let activeSelectionText = '';
     let activeSelectionOccurrence = 0;
     let activeSourceLine = undefined;
+    let activeSourceLineEnd = undefined;
     let activeSelectionRect = null;
+    let activeSelectionRange = null;
     let selectionTimer = undefined;
     let activeBlockEdit = undefined;
     let activeMermaidEdit = undefined;
     let activeTableEdit = undefined;
+    const draftSelectionHighlightLayer = document.createElement('div');
+    draftSelectionHighlightLayer.className = 'draft-selection-highlight-layer';
+    draftSelectionHighlightLayer.hidden = true;
+    document.body.appendChild(draftSelectionHighlightLayer);
 
     document.addEventListener('selectionchange', () => {
       scheduleSelectionComposer(false);
@@ -2008,6 +2121,14 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
       scheduleSelectionComposer(false);
     });
 
+    window.addEventListener('scroll', () => {
+      renderDraftSelectionFallbackHighlight();
+    }, true);
+
+    window.addEventListener('resize', () => {
+      renderDraftSelectionFallbackHighlight();
+    });
+
     selectionCommentButton.addEventListener('click', () => {
       openComposer();
     });
@@ -2018,6 +2139,27 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
 
     blockEditorCancel.addEventListener('click', () => {
       hideBlockEditor();
+    });
+
+    blockEditorDelete.addEventListener('click', () => {
+      if (!activeBlockEdit) {
+        return;
+      }
+
+      if (activeBlockEdit.mode === 'insert') {
+        hideBlockEditor();
+        return;
+      }
+
+      vscode.postMessage({
+        type: 'deleteMarkdownBlock',
+        lineStart: activeBlockEdit.lineStart,
+        lineEnd: activeBlockEdit.lineEnd
+      });
+    });
+
+    blockEditorRawToggle.addEventListener('click', () => {
+      toggleBlockEditorRawMode();
     });
 
     mermaidEditorCancel.addEventListener('click', () => {
@@ -2087,13 +2229,25 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
         return;
       }
 
-      vscode.postMessage({
-        type: 'editMarkdownBlock',
-        lineStart: activeBlockEdit.lineStart,
-        lineEnd: activeBlockEdit.lineEnd,
-        html: serializeBlockEditorHtml(),
-        intent: activeBlockEdit.intent
-      });
+      const payload = isBlockEditorRawMode()
+        ? { rawMarkdown: blockEditorRaw.value }
+        : { html: serializeBlockEditorHtml() };
+
+      if (activeBlockEdit.mode === 'insert') {
+        vscode.postMessage({
+          type: 'insertMarkdownBlock',
+          afterLine: activeBlockEdit.afterLine,
+          ...payload
+        });
+      } else {
+        vscode.postMessage({
+          type: 'editMarkdownBlock',
+          lineStart: activeBlockEdit.lineStart,
+          lineEnd: activeBlockEdit.lineEnd,
+          intent: activeBlockEdit.intent,
+          ...payload
+        });
+      }
       hideBlockEditor();
     });
 
@@ -2209,10 +2363,12 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
         anchorText: activeSelectionText,
         anchorOccurrence: activeSelectionOccurrence,
         sourceLine: activeSourceLine,
+        sourceLineEnd: activeSourceLineEnd,
         comment: body
       });
       hideSelectionPopover();
       hideComposer();
+      clearDraftSelectionHighlight();
       window.getSelection()?.removeAllRanges();
     });
 
@@ -2297,6 +2453,39 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
 
         if (table) {
           openTableEditor(table);
+        }
+
+        return;
+      }
+
+      const blockAddButton = target.closest('[data-add-markdown-block]');
+
+      if (blockAddButton) {
+        event.preventDefault();
+        event.stopPropagation();
+        const block = blockAddButton.closest('[data-source-line]');
+
+        if (block) {
+          openInsertBlockEditor(block);
+        }
+
+        return;
+      }
+
+      const blockDeleteButton = target.closest('[data-delete-markdown-block]');
+
+      if (blockDeleteButton) {
+        event.preventDefault();
+        event.stopPropagation();
+        const block = blockDeleteButton.closest('[data-source-line]');
+        const lineRange = block ? getEditableLineRange(block) : undefined;
+
+        if (lineRange) {
+          vscode.postMessage({
+            type: 'deleteMarkdownBlock',
+            lineStart: lineRange.lineStart,
+            lineEnd: lineRange.lineEnd
+          });
         }
 
         return;
@@ -2441,9 +2630,11 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
         }
 
         if (target.matches('[data-mermaid-feedback]')) {
+          clearDraftSelectionHighlight();
           activeSelectionText = source;
           activeSelectionOccurrence = 0;
           activeSourceLine = getSourceLine(figure);
+          activeSourceLineEnd = getSourceLineEnd(figure);
           const rect = target.getBoundingClientRect();
           activeSelectionRect = {
             left: rect.left,
@@ -2469,9 +2660,11 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
         const image = imageFeedbackButton.closest('[data-markdown-image]');
 
         if (image) {
+          clearDraftSelectionHighlight();
           activeSelectionText = getImageReviewAnchor(image);
           activeSelectionOccurrence = 0;
           activeSourceLine = getSourceLine(image);
+          activeSourceLineEnd = getSourceLineEnd(image);
           const rect = image.getBoundingClientRect();
           activeSelectionRect = {
             left: rect.left,
@@ -2669,7 +2862,9 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
         actions.className = 'block-edit-actions';
         actions.innerHTML = [
           '<button type="button" class="secondary compact" title="Edit this rendered Markdown block" data-edit-markdown-block>Edit</button>',
-          '<button type="button" class="secondary compact" title="Rewrite this block and keep attached comments updated" data-rewrite-markdown-block>Rewrite</button>'
+          '<button type="button" class="secondary compact" title="Add a new Markdown block below this block" data-add-markdown-block>Add</button>',
+          '<button type="button" class="secondary compact" title="Rewrite this block and keep attached comments updated" data-rewrite-markdown-block>Rewrite</button>',
+          '<button type="button" class="secondary compact danger" title="Delete this block and keep affected comments visible" data-delete-markdown-block>Delete</button>'
         ].join('');
         block.appendChild(actions);
       }
@@ -2710,44 +2905,11 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
         return;
       }
 
-      if (commentComposer.style.display === 'block' && commentBody.value.trim()) {
-        commentBody.focus();
+      if (!prepareBlockEditor()) {
         return;
       }
 
-      if (mermaidEditor.style.display === 'block'
-        && activeMermaidEdit
-        && mermaidEditorSource.value !== activeMermaidEdit.originalSource) {
-        mermaidEditorSource.focus();
-        return;
-      }
-
-      if (tableEditor.style.display === 'block'
-        && activeTableEdit
-        && tableEditorSignature() !== activeTableEdit.originalSignature) {
-        focusFirstTableInput();
-        return;
-      }
-
-      if (blockEditor.style.display === 'block'
-        && activeBlockEdit
-        && blockEditorSurface.innerHTML !== activeBlockEdit.originalHtml) {
-        blockEditorSurface.focus();
-        return;
-      }
-
-      if (!hideCommentOverlayIfClean()) {
-        return;
-      }
-      hideSelectionPopover();
-      hideComposerIfEmpty();
-      hideMermaidEditorIfClean();
-      hideTableEditorIfClean();
-      activeBlockEdit = {
-        ...lineRange,
-        intent,
-        originalHtml: blockEditorSurface.innerHTML
-      };
+      const rawMarkdown = getSourceMarkdown(lineRange);
       const clone = block.cloneNode(true);
       clone.querySelectorAll('.review-badge, .block-edit-actions').forEach((element) => element.remove());
       clone.querySelectorAll('.review-anchor').forEach((element) => {
@@ -2755,11 +2917,92 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
       });
 
       blockEditorSurface.innerHTML = wrapEditableBlockHtml(block, clone.innerHTML);
-      activeBlockEdit.originalHtml = blockEditorSurface.innerHTML;
+      blockEditorRaw.value = rawMarkdown;
+      setBlockEditorRawMode(false, { force: true });
+      activeBlockEdit = {
+        ...lineRange,
+        mode: 'edit',
+        intent,
+        originalHtml: blockEditorSurface.innerHTML,
+        originalRawMarkdown: rawMarkdown
+      };
+      blockEditorDelete.textContent = 'Delete';
+      blockEditorDelete.hidden = false;
+      blockEditorSubmit.textContent = 'Save';
       blockEditorTitle.textContent = intent === 'rewrite_section'
         ? 'Rewrite Markdown block'
         : 'Edit Markdown block';
       blockEditorLines.textContent = 'Lines ' + lineRange.lineStart + '-' + lineRange.lineEnd;
+      showBlockEditorNear(block);
+      blockEditorSurface.focus();
+    }
+
+    function openInsertBlockEditor(block) {
+      const lineRange = getEditableLineRange(block);
+
+      if (!lineRange) {
+        return;
+      }
+
+      if (!prepareBlockEditor()) {
+        return;
+      }
+
+      const emptyHtml = '<p><br></p>';
+      blockEditorSurface.innerHTML = emptyHtml;
+      blockEditorRaw.value = '';
+      setBlockEditorRawMode(false, { force: true });
+      activeBlockEdit = {
+        mode: 'insert',
+        afterLine: lineRange.lineEnd,
+        originalHtml: emptyHtml,
+        originalRawMarkdown: ''
+      };
+      blockEditorDelete.textContent = 'Clear';
+      blockEditorDelete.hidden = false;
+      blockEditorSubmit.textContent = 'Add';
+      blockEditorTitle.textContent = 'Add Markdown block';
+      blockEditorLines.textContent = 'After line ' + lineRange.lineEnd;
+      showBlockEditorNear(block);
+      blockEditorSurface.focus();
+    }
+
+    function prepareBlockEditor() {
+      if (commentComposer.style.display === 'block' && commentBody.value.trim()) {
+        commentBody.focus();
+        return false;
+      }
+
+      if (mermaidEditor.style.display === 'block'
+        && activeMermaidEdit
+        && mermaidEditorSource.value !== activeMermaidEdit.originalSource) {
+        mermaidEditorSource.focus();
+        return false;
+      }
+
+      if (tableEditor.style.display === 'block'
+        && activeTableEdit
+        && tableEditorSignature() !== activeTableEdit.originalSignature) {
+        focusFirstTableInput();
+        return false;
+      }
+
+      if (blockEditor.style.display === 'block' && isBlockEditorDirty()) {
+        focusActiveBlockEditorInput();
+        return false;
+      }
+
+      if (!hideCommentOverlayIfClean()) {
+        return false;
+      }
+      hideSelectionPopover();
+      hideComposerIfEmpty();
+      hideMermaidEditorIfClean();
+      hideTableEditorIfClean();
+      return true;
+    }
+
+    function showBlockEditorNear(block) {
       const rect = block.getBoundingClientRect();
       positionFloatingElement(blockEditor, {
         left: rect.left,
@@ -2768,7 +3011,62 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
         bottom: rect.bottom
       }, 680);
       blockEditor.style.display = 'block';
+    }
+
+    function focusActiveBlockEditorInput() {
+      if (isBlockEditorRawMode()) {
+        blockEditorRaw.focus();
+        return;
+      }
+
       blockEditorSurface.focus();
+    }
+
+    function getSourceMarkdown(lineRange) {
+      return sourceLines
+        .slice(Math.max(0, lineRange.lineStart - 1), Math.max(0, lineRange.lineEnd))
+        .join(sourceLineEnding);
+    }
+
+    function toggleBlockEditorRawMode() {
+      if (!activeBlockEdit) {
+        return;
+      }
+
+      if (isBlockEditorDirty()) {
+        focusActiveBlockEditorInput();
+        return;
+      }
+
+      setBlockEditorRawMode(!isBlockEditorRawMode());
+      focusActiveBlockEditorInput();
+    }
+
+    function setBlockEditorRawMode(enabled, options = {}) {
+      if (!activeBlockEdit && !options.force) {
+        return;
+      }
+
+      blockEditorRaw.classList.toggle('is-visible', enabled);
+      blockEditorSurface.classList.toggle('is-hidden', enabled);
+      blockEditorRawToggle.setAttribute('aria-pressed', enabled ? 'true' : 'false');
+      blockEditorRawToggle.classList.toggle('compact-active', enabled);
+    }
+
+    function isBlockEditorRawMode() {
+      return blockEditorRaw.classList.contains('is-visible');
+    }
+
+    function isBlockEditorDirty() {
+      if (!activeBlockEdit) {
+        return false;
+      }
+
+      if (isBlockEditorRawMode()) {
+        return blockEditorRaw.value !== activeBlockEdit.originalRawMarkdown;
+      }
+
+      return blockEditorSurface.innerHTML !== activeBlockEdit.originalHtml;
     }
 
     function openTableEditor(tableElement) {
@@ -2785,8 +3083,8 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
 
       if (blockEditor.style.display === 'block'
         && activeBlockEdit
-        && blockEditorSurface.innerHTML !== activeBlockEdit.originalHtml) {
-        blockEditorSurface.focus();
+        && isBlockEditorDirty()) {
+        focusActiveBlockEditorInput();
         return;
       }
 
@@ -2971,8 +3269,8 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
 
       if (blockEditor.style.display === 'block'
         && activeBlockEdit
-        && blockEditorSurface.innerHTML !== activeBlockEdit.originalHtml) {
-        blockEditorSurface.focus();
+        && isBlockEditorDirty()) {
+        focusActiveBlockEditorInput();
         return;
       }
 
@@ -3108,6 +3406,8 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
     function hideBlockEditor() {
       blockEditor.style.display = 'none';
       blockEditorSurface.innerHTML = '';
+      blockEditorRaw.value = '';
+      setBlockEditorRawMode(false, { force: true });
       activeBlockEdit = undefined;
     }
 
@@ -3116,7 +3416,7 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
         return;
       }
 
-      if (activeBlockEdit && blockEditorSurface.innerHTML !== activeBlockEdit.originalHtml) {
+      if (isBlockEditorDirty()) {
         return;
       }
 
@@ -4607,6 +4907,7 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
 
         if (!hasSelection) {
           hideSelectionPopover();
+          clearDraftSelectionHighlight();
           return;
         }
 
@@ -4626,6 +4927,7 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
 
       if (!captureCurrentSelection()) {
         hideSelectionPopover();
+        clearDraftSelectionHighlight();
         return;
       }
 
@@ -4663,15 +4965,71 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
 
       activeSelectionText = selectedText;
       activeSelectionOccurrence = countPriorOccurrences(range, selectedText);
-      activeSourceLine = getSourceLine(container);
+      const selectionLineRange = getSelectionSourceLineRange(range, container);
+      activeSourceLine = selectionLineRange?.lineStart ?? getSourceLine(container);
+      activeSourceLineEnd = selectionLineRange?.lineEnd ?? getSourceLineEnd(container);
       activeSelectionRect = {
         left: rect.left,
         right: rect.right,
         top: rect.top,
         bottom: rect.bottom
       };
+      setDraftSelectionHighlight(range);
 
       return true;
+    }
+
+    function getSelectionSourceLineRange(range, container) {
+      const sourceElements = Array.from(markdownBody.querySelectorAll('[data-source-line]'))
+        .filter((element) => !shouldSkipHighlightParent(element) && selectionIntersectsElement(range, element));
+
+      if (sourceElements.length === 0 && container instanceof HTMLElement) {
+        const lineStart = getSourceLine(container);
+
+        if (!lineStart) {
+          return undefined;
+        }
+
+        return {
+          lineStart,
+          lineEnd: Math.max(lineStart, getSourceLineEnd(container) ?? lineStart)
+        };
+      }
+
+      const ranges = sourceElements
+        .map((element) => {
+          const lineStart = getSourceLine(element);
+
+          if (!lineStart) {
+            return undefined;
+          }
+
+          return {
+            lineStart,
+            lineEnd: Math.max(lineStart, getSourceLineEnd(element) ?? lineStart)
+          };
+        })
+        .filter(Boolean);
+
+      if (ranges.length === 0) {
+        return undefined;
+      }
+
+      return {
+        lineStart: Math.min(...ranges.map((lineRange) => lineRange.lineStart)),
+        lineEnd: Math.max(...ranges.map((lineRange) => lineRange.lineEnd))
+      };
+    }
+
+    function selectionIntersectsElement(range, element) {
+      try {
+        return range.intersectsNode(element);
+      } catch {
+        const elementRange = document.createRange();
+        elementRange.selectNodeContents(element);
+        return range.compareBoundaryPoints(Range.END_TO_START, elementRange) < 0
+          && range.compareBoundaryPoints(Range.START_TO_END, elementRange) > 0;
+      }
     }
 
     function countPriorOccurrences(range, selectedText) {
@@ -4709,6 +5067,67 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
       return range.getBoundingClientRect();
     }
 
+    function setDraftSelectionHighlight(range) {
+      activeSelectionRange = range.cloneRange();
+      renderDraftSelectionHighlight();
+    }
+
+    function clearDraftSelectionHighlight() {
+      activeSelectionRange = null;
+      clearDraftSelectionCustomHighlight();
+      draftSelectionHighlightLayer.replaceChildren();
+      draftSelectionHighlightLayer.hidden = true;
+    }
+
+    function renderDraftSelectionHighlight() {
+      if (!activeSelectionRange) {
+        clearDraftSelectionHighlight();
+        return;
+      }
+
+      if (supportsDraftSelectionCustomHighlight()) {
+        draftSelectionHighlightLayer.replaceChildren();
+        draftSelectionHighlightLayer.hidden = true;
+        window.CSS.highlights.set('ai-review-draft-selection', new window.Highlight(activeSelectionRange));
+        return;
+      }
+
+      renderDraftSelectionFallbackHighlight();
+    }
+
+    function renderDraftSelectionFallbackHighlight() {
+      if (!activeSelectionRange || supportsDraftSelectionCustomHighlight()) {
+        draftSelectionHighlightLayer.replaceChildren();
+        draftSelectionHighlightLayer.hidden = true;
+        return;
+      }
+
+      const rects = Array.from(activeSelectionRange.getClientRects())
+        .filter((rect) => rect.width > 0 && rect.height > 0);
+      draftSelectionHighlightLayer.replaceChildren(...rects.map((rect) => {
+        const element = document.createElement('span');
+        element.className = 'draft-selection-highlight-rect';
+        element.style.left = rect.left + 'px';
+        element.style.top = rect.top + 'px';
+        element.style.width = rect.width + 'px';
+        element.style.height = rect.height + 'px';
+        return element;
+      }));
+      draftSelectionHighlightLayer.hidden = rects.length === 0;
+    }
+
+    function supportsDraftSelectionCustomHighlight() {
+      return typeof window.Highlight === 'function'
+        && Boolean(window.CSS?.highlights?.set)
+        && Boolean(window.CSS?.highlights?.delete);
+    }
+
+    function clearDraftSelectionCustomHighlight() {
+      if (supportsDraftSelectionCustomHighlight()) {
+        window.CSS.highlights.delete('ai-review-draft-selection');
+      }
+    }
+
     function openComposer() {
       if (!activeSelectionText || !activeSelectionRect) {
         return;
@@ -4720,6 +5139,7 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
       hideSelectionPopover();
       commentBody.value = '';
       updateCommentQualityWarning();
+      renderDraftSelectionHighlight();
       positionFloatingElement(commentComposer, activeSelectionRect, 340);
       commentComposer.style.display = 'block';
       commentBody.focus();
@@ -4733,6 +5153,7 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
       commentComposer.style.display = 'none';
       commentBody.value = '';
       updateCommentQualityWarning();
+      clearDraftSelectionHighlight();
     }
 
     function hideComposerIfEmpty(target) {
@@ -5004,6 +5425,29 @@ function parseSourceLine(value: unknown): number | undefined {
   return Math.floor(value);
 }
 
+function createMarkdownBlockReplacement(
+  message: { html?: unknown; rawMarkdown?: unknown },
+  sourceMarkdown: string,
+  oneBasedLineStart: number
+): string {
+  if (typeof message.rawMarkdown === 'string') {
+    return normalizeSubmittedMarkdownBlock(message.rawMarkdown);
+  }
+
+  return htmlBlockToMarkdown(String(message.html ?? ''), {
+    sourceMarkdown,
+    oneBasedLineStart
+  });
+}
+
+function normalizeSubmittedMarkdownBlock(value: string): string {
+  return value.replace(/^(?:\r\n|\r|\n)+|(?:\r\n|\r|\n)+$/g, '');
+}
+
+function detectLineEnding(value: string): string {
+  return value.match(/\r\n|\r|\n/)?.[0] ?? '\n';
+}
+
 function parseDocumentVersion(value: unknown): number | undefined {
   if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) {
     return undefined;
@@ -5050,6 +5494,8 @@ function parseThreadIds(value: unknown, fallbackThreadId: string): string[] {
 
 function parseReviewAwareEditIntent(value: unknown): ReviewAwareEditIntent | undefined {
   if (value === 'manual_block_edit'
+    || value === 'delete_block'
+    || value === 'insert_block'
     || value === 'manual_table_edit'
     || value === 'manual_mermaid_edit'
     || value === 'rewrite_section') {

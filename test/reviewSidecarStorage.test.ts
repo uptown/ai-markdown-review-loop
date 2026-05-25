@@ -66,6 +66,49 @@ describe('review sidecar storage', () => {
     assert.deepEqual(parsedSidecar.reviewDocument.threads.map(item => item.id), ['rv_legacy']);
     assert.deepEqual(parsedSidecar.resolvedReviewDocument.threads, []);
   });
+
+  it('keeps rich closed-thread anchor metadata instead of requiring proposed-thread shape', () => {
+    const payload = createPortableReviewSidecarPayload(
+      documentUri,
+      {
+        documentUri,
+        threads: [],
+        updatedAt: now
+      },
+      {
+        documentUri,
+        threads: [{
+          ...thread('rv_closed_rich_anchor', 'resolved'),
+          closedBy: 'user',
+          closedAt: now,
+          anchor: {
+            text: 'Reviewed text',
+            lineStart: 12,
+            lineEnd: 13,
+            hash: 'sha256:abc123',
+            occurrence: 2,
+            contextBefore: 'Before snippet',
+            contextAfter: 'After snippet',
+            confidence: 'recovered',
+            lastLocatedLine: 12,
+            lastLocatedAt: now
+          }
+        }],
+        updatedAt: now
+      },
+      now
+    );
+    const parsed = parsePortableReviewSidecar(movedDocumentUri, payload);
+    const closedThread = parsed.resolvedReviewDocument.threads[0];
+
+    assert.equal(closedThread.anchor.hash, 'sha256:abc123');
+    assert.equal(closedThread.anchor.confidence, 'recovered');
+    assert.equal(closedThread.anchor.lastLocatedLine, 12);
+    assert.equal(closedThread.anchor.lastLocatedAt, now);
+    assert.equal(closedThread.anchor.contextBefore, 'Before snippet');
+    assert.equal(closedThread.closedBy, 'user');
+    assert.equal(closedThread.closedAt, now);
+  });
 });
 
 function thread(id: string, status: ReviewThread['status']): ReviewThread {
