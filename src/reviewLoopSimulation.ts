@@ -119,7 +119,7 @@ function createReviewLoopScenarios(): SimulationScenario[] {
       turns: [
         turn('ai_reviewer', 'bootstrap', 'Reads the target fixture and shared review-loop docs before commenting.', 'AI asks only for missing context that changes review quality.'),
         turn('ai_reviewer', 'open_thread', 'Opens rv_acceptance as a question anchored to the broad acceptance criterion.', 'Thread stays specific and actionable instead of becoming broad style feedback.', 'rv_acceptance'),
-        turn('human_author', 'reply', 'Answers that acceptance should focus on preserving review metadata during edits.', 'Human context remains inside the same thread.', 'rv_acceptance'),
+        turn('human_author', 'reply', 'Answers that acceptance should focus on preserving sidecar review state during edits.', 'Human context remains inside the same thread.', 'rv_acceptance'),
         turn('ai_reviewer', 'reply', 'Replies with a narrower acceptance criterion candidate.', 'AI continues the thread rather than opening a duplicate.', 'rv_acceptance')
       ],
       reviewThreads: [

@@ -38,9 +38,9 @@ This extension is built around repeated document-review loops between human auth
 - `Rewrite block`: manual rewrite path that uses the same review-aware edit pipeline reserved for future AI rewrite integration.
 - `Resolve`: close because the underlying issue has been handled, superseded, or no longer applies.
 - `Restore`: reopen a closed thread, move it back to active feedback, and attach it to the current document again.
-- `Needs re-anchor`: state shown when the original anchor cannot be located reliably; reply, edit manually, restore context, or clean stale anchors rather than assuming the feedback disappeared.
-- `Open expected sidecar` / `Find review sidecars`: recovery actions for stale inline anchors when sidecar JSON is missing or incomplete.
-- `Clean stale anchors`: remove broken metadata only after recovery options are exhausted; this is not a review decision.
+- `Needs re-anchor`: state shown when the original anchor cannot be located reliably; reply, edit manually, restore context, or keep discussing rather than assuming the feedback disappeared.
+- `Open review sidecar` / `Find review sidecars`: inspection actions for colocated or legacy sidecar JSON.
+- `Clean legacy metadata`: remove older inline `ai-review-*` comments from Markdown source after confirming the colocated sidecar has the review state; this is not a review decision.
 - `Export for Agent`: package open threads for AI work without mutating review state.
 - `Review Session Brief`: current human instructions for this pass, including review goal, focus areas, non-goals, constraints, preferred comment style, and done condition.
 
@@ -77,7 +77,7 @@ Any future AI reviewer integration should use these canonical inputs:
 
 1. A user installs the plugin in a repo with no prior AI review history.
 2. The review preview exposes `Open Bootstrap Prompt` for first-pass context and `Open Feedback Loop Prompt` for active thread iteration.
-3. The user opens a repo-aware bootstrap prompt. The prompt tells any AI agent how to discover only the needed repo context, what missing context to ask for, how to use AI Markdown Review Loop when available, and how to preserve review metadata while editing Markdown.
+3. The user opens a repo-aware bootstrap prompt. The prompt tells any AI agent how to discover only the needed repo context, what missing context to ask for, how to use AI Markdown Review Loop when available, and how to preserve sidecar review state while editing Markdown.
 4. The AI captures the review session brief from the human request, including what this pass should optimize for and what is out of scope.
 5. The AI starts from the current Markdown target, then reads only the nearby or canonical repo docs that are relevant to the requested review or edit.
 6. If the available context still leaves key document questions unanswered, the AI creates or replies to focused `question` threads instead of guessing or stopping only in chat.
@@ -104,7 +104,7 @@ Any future AI reviewer integration should use these canonical inputs:
 2. The author opens the thread and reviews the diff.
 3. The extension checks that the original text still exists at a reliable anchor.
 4. The author clicks `Apply Patch and Close`.
-5. The extension replaces the Markdown text, refreshes affected sidecar anchors and context snippets, records edit outcome replies, removes the open target anchor, archives the target thread as `accepted`, and leaves an audit log pointer.
+5. The extension replaces the Markdown text, refreshes affected sidecar anchors and context snippets, records edit outcome replies, and archives the target thread as `accepted` in the colocated sidecar.
 6. If the text is missing, duplicated ambiguously, or attached to a low-confidence anchor, the thread remains open for reply, re-anchor, or manual editing.
 
 ### Rendered Block Edit
@@ -137,14 +137,13 @@ Any future AI reviewer integration should use these canonical inputs:
 3. The history card shows the final decision color and the actor who closed it when that metadata is available.
 4. If the original anchor text still exists, the history card is `Linked`; if the text disappeared, it is `Outdated`.
 5. The user clicks `Restore` when the decision needs more discussion.
-6. The extension moves the thread back to open feedback, removes the old closed audit pointer, writes a fresh open anchor index, clears the old closure actor metadata, and focuses the restored thread.
+6. The extension moves the thread back to open feedback in the colocated sidecar, clears the old closure actor metadata, and focuses the restored thread without writing Markdown metadata.
 
 ### Rename Without Losing Review State
 
 1. A reviewed Markdown file is renamed or moved inside the workspace.
 2. The extension migrates review state into the renamed document's colocated `.<filename>.ai-review.json` sidecar.
-3. Inline review metadata is rewritten to point at the new sidecar paths.
-4. Existing review threads remain available in the preview after the rename.
+3. Existing review threads remain available in the preview after the rename without rewriting the Markdown source.
 
 ### Comment Survives Iterative Editing
 
@@ -155,7 +154,7 @@ Any future AI reviewer integration should use these canonical inputs:
 
 ## Agent Behavior
 
-Agents should treat review sidecar data and inline review metadata as part of the document state. Review sidecars live beside Markdown documents as hidden `.<filename>.ai-review.json` files, with legacy `.ai-markdown-review/` paths supported for older workspaces. Agents should preserve review anchors and logs, prefer localized edits, keep nearby context stable where possible, and report every handled `rv_*` ID with an outcome. Agents should not close threads as `accepted`, `resolved`, or `rejected` unless the user explicitly asks them to make that review decision.
+Agents should treat the colocated review sidecar as part of the document state. Review sidecars live beside Markdown documents as hidden `.<filename>.ai-review.json` files, with legacy `.ai-markdown-review/` paths supported for older workspaces. Agents should preserve sidecar review data, avoid creating inline `ai-review-*` metadata comments, prefer localized edits, keep nearby context stable where possible, and report every handled `rv_*` ID with an outcome. Agents should not close threads as `accepted`, `resolved`, or `rejected` unless the user explicitly asks them to make that review decision.
 
 When an AI rewrite provider is added, it should emit a review-aware edit plan instead of rewriting Markdown directly. The plan should identify the selected range, actor, intent, target thread when applicable, and whether a user explicitly requested a status decision.
 

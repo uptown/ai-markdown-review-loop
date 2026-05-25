@@ -2,12 +2,6 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { renderFeedbackExport } from '../src/exportFeedback';
 import {
-  createInlineAnchorMarker,
-  findStaleInlineAnchorMarkers,
-  readInlineAnchorMarkers,
-  removeInlineAnchorMarkerPayloads
-} from '../src/inlineMarkerPayloads';
-import {
   applyReviewAwareEditToMarkdown,
   buildReviewAwareThreadUpdates,
   createOffsetEditPlan
@@ -15,20 +9,12 @@ import {
 import { selectSuggestedPatchReplacement } from '../src/suggestedPatches';
 import type { ReviewThread } from '../src/types';
 
-const sidecar = '.ai-markdown-review/documents/spec.json';
-
 describe('review lifecycle scenario', () => {
-  it('cleans stale anchors, applies a reliable suggested edit, and exports remaining work', () => {
-    const marker = createInlineAnchorMarker([
-      { id: 'rv_patch', sidecar },
-      { id: 'rv_stale', sidecar },
-      { id: 'rv_followup', sidecar }
-    ]);
+  it('applies a reliable suggested edit without adding inline review metadata', () => {
     const markdown = [
       'Requirement old',
       '',
-      'Follow up text',
-      marker
+      'Follow up text'
     ].join('\n');
 
     const patchThread = thread('rv_patch', {
@@ -46,18 +32,6 @@ describe('review lifecycle scenario', () => {
       lineStart: 3,
       comment: 'Keep discussing this point.'
     });
-
-    assert.deepEqual(findStaleInlineAnchorMarkers(markdown, [patchThread, followupThread]), [
-      { id: 'rv_stale', sidecar }
-    ]);
-
-    const cleanedMarker = createInlineAnchorMarker(
-      removeInlineAnchorMarkerPayloads(readInlineAnchorMarkers(markdown), ['rv_stale'])
-    );
-    assert.equal(
-      cleanedMarker,
-      '<!-- ai-review-anchors:{"sidecar":".ai-markdown-review/documents/spec.json","ids":["rv_patch","rv_followup"]} -->'
-    );
 
     const patchSelection = selectSuggestedPatchReplacement(
       markdown,
@@ -87,6 +61,7 @@ describe('review lifecycle scenario', () => {
     );
 
     assert.match(nextMarkdown, /^Requirement new/);
+    assert.doesNotMatch(nextMarkdown, /ai-review-/);
     assert.equal(threadUpdates.length, 1);
     assert.equal(threadUpdates[0].threadId, 'rv_patch');
     assert.equal(threadUpdates[0].update.status, 'accepted');

@@ -20,7 +20,7 @@ export function createContextBootstrapPrompt(): string {
     '',
     'Editing rules:',
     '- Prefer small, localized Markdown edits over whole-document rewrites.',
-    '- Preserve nearby review state files such as hidden `.<filename>.ai-review.json` sidecars and inline `ai-review-*` metadata comments when they exist.',
+    '- Preserve nearby hidden `.<filename>.ai-review.json` sidecars. They are the review source of truth; do not create inline `ai-review-*` metadata comments.',
     '- If an edit moves, changes, or invalidates a commented span, keep the thread visible and report the affected `rv_*` id instead of silently deleting it.',
     '',
     'Final response:',

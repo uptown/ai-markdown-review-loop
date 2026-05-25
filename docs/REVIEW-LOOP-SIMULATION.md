@@ -4,7 +4,7 @@ Generated from `runReviewLoopSimulations()` in `src/reviewLoopSimulation.ts`.
 
 The simulation models two working personas:
 
-- an AI reviewer that opens focused review threads, proposes patches, replies, exports handoff context, and tries to preserve review metadata;
+- an AI reviewer that opens focused review threads, proposes patches, replies, exports handoff context, and tries to preserve sidecar review state;
 - a human author/reviewer that disagrees, replies, edits Markdown, applies patches, and resolves only when a decision is genuinely handled.
 
 The current dogfood target is `test/fixtures/rich-review-loop-sample.md`, a dense Markdown fixture with tables, ordered lists, task lists, Mermaid diagrams, code fences, repeated phrases, and long wrapping prose.
@@ -52,7 +52,7 @@ Turns:
 
 1. AI reviewer bootstraps by reading the target fixture and shared review-loop docs before commenting.
 2. AI reviewer opens `rv_acceptance` as a question anchored to the broad acceptance criterion.
-3. Human author answers that acceptance should focus on preserving review metadata during edits.
+3. Human author answers that acceptance should focus on preserving sidecar review state during edits.
 4. AI reviewer replies with a narrower acceptance criterion candidate.
 
 Thread transcript:

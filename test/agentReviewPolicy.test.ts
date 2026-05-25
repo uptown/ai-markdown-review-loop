@@ -50,7 +50,7 @@ describe('agent review policy', () => {
     assert.match(bootstrap, /Open Bootstrap Prompt/);
     assert.match(bootstrap, /discover only the repo context needed/);
     assert.match(bootstrap, /nearby `\.<filename>\.ai-review\.json` sidecars/);
-    assert.match(bootstrap, /`ai-review-\*` metadata comments/);
+    assert.match(bootstrap, /avoid creating inline `ai-review-\*` metadata comments/);
     assert.match(bootstrap, /not embed the context brief template/);
     assert.doesNotMatch(bootstrap, /docs\/AI-CONTEXT-BRIEF.md/);
     assert.doesNotMatch(bootstrap, /docs\/PRD.md/);

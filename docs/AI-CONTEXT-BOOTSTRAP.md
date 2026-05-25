@@ -45,7 +45,7 @@ generated prompt.
 After the first bootstrap, active review iteration should use a separate
 `Open Feedback Loop Prompt`. That prompt is for continuing existing Review
 Threads, drafting replies, and applying explicit suggested patches while
-preserving review metadata.
+preserving sidecar review state.
 
 ## Context Discovery
 
@@ -121,8 +121,8 @@ The generated bootstrap prompt should tell the AI to:
 - ask at most 3 specific follow-up questions about missing context, using a
   focused `question` thread when the question belongs to the document
 - treat Review Threads as conversation state rather than disposable comments
-- preserve nearby `.<filename>.ai-review.json` sidecars and inline
-  `ai-review-*` metadata comments during normal Markdown edits
+- preserve nearby `.<filename>.ai-review.json` sidecars during normal Markdown
+  edits and avoid creating inline `ai-review-*` metadata comments
 - prefer localized edits over whole-document rewrites
 - apply suggested Markdown changes only when the human explicitly asks
 - report every touched `rv_*` thread with an outcome
@@ -137,7 +137,7 @@ The export packet for AI agents should:
   that question should become a review thread
 - point users toward the bootstrap prompt instead of showing a persistent
   context status panel in the review preview
-- reinforce that Markdown edits must preserve review metadata and report
+- reinforce that Markdown edits must preserve sidecar review state and report
   affected thread outcomes
 
 That way the first AI review pass starts from explicit context instead of

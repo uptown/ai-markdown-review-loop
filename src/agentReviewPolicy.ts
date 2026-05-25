@@ -6,8 +6,8 @@ export const AGENT_CONTEXT_BOOTSTRAP_DOC_PATH = 'docs/AI-CONTEXT-BOOTSTRAP.md';
 export const AGENT_EDITING_GUIDELINES = [
   'Treat the Markdown document and its review sidecar as one review state.',
   'Work on open review threads only unless the user explicitly asks you to inspect closed history.',
-  'Preserve the document-level `ai-review-anchors` marker unless the user explicitly asks to clean stale anchors.',
-  'Preserve `ai-review-log` audit comments and colocated `.<filename>.ai-review.json` sidecar files during normal document editing.',
+  'Treat the colocated hidden `.<filename>.ai-review.json` sidecar as the canonical review state.',
+  'Do not create inline `ai-review-*` metadata comments; older inline metadata is legacy recovery data and should only be cleaned when the user asks.',
   'Prefer localized edits over whole-document rewrites so anchors can keep tracking nearby content.',
   'When editing text with open feedback, keep enough nearby context stable for anchor recovery.',
   'Do not silently delete or rewrite open review comments. If a comment no longer matches after your edit, call that out and leave it open for re-anchor.',

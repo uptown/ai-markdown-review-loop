@@ -20,7 +20,8 @@ describe('createContextBootstrapPrompt', () => {
     assert.match(prompt, /switch to the AI Feedback Loop Prompt/);
     assert.match(prompt, /Apply a suggested Markdown change only when the human explicitly asks/i);
     assert.match(prompt, /hidden `\.<filename>\.ai-review\.json` sidecars/);
-    assert.match(prompt, /inline `ai-review-\*` metadata comments/);
+    assert.match(prompt, /review source of truth/);
+    assert.match(prompt, /do not create inline `ai-review-\*` metadata comments/);
     assert.match(prompt, /List every touched `rv_\*` id/);
     assert.doesNotMatch(prompt, /Detected Sources/);
     assert.doesNotMatch(prompt, /Prompt To Paste/);

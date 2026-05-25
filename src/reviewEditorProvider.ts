@@ -14,20 +14,9 @@ import {
   markdownImageReviewLabel
 } from './markdownImageAnchors';
 import {
-  findStaleInlineAnchorMarkers,
-  removeInlineAnchorMarkers,
   stripInlineAnchorMarkers
 } from './inlineMarkers';
-import {
-  appendInlineReviewLogMarker,
-  removeInlineAnchorMarkersFromMarkdown,
-  removeInlineReviewLogMarkers,
-  upsertInlineAnchorMarkersInMarkdown
-} from './inlineMarkerPayloads';
-import {
-  applyReviewThreadUpdatesToDocuments,
-  ClosedReviewThreadUpdate
-} from './reviewDocumentUpdates';
+import { applyReviewThreadUpdatesToDocuments } from './reviewDocumentUpdates';
 import { ReviewStore } from './reviewStore';
 import {
   applyReviewAwareEditToMarkdown,
@@ -305,24 +294,15 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
           await render();
         }
 
-        if (message?.type === 'cleanupStaleAnchors') {
-          const threadIds = Array.isArray(message.threadIds)
-            ? message.threadIds.map((threadId: unknown) => String(threadId)).filter(Boolean)
-            : [];
-
-          if (threadIds.length === 0) {
-            vscode.window.showWarningMessage('No stale review anchors were selected for cleanup.');
-            return;
-          }
-
-          const cleaned = await removeInlineAnchorMarkers(document, threadIds);
+        if (message?.type === 'cleanupStaleAnchors' || message?.type === 'cleanupLegacyMetadata') {
+          const cleaned = await this.cleanupLegacyReviewMetadata(document);
 
           if (!cleaned) {
-            vscode.window.showWarningMessage('Stale review anchors could not be cleaned up.');
+            vscode.window.showWarningMessage('Legacy review metadata could not be cleaned up.');
             return;
           }
 
-          vscode.window.showInformationMessage(`Cleaned ${threadIds.length} stale review anchor(s).`);
+          vscode.window.showInformationMessage('Cleaned legacy inline review metadata.');
           await render();
         }
 
@@ -618,24 +598,19 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
 
     const beforeMarkdown = document.getText();
     const beforeSnapshot = await this.reviewUndo.capture(document.uri);
-    const sidecarUri = await this.store.getReviewFileUri(document.uri);
     const reviewDocument = await this.store.load(document.uri);
     reviewDocument.threads.push(thread);
 
-    const afterMarkdown = upsertInlineAnchorMarkersInMarkdown(beforeMarkdown, [{
-      id: thread.id,
-      sidecar: vscode.workspace.asRelativePath(sidecarUri, false)
-    }]);
     const committed = await this.commitReviewMutation(
       document,
       beforeMarkdown,
-      afterMarkdown,
+      beforeMarkdown,
       beforeSnapshot,
       async () => this.store.save(document.uri, reviewDocument)
     );
 
     if (!committed) {
-      vscode.window.showWarningMessage('Feedback could not be anchored in Markdown.');
+      vscode.window.showWarningMessage('Feedback could not be saved.');
       return;
     }
   }
@@ -670,19 +645,10 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
       }],
       now
     );
-    const afterMarkdown = appliedUpdates.closedThreads.length > 0
-      ? this.applyClosedThreadMarkers(
-        beforeMarkdown,
-        appliedUpdates.closedThreads,
-        now,
-        vscode.workspace.asRelativePath(await this.store.getResolvedReviewFileUri(document.uri), false)
-      )
-      : beforeMarkdown;
-
     const committed = await this.commitReviewMutation(
       document,
       beforeMarkdown,
-      afterMarkdown,
+      beforeMarkdown,
       beforeSnapshot,
       async () => this.store.saveBoth(
         document.uri,
@@ -692,7 +658,7 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
     );
 
     if (!committed) {
-      vscode.window.showWarningMessage('Review status was updated, but the Markdown markers could not be updated.');
+      vscode.window.showWarningMessage('Review status could not be saved.');
       return;
     }
   }
@@ -805,19 +771,11 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
       now
     );
     const editedMarkdown = applyReviewAwareEditToMarkdown(beforeMarkdown, plan);
-    const afterMarkdown = appliedUpdates.closedThreads.length > 0
-      ? this.applyClosedThreadMarkers(
-        editedMarkdown,
-        appliedUpdates.closedThreads,
-        now,
-        vscode.workspace.asRelativePath(await this.store.getResolvedReviewFileUri(document.uri), false)
-      )
-      : editedMarkdown;
 
     const committed = await this.commitReviewMutation(
       document,
       beforeMarkdown,
-      afterMarkdown,
+      editedMarkdown,
       beforeSnapshot,
       async () => this.store.saveBoth(
         document.uri,
@@ -900,21 +858,13 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
       resolvedReviewDocument.threads[resolvedIndex],
       now
     );
-    const sidecarUri = await this.store.getReviewFileUri(document.uri);
-    const afterMarkdown = upsertInlineAnchorMarkersInMarkdown(
-      removeInlineReviewLogMarkers(beforeMarkdown, [threadId]),
-      [{
-        id: restoredThread.id,
-        sidecar: vscode.workspace.asRelativePath(sidecarUri, false)
-      }]
-    );
     resolvedReviewDocument.threads.splice(resolvedIndex, 1);
     reviewDocument.threads.push(restoredThread);
 
     const committed = await this.commitReviewMutation(
       document,
       beforeMarkdown,
-      afterMarkdown,
+      beforeMarkdown,
       beforeSnapshot,
       async () => this.store.saveBoth(
         document.uri,
@@ -924,36 +874,8 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
     );
 
     if (!committed) {
-      throw new Error('Markdown markers could not be updated.');
+      throw new Error('Review thread could not be restored.');
     }
-  }
-
-  private applyClosedThreadMarkers(
-    markdown: string,
-    closedThreads: ClosedReviewThreadUpdate[],
-    now: string,
-    resolvedSidecarPath: string
-  ): string {
-    if (closedThreads.length === 0) {
-      return markdown;
-    }
-
-    let nextMarkdown = removeInlineAnchorMarkersFromMarkdown(
-      markdown,
-      closedThreads.map(thread => thread.threadId)
-    );
-
-    for (const thread of closedThreads) {
-      nextMarkdown = appendInlineReviewLogMarker(nextMarkdown, {
-        id: thread.threadId,
-        status: thread.status,
-        sidecar: resolvedSidecarPath,
-        updatedAt: thread.closedAt,
-        closedBy: thread.closedBy
-      });
-    }
-
-    return nextMarkdown;
   }
 
   private async replaceDocumentMarkdown(
@@ -972,6 +894,12 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
       afterMarkdown
     );
     return vscode.workspace.applyEdit(edit);
+  }
+
+  private async cleanupLegacyReviewMetadata(document: vscode.TextDocument): Promise<boolean> {
+    const beforeMarkdown = document.getText();
+    const afterMarkdown = stripInlineAnchorMarkers(beforeMarkdown);
+    return this.replaceDocumentMarkdown(document, beforeMarkdown, afterMarkdown);
   }
 
   private async commitReviewMutation(
@@ -996,8 +924,11 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
       throw error;
     }
 
-    const afterSnapshot = await this.reviewUndo.capture(document.uri);
-    this.reviewUndo.register(document.uri, beforeMarkdown, document.getText(), beforeSnapshot, afterSnapshot);
+    if (beforeMarkdown !== document.getText()) {
+      const afterSnapshot = await this.reviewUndo.capture(document.uri);
+      this.reviewUndo.register(document.uri, beforeMarkdown, document.getText(), beforeSnapshot, afterSnapshot);
+    }
+
     return true;
   }
 
@@ -2389,17 +2320,13 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
         return;
       }
 
-      const cleanupButton = target.closest('[data-cleanup-stale-anchors]');
+      const cleanupButton = target.closest('[data-cleanup-legacy-metadata], [data-cleanup-stale-anchors]');
 
       if (cleanupButton) {
         event.preventDefault();
         event.stopPropagation();
         vscode.postMessage({
-          type: 'cleanupStaleAnchors',
-          threadIds: String(cleanupButton.getAttribute('data-thread-ids') || '')
-            .split(',')
-            .map((threadId) => threadId.trim())
-            .filter(Boolean)
+          type: 'cleanupLegacyMetadata'
         });
         return;
       }
@@ -4874,24 +4801,18 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
 </html>`;
   }
 
-  private renderStorageWarning(documentText: string, reviewDocument: ReviewDocument): string {
-    const missingMarkers = findStaleInlineAnchorMarkers(documentText, reviewDocument.threads);
-
-    if (missingMarkers.length === 0) {
+  private renderStorageWarning(documentText: string, _reviewDocument: ReviewDocument): string {
+    if (!hasLegacyInlineReviewMetadata(documentText)) {
       return '';
     }
 
-    const sidecar = missingMarkers.find(marker => marker.sidecar)?.sidecar ?? '.<filename>.ai-review.json';
-    const markerLabel = missingMarkers.length === 1 ? 'anchor' : 'anchors';
-    const markerIds = missingMarkers.map(marker => marker.id).join(',');
-
     return `<section class="storage-warning" role="status">
-    <strong>Review anchors need recovery.</strong>
-    <p>This Markdown file still contains ${missingMarkers.length} stale ai-review-anchor ${markerLabel}. The matching review thread data is missing from <code>${escapeHtml(sidecar)}</code> or no longer open. Comment text cannot be rebuilt from inline anchors, so inspect the expected sidecar or find a legacy backup before removing metadata.</p>
+    <strong>Legacy inline review metadata found.</strong>
+    <p>Review state now lives in the hidden colocated <code>.&lt;filename&gt;.ai-review.json</code> sidecar beside this Markdown file. These old <code>ai-review-*</code> comments are no longer required for the feedback loop and can be removed without deleting sidecar review threads.</p>
     <div class="storage-warning-actions">
-      <button type="button" class="secondary compact" data-open-review-sidecar data-sidecar-path="${escapeHtml(sidecar)}">Open expected sidecar</button>
+      <button type="button" class="secondary compact" data-open-review-sidecar>Open review sidecar</button>
       <button type="button" class="secondary compact" data-find-review-sidecars>Find review sidecars</button>
-      <button type="button" class="secondary compact" data-cleanup-stale-anchors data-thread-ids="${escapeHtml(markerIds)}">Clean stale anchors</button>
+      <button type="button" class="secondary compact" data-cleanup-legacy-metadata>Clean legacy metadata</button>
     </div>
   </section>`;
   }
@@ -5029,6 +4950,10 @@ function parseReviewStatus(value: unknown): ReviewStatus | undefined {
   }
 
   return undefined;
+}
+
+function hasLegacyInlineReviewMetadata(markdown: string): boolean {
+  return /<!--\s*ai-review-(?:anchor|anchors|log):/.test(markdown);
 }
 
 function parseThreadIds(value: unknown, fallbackThreadId: string): string[] {

@@ -4,6 +4,12 @@
 
 - None.
 
+## 0.0.11 - 2026-05-25
+
+- Makes colocated `.<filename>.ai-review.json` sidecars the source of truth for new comments, replies, decisions, restores, and local review feedback without inserting inline Markdown metadata.
+- Changes legacy `ai-review-*` source comments into optional cleanup hints instead of export blockers.
+- Updates AI prompt and review policy guidance so agents preserve sidecars and avoid creating new inline review metadata.
+
 ## 0.0.10 - 2026-05-25
 
 - Renders local Markdown images in the review preview through VS Code-safe webview URIs.

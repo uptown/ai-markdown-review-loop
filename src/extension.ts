@@ -2,8 +2,6 @@ import * as vscode from 'vscode';
 import { openContextBootstrapPrompt } from './contextBootstrap';
 import { renderFeedbackExport } from './exportFeedback';
 import { openFeedbackLoopPrompt } from './feedbackLoopPrompt';
-import { findStaleInlineAnchorMarkers, insertInlineAnchorMarker } from './inlineMarkers';
-import { rebaseInlineReviewMetadataSidecars } from './inlineMarkerPayloads';
 import { createLocalReviewThreads } from './localReview';
 import { openReadOnlyMarkdownPrompt, registerPromptDocumentProvider } from './promptDocuments';
 import { ReviewEditorProvider, reviewEditorViewType } from './reviewEditorProvider';
@@ -74,14 +72,6 @@ export function activate(context: vscode.ExtensionContext): void {
         return;
       }
 
-      const sidecarUri = await store.getReviewFileUri(document.uri);
-
-      for (const thread of [...addedThreads].sort((left, right) => {
-        return (right.anchor.lineEnd ?? 0) - (left.anchor.lineEnd ?? 0);
-      })) {
-        await insertInlineAnchorMarker(document, thread, sidecarUri);
-      }
-
       vscode.window.showInformationMessage(`Added ${addedThreads.length} local review feedback item(s).`);
       await vscode.commands.executeCommand('vscode.openWith', document.uri, reviewEditorViewType);
     }),
@@ -94,15 +84,7 @@ export function activate(context: vscode.ExtensionContext): void {
       }
 
       const reviewDocument = await store.load(document.uri);
-      const missingMarkers = findStaleInlineAnchorMarkers(document.getText(), reviewDocument.threads);
-
-      if (missingMarkers.length > 0) {
-        vscode.window.showWarningMessage(
-          `Review sidecar data is missing, incomplete, or closed for ${missingMarkers.length} inline anchor(s). Clean stale anchors or restore the sidecar JSON before treating this export as complete.`
-        );
-      }
-
-      const exportText = appendStorageWarning(renderFeedbackExport(reviewDocument), missingMarkers);
+      const exportText = renderFeedbackExport(reviewDocument);
       await openReadOnlyMarkdownPrompt('AI Review Feedback Export', exportText);
     }),
     vscode.commands.registerCommand('aiMarkdownReviewLoop.openContextBootstrapPrompt', async (targetUri?: vscode.Uri) => {
@@ -159,25 +141,6 @@ function isMarkdown(document: vscode.TextDocument): boolean {
   return document.languageId === 'markdown' || document.fileName.toLowerCase().endsWith('.md');
 }
 
-function appendStorageWarning(
-  exportText: string,
-  missingMarkers: Array<{ sidecar?: string }>
-): string {
-  if (missingMarkers.length === 0) {
-    return exportText;
-  }
-
-  const sidecar = missingMarkers.find(marker => marker.sidecar)?.sidecar ?? '.<filename>.ai-review.json';
-
-  return [
-    exportText,
-    '',
-    '## Review Storage Warning',
-    '',
-    `This Markdown file contains ${missingMarkers.length} stale ai-review-anchor marker(s) whose matching thread data is missing from ${sidecar} or no longer open. The original comment text is unavailable from inline anchors alone; clean stale anchors or restore the sidecar JSON from backup before treating this export as complete.`
-  ].join('\n');
-}
-
 async function migrateRenamedMarkdownReviews(
   store: ReviewStore,
   files: readonly { oldUri: vscode.Uri; newUri: vscode.Uri }[]
@@ -189,46 +152,11 @@ async function migrateRenamedMarkdownReviews(
 
     try {
       await store.migrateDocument(file.oldUri, file.newUri);
-      await rebaseRenamedDocumentMetadata(store, file.oldUri, file.newUri);
       await store.deleteDocumentSidecars(file.oldUri);
     } catch (error) {
       vscode.window.showWarningMessage(`AI Markdown Review could not migrate review state after rename: ${formatError(error)}`);
     }
   }
-}
-
-async function rebaseRenamedDocumentMetadata(
-  store: ReviewStore,
-  oldUri: vscode.Uri,
-  newUri: vscode.Uri
-): Promise<void> {
-  const document = await vscode.workspace.openTextDocument(newUri);
-
-  if (!isMarkdown(document)) {
-    return;
-  }
-
-  const rewritten = rebaseInlineReviewMetadataSidecars(
-    document.getText(),
-    await store.getSidecarPathRewrites(oldUri, newUri)
-  );
-
-  if (rewritten === document.getText()) {
-    return;
-  }
-
-  const edit = new vscode.WorkspaceEdit();
-  edit.replace(
-    document.uri,
-    new vscode.Range(document.positionAt(0), document.positionAt(document.getText().length)),
-    rewritten
-  );
-
-  if (!await vscode.workspace.applyEdit(edit)) {
-    throw new Error('Markdown metadata rewrite was rejected by VS Code.');
-  }
-
-  await document.save();
 }
 
 function looksLikeMarkdownUri(uri: vscode.Uri): boolean {

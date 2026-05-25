@@ -19,7 +19,7 @@ This table is intentionally complex enough to exercise rendered table editing. R
 | Area | Current decision | Risk | Owner | Status |
 | --- | --- | --- | --- | --- |
 | Auth | Use existing workspace identity | Token refresh behavior is not specified | Platform | Open |
-| Review data | Sidecar JSON plus compact inline anchor index | Deleted sidecar leaves anchors without comment text | Extension | Mitigated |
+| Review data | Colocated sidecar JSON | Deleted sidecar leaves review state unavailable | Extension | Mitigated |
 | Mermaid | Render and source-edit fenced diagrams | Invalid syntax should show inline errors | Extension | Open |
 | Tables | Reviewable rendered table with grid editing | Grid edits should preserve comments and following blocks | Extension | Open |
 | Export | Open feedback only | Closed history may still be needed for audit | Product | Watching |
