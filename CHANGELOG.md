@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- None.
+
+## 0.0.9 - 2026-05-25
+
+- Adds Marketplace-ready package metadata, icon, gallery banner, README visuals, and support links.
+- Adds generated Marketplace hero, animated GIF demo, MP4 demo, and reproducible asset generation script.
+- Adds release hygiene scripts for third-party notice coverage and VSIX package contents.
 - Warns when Markdown inline review anchors refer to sidecar comment JSON that is missing or incomplete.
 - Adds reply threads under review comments and includes discussion history in agent exports.
 - Compacts multiple inline review anchors at the same insertion point into one grouped marker.

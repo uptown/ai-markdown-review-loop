@@ -18,6 +18,9 @@ package-lock.json
 docs/PRD.md
 docs/AI-CONTEXT-BRIEF.md
 docs/mermaid-sample.md
+docs/RELEASE.md
+docs/REVIEW-LOOP-SIMULATION.md
+docs/REVIEW-LOOP-SIMULATION-TRACE.md
 out/*.js
 !out/extension.js
 !out/vendor/**

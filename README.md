@@ -1,60 +1,44 @@
 # AI Markdown Review Loop
 
-AI Markdown Review Loop is a VS Code extension for reviewing Markdown documents with inline feedback, AI-ready review threads, and agent handoff exports.
+Review Markdown like a PR inside VS Code: comment on rendered text, keep human
+and AI review threads attached through edits, and export unresolved feedback
+back to your coding agent.
 
-The first MVP focuses on a local workflow:
+Best for specs, PRDs, implementation plans, READMEs, ADRs, and AI-generated
+docs that need review before implementation.
 
-- Open a rendered Markdown review preview.
-- Open the review preview beside the Markdown source in a split editor.
-- Render Mermaid diagrams from fenced `mermaid` code blocks.
-- Open the review preview from a Markdown editor title shortcut.
-- Use the green AI Review icon in the VS Code editor title toolbar.
-- Drag-select rendered text and attach feedback from an inline comment popover.
-- Submit comments and replies with `Enter`, while `Shift+Enter` keeps a newline.
-- Empty comment composers close on outside click or Escape, while typed drafts stay open.
-- Reply drafts inside the comment overlay also stay open until they are empty.
-- See saved comments as highlights and small badges in the rendered document.
-- Click a highlighted region or badge to inspect saved comments, draft discussion replies, resolve handled issues, or apply reliable suggested patches.
-- Navigate between review comments with the `←` and `→` buttons or the Left/Right Arrow keys when not typing.
-- Edit or rewrite a rendered Markdown block through a constrained block editor that keeps review anchors in sync.
-- Edit rendered Markdown tables through a grid editor with row, column, and alignment controls.
-- Edit Mermaid diagram source from the rendered diagram card through the same review-aware edit pipeline.
-- Reply under review comments with clear `You`/`AI` attribution for future AI handoff.
-- Distinguish user comments from AI-generated review comments with separate labels, badges, and highlight colors.
-- Apply suggested replacement patches from review threads when the patch still matches a reliable anchor.
-- Use `Agree`, `Revise`, and `Disagree` as reply shortcuts that keep the thread open for discussion. Use `Resolve` when the issue is handled or no longer applies, or `Close as Declined` when the feedback is wrong or intentionally not applicable.
-- Continue one exact review thread with AI from the thread card or comment overlay so the feedback-loop prompt starts from that `rv_*` discussion.
-- Carry the current review session brief into prompts and exports so the AI follows the user's goal, focus, non-goals, constraints, comment style, and done condition for this pass.
-- Click a thread in `Review Threads` to jump back to its highlighted content.
-- Review accepted, resolved, and rejected history from `Review Threads`, including who closed the thread and whether the old anchor is still linked or now outdated.
-- Restore a closed review thread when a decision needs to be reopened.
-- Persist compact `ai-review-anchor` metadata in the Markdown file while storing full thread data in sidecar JSON.
-- Keep review sidecars and inline metadata aligned when a reviewed Markdown file is renamed.
-- Attach feedback directly to a Mermaid diagram source block.
-- Store review threads in a hidden sidecar file beside each Markdown document.
-- Export unresolved feedback as Markdown for an AI coding agent.
-- Ship a repo-owned AI review policy and thread-creation schema for future AI reviewer integrations.
-- Document the human-AI collaboration loop and first-pass context bootstrap path.
-- Run deterministic AI reviewer and human author simulations to collect review-loop product feedback.
-- Open a generic AI bootstrap prompt from the review preview so any AI agent can learn the review loop and preserve comments while editing Markdown.
-- Open an AI feedback loop prompt when an agent should continue active Review Threads, apply explicit suggested patches, or draft replies without losing review metadata.
-- Run a local heuristic document review to seed obvious feedback items.
+![AI Markdown Review Loop hero](./media/marketplace-hero.png)
 
-## Development
+![AI Markdown Review Loop animated demo](./media/review-loop-demo.gif)
 
-```bash
-nvm use
-npm install
-npm run check
-npm run compile
-```
+[Download the short MP4 demo](./media/review-loop-demo.mp4)
 
-To run inside VS Code:
+## How It Works
 
-1. Open this folder in VS Code.
-2. Press `F5` to launch an Extension Development Host.
-3. Open a `.md` file.
-4. Click the review shortcut in the Markdown editor title, or run `AI Markdown Review: Open Review Preview`.
+1. Open a Markdown file in the review preview, or open source and preview side by side.
+2. Drag-select rendered text and leave anchored feedback.
+3. Reply, resolve, close as declined, safely apply suggested patches, or export open threads to your AI agent.
+
+AI Markdown Review Loop is local-first. It stores review state beside your
+Markdown files and does not call a model provider by itself. AI collaboration
+happens when you copy a generated prompt or feedback export into the agent you
+choose.
+
+## Highlights
+
+- Rendered Markdown review preview with visible comment highlights and badges.
+- Split review command for source and rendered preview side by side.
+- Read-only comment overlays from highlighted regions or badges.
+- Review thread replies with consistent `You` and `AI` attribution.
+- Discussion-first shortcuts such as `Agree`, `Revise`, and `Disagree`.
+- Explicit `Resolve`, `Close as Declined`, restore, and closed-history states.
+- `Apply Patch and Close` for reliable suggested replacements that still match the document.
+- Review-aware Markdown, table, and Mermaid edits that keep anchors and sidecars in sync.
+- Anchor confidence states such as `Located`, `Recovered`, `Approximate`, and `Needs re-anchor`.
+- Generic bootstrap and feedback-loop prompts for AI agents that need to preserve review metadata.
+- Threads-first feedback export for agent handoff.
+
+## Install And Use
 
 Installed usage:
 
@@ -68,6 +52,7 @@ Installed usage:
 
 ## Commands
 
+- `AI Markdown Review: Open Review Beside`
 - `AI Markdown Review: Open Review Preview`
 - `AI Markdown Review: Review Document`
 - `AI Markdown Review: Export Feedback for Agent`
@@ -162,8 +147,6 @@ Canonical AI review contracts:
 - [AI Review Policy](./docs/AI-REVIEW-POLICY.md)
 - [AI Collaboration Loop](./docs/AI-COLLABORATION-LOOP.md)
 - [AI Context Bootstrap](./docs/AI-CONTEXT-BOOTSTRAP.md)
-- [Review Loop Simulation](./docs/REVIEW-LOOP-SIMULATION.md)
-- [Review Loop Simulation Trace](./docs/REVIEW-LOOP-SIMULATION-TRACE.md)
 - [AI Review Thread Schema](./docs/agent-review-thread.schema.json)
 
 For first-time setup in a repo, the recommended context injection path is:
@@ -186,7 +169,7 @@ Suggested replacement patches are treated as document edits, not just review dec
 
 When AI revises a patch in discussion, the feedback-loop prompt asks it to use a `Suggested patch revision:` label with a fenced `diff` block. That keeps revised patch candidates readable to humans without treating every reply as an immediately applyable edit.
 
-Rendered block edits use the same review-aware edit pipeline. The MVP editor is intentionally constrained to source-mapped Markdown blocks instead of replacing the whole file with a free-form WYSIWYG surface, so open comments can stay attached to the edited range and ordinary source edits still fall back to debounced re-anchoring.
+Rendered block edits use the same review-aware edit pipeline. The editor is intentionally constrained to source-mapped Markdown blocks instead of replacing the whole file with a free-form WYSIWYG surface, so open comments can stay attached to the edited range and ordinary source edits still fall back to debounced re-anchoring.
 
 Rendered Markdown tables get a dedicated grid editor instead of the generic block editor. Use `Edit Table` from the preview table controls to edit header/body cells, add or remove rows and columns, choose column alignment, and save back to pipe-table Markdown through the same review-aware edit and undo path.
 
@@ -194,29 +177,21 @@ Review-aware edits, new comment anchors, review decisions, and restored threads 
 
 If a sidecar write fails during a review-aware change, the extension rolls the Markdown and sidecar files back together instead of leaving a half-applied review state behind.
 
-## Packaging
+## Privacy And Storage
 
-```bash
-npm run check
-npm run package
-```
+- Review data stays in your workspace in hidden `.<filename>.ai-review.json` sidecars.
+- Inline Markdown comments store compact metadata pointers, not the full review discussion.
+- The extension does not send document text to an AI provider.
+- Export and prompt commands produce Markdown you can inspect before giving it to an agent.
 
-`npm run check` runs TypeScript type checking plus Node-based regression tests for review export, suggested patch selection, review-aware edits, inline anchor metadata, and the review lifecycle scenario.
+## License And Notices
 
-License policy and bundled dependency notices:
+AI Markdown Review Loop is MIT licensed. Bundled runtime dependency notices are
+kept in the repository and packaged with the extension:
 
 - [License Policy](./docs/LICENSE-POLICY.md)
 - [Third-Party Notices](./THIRD_PARTY_NOTICES.md)
 
-Publishing requires a Visual Studio Marketplace publisher and a `vsce` login:
+## Support
 
-```bash
-npx vsce login <publisher-id>
-npx vsce publish
-```
-
-GitHub publishing will use:
-
-```bash
-gh repo create uptown/ai-markdown-review-loop --public --source=. --remote=origin --push
-```
+Open issues at <https://github.com/uptown/ai-markdown-review-loop/issues>.

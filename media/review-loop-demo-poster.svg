@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="540" viewBox="0 0 960 540" role="img" aria-labelledby="title desc">
+  <title id="title">AI Markdown Review Loop demo step 4</title>
+  <desc id="desc">Apply or hand off: Apply reliable patches or continue the exact thread with AI.</desc>
+  <rect width="960" height="540" fill="#0f172a"/>
+  <rect x="28" y="28" width="904" height="484" rx="22" fill="#111827" stroke="#334155"/>
+  <rect x="28" y="28" width="904" height="48" rx="22" fill="#1f2937"/>
+  <text x="54" y="60" fill="#e5e7eb" font-size="19" font-family="Inter, Arial, sans-serif" font-weight="800">Apply or hand off</text>
+  <text x="690" y="60" fill="#22c55e" font-size="17" font-family="Inter, Arial, sans-serif" font-weight="800">Step 4/4</text>
+  <rect x="54" y="100" width="326" height="360" rx="12" fill="#0b1220" stroke="#334155"/>
+  <text x="78" y="132" fill="#93c5fd" font-size="15" font-family="SFMono-Regular, Menlo, monospace">source.md</text>
+  <text x="78" y="172" fill="#e5e7eb" font-size="17" font-family="SFMono-Regular, Menlo, monospace">## Review Loop</text>
+  <text x="78" y="210" fill="#d1d5db" font-size="16" font-family="SFMono-Regular, Menlo, monospace">1. Feedback stays attached.</text>
+  <text x="78" y="246" fill="#d1d5db" font-size="16" font-family="SFMono-Regular, Menlo, monospace">2. AI can continue threads.</text>
+  <text x="78" y="282" fill="#d1d5db" font-size="16" font-family="SFMono-Regular, Menlo, monospace">3. Safe patches can apply.</text>
+  <text x="78" y="340" fill="#94a3b8" font-size="14" font-family="SFMono-Regular, Menlo, monospace">.&lt;filename&gt;.ai-review.json</text>
+  <rect x="404" y="100" width="328" height="360" rx="12" fill="#18212f" stroke="#475569"/>
+  <text x="430" y="146" fill="#f8fafc" font-size="28" font-family="Inter, Arial, sans-serif" font-weight="800">Review Loop</text>
+  <text x="430" y="196" fill="#e5e7eb" font-size="19" font-family="Inter, Arial, sans-serif">1. Feedback stays attached.</text>
+  <rect x="428" y="218" width="254" height="34" rx="8" fill="#365314" stroke="#84cc16"/>
+  <text x="442" y="241" fill="#f8fafc" font-size="19" font-family="Inter, Arial, sans-serif">2. AI can continue threads.</text>
+  <text x="430" y="292" fill="#e5e7eb" font-size="19" font-family="Inter, Arial, sans-serif">3. Safe patches can apply.</text>
+  <rect x="462" y="272" width="220" height="84" rx="10" fill="#243447" stroke="#84cc16"/><text x="482" y="304" fill="#e5e7eb" font-size="17" font-family="Inter, Arial, sans-serif">Comment on selected text</text><rect x="584" y="318" width="76" height="28" rx="7" fill="#15803d"/><text x="603" y="338" fill="#f0fdf4" font-size="14" font-family="Inter, Arial, sans-serif" font-weight="700">Save</text>
+  <rect x="486" y="248" width="286" height="174" rx="13" fill="#111827" stroke="#64748b"/><rect x="508" y="270" width="42" height="24" rx="12" fill="#581c87" stroke="#c084fc"/><text x="521" y="288" fill="#f3e8ff" font-size="13" font-family="Inter, Arial, sans-serif" font-weight="800">AI</text><text x="508" y="326" fill="#f8fafc" font-size="17" font-family="Inter, Arial, sans-serif">Needs owner before handoff.</text><rect x="508" y="352" width="116" height="30" rx="7" fill="#374151"/><text x="526" y="372" fill="#e5e7eb" font-size="14" font-family="Inter, Arial, sans-serif">Reply</text><rect x="636" y="352" width="116" height="30" rx="7" fill="#15803d"/><text x="654" y="372" fill="#f0fdf4" font-size="14" font-family="Inter, Arial, sans-serif">Apply Patch</text>
+  <rect x="756" y="100" width="148" height="360" rx="12" fill="#0b1220" stroke="#334155"/>
+  <text x="776" y="136" fill="#f8fafc" font-size="18" font-family="Inter, Arial, sans-serif" font-weight="800">Threads</text>
+  <rect x="776" y="160" width="108" height="58" rx="9" fill="#172554" stroke="#38bdf8"/>
+  <text x="790" y="185" fill="#dbeafe" font-size="14" font-family="Inter, Arial, sans-serif">Located</text>
+  <text x="790" y="205" fill="#bfdbfe" font-size="13" font-family="Inter, Arial, sans-serif">AI thread</text>
+  <rect x="776" y="238" width="108" height="58" rx="9" fill="#14532d" stroke="#84cc16"/>
+  <text x="790" y="263" fill="#dcfce7" font-size="14" font-family="Inter, Arial, sans-serif">Accepted</text>
+  <text x="790" y="283" fill="#bbf7d0" font-size="13" font-family="Inter, Arial, sans-serif">History</text>
+  <text x="54" y="492" fill="#cbd5e1" font-size="20" font-family="Inter, Arial, sans-serif">Apply reliable patches or continue the exact thread with AI.</text>
+</svg>

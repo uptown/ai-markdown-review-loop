@@ -1,6 +1,6 @@
 # Support
 
-Open an issue in the public repository once the GitHub repo is published:
+Open an issue in the public repository:
 
 https://github.com/uptown/ai-markdown-review-loop/issues
 

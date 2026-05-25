@@ -1,31 +1,48 @@
 {
   "name": "ai-markdown-review-loop",
   "displayName": "AI Markdown Review Loop",
-  "description": "Review Markdown with inline feedback, AI-ready threads, and agent handoff exports.",
-  "version": "0.0.8",
+  "description": "Turn Markdown specs into review threads: comment in the rendered preview, keep AI/human discussion attached, and export open feedback to coding agents.",
+  "version": "0.0.9",
   "publisher": "uptown",
   "license": "MIT",
   "repository": {
     "type": "git",
     "url": "https://github.com/uptown/ai-markdown-review-loop.git"
   },
+  "homepage": "https://github.com/uptown/ai-markdown-review-loop#readme",
+  "bugs": {
+    "url": "https://github.com/uptown/ai-markdown-review-loop/issues"
+  },
+  "icon": "media/marketplace-icon.png",
+  "galleryBanner": {
+    "color": "#111827",
+    "theme": "dark"
+  },
+  "pricing": "Free",
   "engines": {
     "vscode": "^1.85.0"
   },
   "categories": [
-    "Other"
+    "Other",
+    "Visualization"
   ],
   "keywords": [
     "markdown",
+    "documentation",
+    "docs",
+    "spec",
+    "prd",
     "review",
+    "feedback",
     "comments",
     "ai",
     "agent",
-    "mcp"
+    "handoff",
+    "mermaid",
+    "table"
   ],
   "activationEvents": [
     "onCustomEditor:aiMarkdownReviewLoop.reviewEditor",
-    "onLanguage:markdown",
     "onCommand:aiMarkdownReviewLoop.openReviewPreview",
     "onCommand:aiMarkdownReviewLoop.openReviewBeside",
     "onCommand:aiMarkdownReviewLoop.reviewDocument",
@@ -218,11 +235,15 @@
     }
   },
   "scripts": {
-    "compile": "tsc -p ./ --noEmit && esbuild src/extension.ts --bundle --platform=node --format=cjs --external:vscode --sourcemap --outfile=out/extension.js && node scripts/copy-vendor.mjs",
+    "compile": "tsc -p ./ --noEmit && esbuild src/extension.ts --bundle --platform=node --format=cjs --external:vscode --outfile=out/extension.js && node scripts/copy-vendor.mjs",
     "watch": "tsc -watch -p ./",
     "check": "tsc -p ./ --noEmit && npm run test:unit",
     "test": "npm run check",
     "test:unit": "tsc -p tsconfig.test.json && node --test .test-out/test",
+    "assets:marketplace": "node scripts/render-marketplace-assets.mjs",
+    "notices:check": "node scripts/check-third-party-notices.mjs",
+    "package:hygiene": "node scripts/check-vsix-hygiene.mjs",
+    "release:check": "npm run assets:marketplace && npm run check && npm run notices:check && npm run package && npm run package:hygiene",
     "vscode:prepublish": "npm run compile",
     "package": "vsce package"
   },

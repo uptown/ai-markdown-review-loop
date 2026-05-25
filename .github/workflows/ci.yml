@@ -18,4 +18,6 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run check
+      - run: npm run notices:check
       - run: npx vsce package
+      - run: npm run package:hygiene
