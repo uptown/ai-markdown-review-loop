@@ -44,6 +44,14 @@ describe('agent review policy', () => {
       /Do not validate, strip, or rewrite existing `openThreads` or `closedThreads`/
     );
     assert.match(
+      AGENT_EDITING_GUIDELINES.join('\n'),
+      /Every Markdown edit made for an `rv_\*` thread must leave thread history/
+    );
+    assert.match(
+      AGENT_EDITING_GUIDELINES.join('\n'),
+      /Do not claim a feedback-loop edit is complete until the Markdown change and sidecar reply\/history update both happened/
+    );
+    assert.match(
       AGENT_THREAD_CREATION_CONTRACT.join('\n'),
       /Do not apply this schema to existing sidecar `openThreads` or `closedThreads`/
     );

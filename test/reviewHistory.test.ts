@@ -78,6 +78,28 @@ describe('review history', () => {
       rv_linked_line: 'linked'
     });
   });
+
+  it('does not relink a closed first occurrence after only a later duplicate survives', () => {
+    const states = getReviewHistoryAnchorStates(
+      [
+        'Spacer',
+        'Omega repeated phrase'
+      ].join('\n'),
+      [
+        thread('rv_deleted_first_occurrence', 'repeated phrase', {
+          lineStart: 1,
+          lineEnd: 1,
+          occurrence: 0,
+          contextBefore: undefined,
+          contextAfter: undefined
+        })
+      ]
+    );
+
+    assert.deepEqual(states, {
+      rv_deleted_first_occurrence: 'outdated'
+    });
+  });
 });
 
 function thread(

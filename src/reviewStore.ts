@@ -16,6 +16,7 @@ import {
   LEGACY_REVIEW_STORAGE_ROOT,
   createColocatedReviewSidecarFileName
 } from './reviewSidecarPaths';
+import { isDuplicateReviewThread } from './reviewThreadDedup';
 import { AnchorConfidence, ReviewDocument, ReviewThread } from './types';
 
 const encoder = new TextEncoder();
@@ -92,11 +93,7 @@ export class ReviewStore {
     const addedThreads: ReviewThread[] = [];
 
     for (const thread of threads) {
-      const duplicate = reviewDocument.threads.some(existing => {
-        return existing.status === 'open'
-          && existing.anchor.lineStart === thread.anchor.lineStart
-          && existing.comment === thread.comment;
-      });
+      const duplicate = reviewDocument.threads.some(existing => isDuplicateReviewThread(existing, thread));
 
       if (!duplicate) {
         reviewDocument.threads.push(thread);

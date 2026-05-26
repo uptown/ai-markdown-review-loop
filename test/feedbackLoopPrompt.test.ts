@@ -18,6 +18,11 @@ describe('createFeedbackLoopPrompt', () => {
     assert.match(prompt, /extension-owned persistence/);
     assert.match(prompt, /preserve full sidecar thread objects and all anchor fields/);
     assert.match(prompt, /`hash`, `confidence`, `lastLocatedLine`, `lastLocatedAt`, `contextBefore`, and `contextAfter`/);
+    assert.match(prompt, /Every Markdown edit that handles or affects an `rv_\*` thread must leave a sidecar history entry/);
+    assert.match(prompt, /appending an assistant reply to the affected thread explaining the outcome/);
+    assert.match(prompt, /AI loop outcome: applied patch/);
+    assert.match(prompt, /Do not claim an edit is complete until both the Markdown change and the sidecar thread history update are done/);
+    assert.match(prompt, /state whether you appended the sidecar reply\/history entry/);
     assert.match(prompt, /Apply Patch and Close.*proposed Markdown change applied/);
     assert.match(prompt, /accept this suggestion/);
     assert.match(prompt, /close the target thread as `accepted` only after the edit succeeds/);

@@ -38,7 +38,6 @@ This extension is built around repeated document-review loops between human auth
 - `Add block`: insert a new Markdown block below a source-mapped block without treating existing review threads as edited.
 - `Delete block`: remove a source-mapped block through the review-aware edit pipeline and keep affected comments visible as needing re-anchor or closure.
 - `Edit Mermaid`: source editor for a Mermaid fenced code block. It replaces only that fenced block and refreshes overlapping thread anchors without deciding review status.
-- `Rewrite block`: manual rewrite path that uses the same review-aware edit pipeline reserved for future AI rewrite integration.
 - `Resolve`: close because the underlying issue has been handled, superseded, or no longer applies.
 - `Restore`: reopen a closed thread, move it back to active feedback, and attach it to the current document again.
 - `Needs re-anchor`: state shown when the original anchor cannot be located reliably; reply, edit manually, restore context, or keep discussing rather than assuming the feedback disappeared.
@@ -116,7 +115,7 @@ Any future AI reviewer integration should use these canonical inputs:
 2. The author opens the block editor from the rendered preview, optionally switches to raw Markdown mode, or inserts a new block below the current block.
 3. The extension replaces or inserts only the source-mapped Markdown lines for that operation.
 4. Overlapping open threads receive refreshed anchor text, line hints, hash, context snippets, and an edit outcome reply; inserted blocks do not mark existing threads as edited.
-5. Deleting a reviewed block keeps affected comments visible with missing-anchor state instead of silently dropping them.
+5. Deleting a reviewed block keeps affected comments visible with missing-anchor state instead of silently dropping them or recovering them onto neighboring sections.
 6. Ordinary source edits outside this pipeline still use debounced re-anchor fallback and only persist high-confidence locations.
 
 ### Mermaid Source Edit
@@ -158,7 +157,7 @@ Any future AI reviewer integration should use these canonical inputs:
 
 ## Agent Behavior
 
-Agents should treat the colocated review sidecar as part of the document state. Review sidecars live beside Markdown documents as hidden `.<filename>.ai-review.json` files, with legacy `.ai-markdown-review/` paths supported for older workspaces. Agents should preserve sidecar review data, avoid creating inline `ai-review-*` metadata comments, prefer localized edits, keep nearby context stable where possible, and report every handled `rv_*` ID with an outcome. Agents should not close threads as `accepted`, `resolved`, or `rejected` unless the user explicitly asks them to make that review decision.
+Agents should treat the colocated review sidecar as part of the document state. Review sidecars live beside Markdown documents as hidden `.<filename>.ai-review.json` files, with legacy `.ai-markdown-review/` paths supported for older workspaces. Agents should preserve sidecar review data, avoid creating inline `ai-review-*` metadata comments, prefer localized edits, keep nearby context stable where possible, and report every handled `rv_*` ID with an outcome. When an agent edits Markdown because of a review thread, it should also leave durable sidecar thread history by using a review-aware extension action or appending an assistant reply to the affected thread. Agents should not claim the feedback loop is complete if the document changed but the sidecar discussion did not. Agents should not close threads as `accepted`, `resolved`, or `rejected` unless the user explicitly asks them to make that review decision.
 
 When an AI rewrite provider is added, it should emit a review-aware edit plan instead of rewriting Markdown directly. The plan should identify the selected range, actor, intent, target thread when applicable, and whether a user explicitly requested a status decision.
 

@@ -118,7 +118,9 @@ export function renderFeedbackExport(reviewDocument: ReviewDocument): string {
     ``,
     `Do not mark the task complete until every open feedback item has an explicit outcome in your response. Do not close review threads unless the user explicitly asks you to mark them accepted, resolved, or rejected.`,
     ``,
-    `Outcome vocabulary: replied keeps the thread open with new context; applied patch means Markdown changed and the thread may close as accepted only after the edit succeeds; preserved means the thread stayed attached after nearby edits; stale or blocked means the thread stays open; needs human decision means stop before deciding and leave the thread open for the human.`
+    `For any Markdown edit that handles or affects an \`rv_*\` thread, the done state is two-part: the Markdown changed and the colocated sidecar thread history was updated with an assistant reply explaining the outcome. If you cannot update sidecar history safely, report the thread as blocked instead of claiming the loop is complete.`,
+    ``,
+    `Outcome vocabulary: replied keeps the thread open with new context; applied patch means Markdown changed and sidecar history records the edit outcome, and the thread may close as accepted only after the edit succeeds; preserved means the thread stayed attached after nearby edits; stale or blocked means the thread stays open; needs human decision means stop before deciding and leave the thread open for the human.`
   );
 
   return lines.join('\n');

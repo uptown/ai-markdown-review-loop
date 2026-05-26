@@ -16,6 +16,7 @@ describe('htmlBlockToMarkdown', () => {
 
   it('maps contenteditable monospace formatting to inline code', () => {
     assert.equal(htmlBlockToMarkdown('<p>Run <font face="monospace">npm run check</font>.</p>'), 'Run `npm run check`.');
+    assert.equal(htmlBlockToMarkdown('<p>Run <code>npm run package</code>.</p>'), 'Run `npm run package`.');
   });
 
   it('normalizes excessive blank lines from edited blocks', () => {

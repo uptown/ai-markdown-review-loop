@@ -13,6 +13,8 @@ export const AGENT_EDITING_GUIDELINES = [
   'Prefer localized edits over whole-document rewrites so anchors can keep tracking nearby content.',
   'When editing text with open feedback, keep enough nearby context stable for anchor recovery.',
   'Do not silently delete or rewrite open review comments. If a comment no longer matches after your edit, call that out and leave it open for re-anchor.',
+  'Every Markdown edit made for an `rv_*` thread must leave thread history in the sidecar. Prefer plugin review-aware edit actions; if editing directly, append an assistant reply to each affected thread with the outcome and evidence.',
+  'Do not claim a feedback-loop edit is complete until the Markdown change and sidecar reply/history update both happened. If sidecar history cannot be updated safely, report the thread as blocked.',
   'Use replies to discuss, clarify, or challenge feedback. If you disagree, propose a reply or objection instead of ignoring the thread.',
   'Do not mark a thread `accepted`, `resolved`, or `rejected` on behalf of the user unless they explicitly ask you to close it.',
   'Report every handled `rv_*` ID in your response with an outcome: applied, partially applied, replied, needs user decision, or blocked.'

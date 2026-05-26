@@ -73,12 +73,16 @@ export function createFeedbackLoopPrompt(input: FeedbackLoopPromptInput): string
     'When editing Markdown:',
     '- Prefer the smallest stable span that satisfies the thread.',
     '- Treat the colocated sidecar as extension-owned persistence. If a normal edit touches nearby files, preserve full sidecar thread objects and all anchor fields such as `hash`, `confidence`, `lastLocatedLine`, `lastLocatedAt`, `contextBefore`, and `contextAfter`.',
+    '- Every Markdown edit that handles or affects an `rv_*` thread must leave a sidecar history entry. Prefer the extension/plugin review-aware edit action; if you edit files directly, update the colocated sidecar in the same turn by appending an assistant reply to the affected thread explaining the outcome.',
+    '- The sidecar reply should name the outcome and evidence, for example `AI loop outcome: applied patch`, `AI loop outcome: edited nearby and preserved anchor`, `AI loop outcome: blocked`, or `AI loop outcome: needs human decision`.',
+    '- Do not claim an edit is complete until both the Markdown change and the sidecar thread history update are done. If you cannot update the sidecar safely, report the edit as blocked and ask the human to use the extension action or provide the sidecar.',
     '- If an anchor moved, partially changed, or became stale, report the affected `rv_*` id and whether it was preserved, re-anchored, left open, or needs a human decision.',
     '- If a suggested patch is missing, duplicated ambiguously, or attached to a low-confidence anchor, do not guess. Reply with the blocker and ask for a human decision.',
     '',
     'Final response requirements:',
     '- Restate the review session brief if it changed during this turn.',
     '- List each touched `rv_*` thread.',
+    '- For any thread that led to a Markdown edit, state whether you appended the sidecar reply/history entry.',
     '- For each one, report one outcome: replied - waiting for human decision, applied patch, edited nearby, preserved, stale, blocked, resolved by human request, or needs human decision.',
     '- Do not claim the loop is complete until every open feedback item involved in this turn has an explicit outcome.'
   ].join('\n');

@@ -24,6 +24,8 @@ describe('createContextBootstrapPrompt', () => {
     assert.match(prompt, /Do not rewrite or normalize sidecar JSON by hand/);
     assert.match(prompt, /extension owns existing thread and history records/);
     assert.match(prompt, /preserve full thread objects and all anchor metadata/);
+    assert.match(prompt, /If you edit Markdown because of an existing review thread/);
+    assert.match(prompt, /append a sidecar reply to the affected `rv_\*` thread/);
     assert.match(prompt, /proposed-thread schema is only for proposing new AI-authored open feedback/);
     assert.match(prompt, /Never use that proposal schema to validate, strip, or rewrite existing sidecar records/);
     assert.match(prompt, /do not create inline `ai-review-\*` metadata comments/);

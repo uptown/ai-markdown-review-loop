@@ -125,6 +125,9 @@ The generated bootstrap prompt should tell the AI to:
   edits and avoid creating inline `ai-review-*` metadata comments
 - avoid rewriting sidecar `openThreads` or `closedThreads` by hand; if a
   sidecar is touched, preserve full thread objects and all anchor metadata
+- when a Markdown edit handles an `rv_*` thread, append or preserve a sidecar
+  reply that records the AI loop outcome; do not call the loop complete if the
+  Markdown changed but the thread history did not
 - treat `docs/agent-review-thread.schema.json` as a proposal schema for new
   AI-authored open feedback only, not as the schema for existing sidecar
   history
@@ -144,6 +147,8 @@ The export packet for AI agents should:
   context status panel in the review preview
 - reinforce that Markdown edits must preserve sidecar review state and report
   affected thread outcomes
+- reinforce that applied edits need durable sidecar thread history, not only a
+  final chat summary
 
 That way the first AI review pass starts from explicit context instead of
 default model assumptions.

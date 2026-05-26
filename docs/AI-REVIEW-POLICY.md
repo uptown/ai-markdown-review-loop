@@ -86,6 +86,8 @@ Use `low` for non-blocking improvements that still deserve review attention.
 - AI should preserve colocated `.<filename>.ai-review.json` sidecar review files during normal edits.
 - The sidecar is extension-owned persistence. Do not validate, strip, or rewrite existing `openThreads` or `closedThreads` with the proposed-thread schema.
 - If a normal Markdown edit touches nearby review state, preserve full sidecar thread objects and all anchor metadata, including `hash`, `confidence`, `lastLocatedLine`, `lastLocatedAt`, `contextBefore`, and `contextAfter`.
+- If you edit Markdown because of an `rv_*` thread, the feedback loop is not complete until the sidecar thread history also records what happened. Prefer extension/plugin review-aware edit actions. When editing files directly, append an assistant reply to each affected thread with the outcome and evidence.
+- If you cannot update sidecar history safely, report the affected thread as blocked instead of saying the loop is complete.
 - AI should not create inline `ai-review-*` metadata comments. Older inline metadata is legacy recovery data and should only be cleaned when the user asks.
 
 ## Machine Contract

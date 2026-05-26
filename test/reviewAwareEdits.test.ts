@@ -211,6 +211,8 @@ describe('review-aware edits', () => {
 
     assert.equal(updates[0].update.anchor?.text, 'Delete me');
     assert.equal(updates[0].update.anchor?.confidence, 'missing');
+    assert.equal(updates[0].update.anchor?.contextBefore, undefined);
+    assert.equal(updates[0].update.anchor?.contextAfter, undefined);
     assert.equal(updates[0].update.thread?.[0].role, 'assistant');
     assert.match(updates[0].update.thread?.[0].text ?? '', /deleted the reviewed block/);
   });
@@ -266,9 +268,9 @@ describe('review-aware edits', () => {
       })
     ], plan, now);
 
-    assert.equal(applyReviewAwareEditToMarkdown(markdown, plan), 'Intro\nNew paragraph\nOutro');
-    assert.equal(plan.lineStart, 2);
-    assert.equal(plan.lineEnd, 2);
+    assert.equal(applyReviewAwareEditToMarkdown(markdown, plan), 'Intro\n\nNew paragraph\n\nOutro');
+    assert.equal(plan.lineStart, 3);
+    assert.equal(plan.lineEnd, 3);
     assert.equal(plan.affectsExistingThreads, false);
     assert.equal(updates.length, 0);
   });
@@ -284,10 +286,10 @@ describe('review-aware edits', () => {
 
     assert.equal(
       applyReviewAwareEditToMarkdown(markdown, plan),
-      ['Intro', 'First inserted', 'Second inserted', 'Outro'].join('\n')
+      ['Intro', '', 'First inserted', 'Second inserted', '', 'Outro'].join('\n')
     );
-    assert.equal(plan.lineStart, 2);
-    assert.equal(plan.lineEnd, 3);
+    assert.equal(plan.lineStart, 3);
+    assert.equal(plan.lineEnd, 4);
   });
 
   it('inserts a Markdown block at the end and into an empty document', () => {
@@ -304,9 +306,9 @@ describe('review-aware edits', () => {
       intent: 'insert_block'
     });
 
-    assert.equal(applyReviewAwareEditToMarkdown('Intro', endPlan), 'Intro\nNew ending');
-    assert.equal(endPlan.lineStart, 2);
-    assert.equal(endPlan.lineEnd, 2);
+    assert.equal(applyReviewAwareEditToMarkdown('Intro', endPlan), 'Intro\n\nNew ending');
+    assert.equal(endPlan.lineStart, 3);
+    assert.equal(endPlan.lineEnd, 3);
     assert.equal(applyReviewAwareEditToMarkdown('', emptyPlan), 'First block');
     assert.equal(emptyPlan.lineStart, 1);
     assert.equal(emptyPlan.lineEnd, 1);

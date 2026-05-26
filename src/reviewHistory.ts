@@ -37,10 +37,6 @@ export function hasLinkedHistoryAnchor(markdown: string, thread: ReviewThread): 
     return false;
   }
 
-  if (candidates.length === 1) {
-    return true;
-  }
-
   const preferredLine = thread.anchor.lastLocatedLine ?? thread.anchor.lineStart;
 
   if (preferredLine !== undefined && candidates.some(candidate => candidate.lineNumber === preferredLine)) {
@@ -48,8 +44,11 @@ export function hasLinkedHistoryAnchor(markdown: string, thread: ReviewThread): 
   }
 
   const occurrence = normalizeOccurrence(thread.anchor.occurrence);
+  const occurrenceCandidate = occurrence !== undefined
+    ? candidates[occurrence]
+    : undefined;
 
-  if (occurrence !== undefined && candidates[occurrence]) {
+  if (candidates.length === 1 && occurrence === undefined) {
     return true;
   }
 
@@ -60,7 +59,11 @@ export function hasLinkedHistoryAnchor(markdown: string, thread: ReviewThread): 
     return false;
   }
 
-  return candidates.some(candidate => {
+  const contextCandidates = occurrenceCandidate
+    ? [occurrenceCandidate]
+    : candidates;
+
+  return contextCandidates.some(candidate => {
     const before = normalizeAnchorText(lines.slice(Math.max(0, candidate.lineNumber - 3), candidate.lineNumber - 1).join('\n'));
     const after = normalizeAnchorText(lines.slice(candidate.lineNumber, Math.min(lines.length, candidate.lineNumber + 2)).join('\n'));
     return (!contextBefore || before.includes(contextBefore))

@@ -146,11 +146,12 @@ export function createLineInsertionEditPlan(
   const start = lineEndOffset(markdown, afterLine);
   const normalizedReplacement = normalizeInsertionBlock(markdown, input.replacement);
   const replacement = createInsertionReplacement(markdown, start, normalizedReplacement);
+  const leadingLineBreaks = countLeadingLineBreaks(replacement);
   const insertedLineCount = Math.max(
     1,
     countLineBreaks(normalizedReplacement) + (normalizedReplacement ? 1 : 0)
   );
-  const lineStart = markdown.length === 0 ? 1 : afterLine + 1;
+  const lineStart = markdown.length === 0 ? 1 : afterLine + Math.max(1, leadingLineBreaks);
 
   return {
     start,
@@ -304,7 +305,9 @@ function createNextAnchor(
   }
 
   const missingLine = lineNumberAtOffset(afterMarkdown, plan.start);
-  const context = createOffsetContext(afterMarkdown, plan.start, plan.replacement.length);
+  const context = plan.intent === 'delete_block'
+    ? {}
+    : createOffsetContext(afterMarkdown, plan.start, plan.replacement.length);
   const nextAnchorText = thread.anchor.text;
   return {
     ...thread.anchor,
@@ -524,8 +527,29 @@ function createInsertionReplacement(markdown: string, offset: number, normalized
     return normalizedReplacement;
   }
 
-  const prefix = offset > 0 ? eol : '';
-  return `${prefix}${normalizedReplacement}`;
+  const prefix = offset <= 0
+    ? ''
+    : needsInsertionBlankLineBefore(markdown, offset) ? `${eol}${eol}` : eol;
+  const suffix = needsInsertionBlankLineAfter(markdown, offset) ? eol : '';
+  return `${prefix}${normalizedReplacement}${suffix}`;
+}
+
+function needsInsertionBlankLineBefore(markdown: string, offset: number): boolean {
+  if (offset <= 0) {
+    return false;
+  }
+
+  return !/(?:\r\n|\r|\n){2}$/.test(markdown.slice(0, offset));
+}
+
+function needsInsertionBlankLineAfter(markdown: string, offset: number): boolean {
+  const after = markdown.slice(offset);
+
+  if (!after) {
+    return false;
+  }
+
+  return !/^(?:\r\n|\r|\n){2}/.test(after);
 }
 
 function normalizeInsertionBlock(markdown: string, replacement: string): string {
@@ -544,6 +568,10 @@ function stripOuterLineBreaks(value: string): string {
 
 function countLineBreaks(value: string): number {
   return (value.match(/\r\n|\r|\n/g) ?? []).length;
+}
+
+function countLeadingLineBreaks(value: string): number {
+  return countLineBreaks(value.match(/^(?:\r\n|\r|\n)+/)?.[0] ?? '');
 }
 
 function lineEndOffsetIncludingFollowingNewline(text: string, lineEnd: number): number {

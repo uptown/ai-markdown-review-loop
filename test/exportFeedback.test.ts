@@ -96,6 +96,9 @@ describe('renderFeedbackExport', () => {
     assert.doesNotMatch(output, /# AI Context Brief/);
     assert.doesNotMatch(output, /"source": "ai"/);
     assert.match(output, /Do not mark a thread `accepted`, `resolved`, or `rejected`/);
+    assert.match(output, /done state is two-part: the Markdown changed and the colocated sidecar thread history was updated/);
+    assert.match(output, /If you cannot update sidecar history safely, report the thread as blocked/);
+    assert.match(output, /applied patch means Markdown changed and sidecar history records the edit outcome/);
     assert.match(output, /## rv_open/);
     assert.match(output, /- Anchor confidence: recovered/);
     assert.match(output, /- Allowed to close: no/);

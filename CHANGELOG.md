@@ -4,6 +4,33 @@
 
 - None.
 
+## 0.0.18 - 2026-05-26
+
+- Removes the premature rendered-block `Rewrite` button until a real AI rewrite or suggested-patch workflow exists.
+- Keeps rendered-block editing focused on explicit `Edit`, `Add Below`, and `Delete` actions.
+
+## 0.0.17 - 2026-05-26
+
+- Clarifies rendered-block actions by labeling insertion as `Add Below` and distinguishing manual edits from whole-block rewrites in tooltips.
+- Inserts new rendered-preview Markdown blocks as separated blocks below the selected source line instead of merging them into adjacent paragraphs.
+- Lets the block editor switch to Raw after rich formatting changes by converting the current rich editor contents back to Markdown first.
+- Makes inline `Code` formatting visibly wrap text in `<code>` styling and preserve toolbar selections during formatting.
+
+## 0.0.16 - 2026-05-26
+
+- Prevents closed-history anchors from reporting `Linked` solely because a later duplicate occurrence survived after the original was removed.
+- Keeps imported same-line review comments distinct when their anchor occurrence or surrounding identity differs.
+- Stops Mermaid diagram comments from decorating every figure that shares a common snippet; full-fence matches stay exact, while source-line-scoped snippet matches are approximate.
+
+## 0.0.15 - 2026-05-26
+
+- Strengthens AI feedback-loop prompts and exports so direct AI-applied Markdown edits must also append sidecar thread history before the loop is considered complete.
+
+## 0.0.14 - 2026-05-26
+
+- Prevents comments on deleted Markdown blocks from being automatically re-anchored to neighboring sections.
+- Clears misleading surrounding context from delete-block missing anchors so `Needs re-anchor` remains explicit until the user decides what to do.
+
 ## 0.0.13 - 2026-05-26
 
 - Adds rendered-preview block insertion below a source-mapped block through the review-aware edit path.
