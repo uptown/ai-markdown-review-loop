@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import {
+  AGENT_ACTION_PACKET_CONTRACT,
+  AGENT_ACTION_PACKET_TEMPLATE,
   AGENT_COLLABORATION_LOOP_DOC_PATH,
   AGENT_CONTEXT_BOOTSTRAP_DOC_PATH,
   AGENT_CONTEXT_BOOTSTRAP_GUIDELINES,
@@ -18,6 +20,10 @@ describe('agent review policy', () => {
     assert.ok(AGENT_EDITING_GUIDELINES.length >= 5);
     assert.ok(AGENT_COMMENTING_GUIDELINES.length >= 5);
     assert.ok(AGENT_THREAD_CREATION_CONTRACT.length >= 4);
+    assert.ok(AGENT_ACTION_PACKET_CONTRACT.length >= 5);
+    assert.match(AGENT_ACTION_PACKET_TEMPLATE, /"action": "propose_edit_plan"/);
+    assert.match(AGENT_ACTION_PACKET_TEMPLATE, /"sidecarReply"/);
+    assert.match(AGENT_ACTION_PACKET_CONTRACT.join('\n'), /`record_outcome`/);
   });
 
   it('ships a thread creation schema aligned with the review policy', () => {
@@ -39,6 +45,9 @@ describe('agent review policy', () => {
     assert.match(policy, /Schema: \[`docs\/agent-review-thread.schema.json`\]/);
     assert.match(policy, /proposal schema, not the sidecar persistence schema/);
     assert.match(policy, /Existing\s+`openThreads` and `closedThreads` are full host-owned thread records/);
+    assert.match(policy, /Action packet shape/);
+    assert.match(policy, /propose_edit_plan/);
+    assert.match(policy, /sidecarReply/);
     assert.match(
       AGENT_EDITING_GUIDELINES.join('\n'),
       /Do not validate, strip, or rewrite existing `openThreads` or `closedThreads`/

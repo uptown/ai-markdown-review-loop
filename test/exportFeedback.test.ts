@@ -76,6 +76,12 @@ describe('renderFeedbackExport', () => {
     assert.ok(output.indexOf('## Open Review Threads') < output.indexOf('## Agent Editing Guidelines'));
     assert.ok(output.indexOf('## rv_open') < output.indexOf('## Agent Editing Guidelines'));
     assert.match(output, /## Agent Editing Guidelines/);
+    assert.match(output, /## Agent Action Packet/);
+    assert.ok(output.indexOf('## Agent Action Packet') < output.indexOf('## Agent Editing Guidelines'));
+    assert.match(output, /`reply_thread` continues an existing `rv_\*` discussion/);
+    assert.match(output, /`propose_edit_plan` describes a planned Markdown edit before mutation/);
+    assert.match(output, /"action": "propose_edit_plan"/);
+    assert.match(output, /"sidecarReply"/);
     assert.match(output, /## Agent Commenting Guidelines/);
     assert.match(output, /## Agent Thread Creation Contract/);
     assert.match(output, /## Human-AI Feedback Loop/);

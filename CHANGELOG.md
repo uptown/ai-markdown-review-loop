@@ -4,6 +4,14 @@
 
 - None.
 
+## 0.0.19 - 2026-05-27
+
+- Frames the Review Threads side panel as a sticky floating review frame when space allows.
+- Prevents rendered-block edit controls from appearing on read-only AI prompt documents and floating over the feedback-loop prompt header.
+- Adds table-level and table-cell comment buttons so rendered Markdown tables can receive review feedback without manual source selection.
+- Renames the `Recovered` anchor state label to `Found nearby` in the UI and docs while keeping the underlying compatibility value unchanged.
+- Adds a closed-loop AI action packet contract and template to feedback-loop prompts, agent exports, and policy docs so AI turns can plan, reply, record outcomes, or request closure explicitly.
+
 ## 0.0.18 - 2026-05-26
 
 - Removes the premature rendered-block `Rewrite` button until a real AI rewrite or suggested-patch workflow exists.

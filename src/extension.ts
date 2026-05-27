@@ -114,14 +114,14 @@ async function resolveMarkdownDocument(
 ): Promise<vscode.TextDocument | undefined> {
   if (targetUri) {
     const document = await vscode.workspace.openTextDocument(targetUri);
-    if (isMarkdown(document)) {
+    if (isReviewableMarkdown(document)) {
       return document;
     }
   }
 
   const activeDocument = vscode.window.activeTextEditor?.document;
 
-  if (activeDocument && isMarkdown(activeDocument)) {
+  if (activeDocument && isReviewableMarkdown(activeDocument)) {
     return activeDocument;
   }
 
@@ -129,7 +129,7 @@ async function resolveMarkdownDocument(
 
   if (currentUri) {
     const document = await vscode.workspace.openTextDocument(currentUri);
-    if (isMarkdown(document)) {
+    if (isReviewableMarkdown(document)) {
       return document;
     }
   }
@@ -137,8 +137,9 @@ async function resolveMarkdownDocument(
   return undefined;
 }
 
-function isMarkdown(document: vscode.TextDocument): boolean {
-  return document.languageId === 'markdown' || document.fileName.toLowerCase().endsWith('.md');
+function isReviewableMarkdown(document: vscode.TextDocument): boolean {
+  return document.uri.scheme === 'file'
+    && (document.languageId === 'markdown' || document.fileName.toLowerCase().endsWith('.md'));
 }
 
 async function migrateRenamedMarkdownReviews(

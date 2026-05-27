@@ -15,6 +15,12 @@ describe('createFeedbackLoopPrompt', () => {
     assert.match(prompt, /Review Threads as conversation state/);
     assert.match(prompt, /Do not validate, strip, or rewrite existing sidecar `openThreads` or `closedThreads`/);
     assert.match(prompt, /schema is only for proposed new AI-authored open feedback/);
+    assert.match(prompt, /Closed-loop action packet/);
+    assert.match(prompt, /`propose_edit_plan` describes a planned Markdown edit before mutation/);
+    assert.match(prompt, /`record_outcome` records what happened after an edit/);
+    assert.match(prompt, /"action": "propose_edit_plan"/);
+    assert.match(prompt, /"sidecarReply"/);
+    assert.match(prompt, /"closeRequest": null/);
     assert.match(prompt, /extension-owned persistence/);
     assert.match(prompt, /preserve full sidecar thread objects and all anchor fields/);
     assert.match(prompt, /`hash`, `confidence`, `lastLocatedLine`, `lastLocatedAt`, `contextBefore`, and `contextAfter`/);

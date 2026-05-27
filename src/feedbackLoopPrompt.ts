@@ -1,4 +1,8 @@
 import type * as Vscode from 'vscode';
+import {
+  AGENT_ACTION_PACKET_CONTRACT,
+  AGENT_ACTION_PACKET_TEMPLATE
+} from './agentReviewPolicy';
 
 export interface FeedbackLoopPromptInput {
   currentDocumentPath?: string;
@@ -51,6 +55,15 @@ export function createFeedbackLoopPrompt(input: FeedbackLoopPromptInput): string
     '5. Make localized Markdown edits only through review-aware edit paths when plugin tools are available.',
     '6. Preserve thread ids, replies, sidecar links, anchor context, status history, and decision history.',
     '7. Do not validate, strip, or rewrite existing sidecar `openThreads` or `closedThreads` using `docs/agent-review-thread.schema.json`; that schema is only for proposed new AI-authored open feedback before the host creates a full thread.',
+    '',
+    'Closed-loop action packet:',
+    ...AGENT_ACTION_PACKET_CONTRACT.map(line => `- ${line}`),
+    '',
+    'Use this shape when an AI turn needs to hand a concrete action back to the host, human, or next agent:',
+    '',
+    '```json',
+    AGENT_ACTION_PACKET_TEMPLATE,
+    '```',
     '',
     'Action semantics:',
     '- `Apply Patch and Close` means the human wants the proposed Markdown change applied. Apply the patch through the review-aware edit path, refresh affected anchors, record an edit outcome reply, and close the target thread as `accepted` only after the edit succeeds.',

@@ -20,6 +20,39 @@ export const AGENT_EDITING_GUIDELINES = [
   'Report every handled `rv_*` ID in your response with an outcome: applied, partially applied, replied, needs user decision, or blocked.'
 ];
 
+export const AGENT_ACTION_PACKET_CONTRACT = [
+  'Use one action packet for each closed-loop AI review step so the host or human can distinguish discussion from document mutation.',
+  '`create_thread` proposes new AI-authored feedback for the host to materialize as an open thread.',
+  '`reply_thread` continues an existing `rv_*` discussion without changing Markdown or closing the thread.',
+  '`propose_edit_plan` describes a planned Markdown edit before mutation, especially when a plan-mode agent is available.',
+  '`record_outcome` records what happened after an edit, reply, or blocker so the sidecar thread history can close the loop.',
+  '`close_request` asks the human or host to close a thread as accepted, resolved, or rejected only after the user made that decision.',
+  'Every action packet that handles an existing thread must include the `rv_*` thread id and a sidecar reply or outcome note.',
+  'Do not treat an action packet as permission to close a thread unless it contains an explicit user-requested close decision.'
+];
+
+export const AGENT_ACTION_PACKET_TEMPLATE = `{
+  "action": "propose_edit_plan",
+  "threadId": "rv_example",
+  "target": {
+    "markdownPath": "docs/example.md",
+    "anchorText": "Smallest stable reviewed span",
+    "lineStart": 12,
+    "lineEnd": 12
+  },
+  "plan": {
+    "intent": "Apply a localized clarification while preserving review metadata.",
+    "steps": [
+      "Edit only the source lines needed for this thread.",
+      "Refresh or preserve the colocated .<filename>.ai-review.json sidecar.",
+      "Append a sidecar reply describing the outcome."
+    ]
+  },
+  "sidecarReply": "AI loop outcome: planned localized edit for rv_example; waiting for explicit apply approval.",
+  "closeRequest": null,
+  "blockers": []
+}`;
+
 export const AGENT_COMMENTING_GUIDELINES = [
   'Comment on material issues only: correctness, ambiguity, missing ownership, missing acceptance criteria, contradiction, hidden implementation risk, or unverifiable requirements.',
   'Do not open new threads for style nits, wording preferences, praise-only observations, or problems already captured by an existing open thread.',

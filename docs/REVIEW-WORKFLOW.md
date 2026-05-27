@@ -22,6 +22,7 @@ This extension is built around repeated document-review loops between human auth
 - As an AI-agent user, I want my current review goal, focus, and non-goals to travel with the prompt/export so AI feedback follows this session instead of generic rules.
 - As an author, I want stale sidecar warnings to help me inspect or find review data before offering destructive cleanup.
 - As an author, I want rename or move operations on reviewed Markdown files to keep their review state attached.
+- As an AI-agent user, I want AI feedback-loop turns to use a structured action packet so the agent either comments, plans, applies, records an outcome, or asks for a close decision instead of continuing an ambiguous comment chain.
 
 ## Action Vocabulary
 
@@ -45,6 +46,7 @@ This extension is built around repeated document-review loops between human auth
 - `Clean legacy metadata`: remove older inline `ai-review-*` comments from Markdown source after confirming the colocated sidecar has the review state; this is not a review decision.
 - `Export for Agent`: package open threads for AI work without mutating review state.
 - `Review Session Brief`: current human instructions for this pass, including review goal, focus areas, non-goals, constraints, preferred comment style, and done condition.
+- `Action packet`: compact AI-to-host handoff that names one action such as `create_thread`, `reply_thread`, `propose_edit_plan`, `record_outcome`, or `close_request`.
 
 ## AI Review Contracts
 
@@ -63,6 +65,13 @@ Any future AI reviewer integration should use these canonical inputs:
 - the collaboration loop doc for thread-level interaction rules
 - the context bootstrap doc for first-pass grounding rules
 - the schema file for payload validation
+
+For active thread iteration, AI agents should use an action packet before
+mutating Markdown or asking to close a thread. The packet keeps the loop closed:
+the AI either records a reply, proposes a plan-mode edit, records an edit
+outcome in sidecar history, or asks for an explicit human decision. This makes
+`user -> AI` and `AI -> user -> AI` flows easier to audit and reduces the need
+for broad anchor-recovery hacks.
 
 ## Scenarios
 
@@ -90,14 +99,15 @@ Any future AI reviewer integration should use these canonical inputs:
 
 1. AI opens a thread with a concrete issue and optional suggested patch.
 2. The human replies with constraints, objections, or approval.
-3. AI responds inside the same thread with a narrower diagnosis, a revised patch, or a clarification question.
-4. The human decides whether to apply a suggested patch, resolve the handled issue, or keep the thread open for discussion.
+3. AI uses an action packet to choose the next move: reply, propose an edit plan, record a blocked outcome, or request closure.
+4. If the next move changes Markdown, the AI should plan first when plan-mode tooling is available, then apply the localized edit through a review-aware path.
+5. The loop closes only when the edit outcome is recorded in sidecar history or the human explicitly resolves, accepts, or declines the thread.
 
 ### AI Suggestion, Manual Fix
 
 1. AI feedback says an acceptance criterion is not testable.
 2. The author edits the Markdown manually instead of applying the exact suggested patch.
-3. The anchor is recovered near the changed paragraph.
+3. The anchor is found near the changed paragraph.
 4. The author marks the thread `Resolve` because the issue was fixed, not `Accept` because an AI patch was applied.
 
 ### AI Suggestion, Patch Accepted

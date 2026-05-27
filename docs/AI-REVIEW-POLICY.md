@@ -105,6 +105,39 @@ This is a proposal schema, not the sidecar persistence schema. Existing
 contain richer anchor fields than the proposal schema allows. Preserving those
 fields is required for reliable re-anchoring and review history.
 
+For active feedback-loop turns, agents should emit or follow a small action
+packet before mutating Markdown. The action packet makes the loop explicit:
+create a thread, reply to a thread, propose an edit plan, record an outcome, or
+request a user-approved close decision. This keeps AI-to-human-to-AI work from
+becoming an unbounded comment chain and gives the host a stable way to apply
+plan-mode edits while preserving sidecar history.
+
+Action packet shape:
+
+```json
+{
+  "action": "propose_edit_plan",
+  "threadId": "rv_example",
+  "target": {
+    "markdownPath": "docs/example.md",
+    "anchorText": "Smallest stable reviewed span",
+    "lineStart": 12,
+    "lineEnd": 12
+  },
+  "plan": {
+    "intent": "Apply a localized clarification while preserving review metadata.",
+    "steps": [
+      "Edit only the source lines needed for this thread.",
+      "Refresh or preserve the colocated .<filename>.ai-review.json sidecar.",
+      "Append a sidecar reply describing the outcome."
+    ]
+  },
+  "sidecarReply": "AI loop outcome: planned localized edit for rv_example; waiting for explicit apply approval.",
+  "closeRequest": null,
+  "blockers": []
+}
+```
+
 ## Example Good Thread
 
 ```json

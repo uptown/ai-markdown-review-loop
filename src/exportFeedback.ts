@@ -1,4 +1,6 @@
 import {
+  AGENT_ACTION_PACKET_CONTRACT,
+  AGENT_ACTION_PACKET_TEMPLATE,
   AGENT_COMMENTING_GUIDELINES,
   AGENT_COLLABORATION_LOOP_GUIDELINES,
   AGENT_CONTEXT_BOOTSTRAP_GUIDELINES,
@@ -85,6 +87,16 @@ export function renderFeedbackExport(reviewDocument: ReviewDocument): string {
   }
 
   lines.push(
+    `## Agent Action Packet`,
+    ``,
+    ...AGENT_ACTION_PACKET_CONTRACT.map(line => `- ${line}`),
+    ``,
+    `Template:`,
+    ``,
+    '```json',
+    AGENT_ACTION_PACKET_TEMPLATE,
+    '```',
+    ``,
     `## Agent Editing Guidelines`,
     ``,
     ...AGENT_EDITING_GUIDELINES.map(line => `- ${line}`),

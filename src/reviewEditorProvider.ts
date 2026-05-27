@@ -1079,6 +1079,7 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
       collectMermaidSourceBlocks(previewMarkdown),
       reviewDocument.threads.filter(thread => thread.status === 'open')
     );
+    const canEditMarkdown = document.uri.scheme === 'file';
     const suggestedPatchResults = getSuggestedPatchResults(documentText, reviewDocument.threads);
     const mermaidScriptUri = webview.asWebviewUri(
       vscode.Uri.joinPath(this.context.extensionUri, 'out', 'vendor', 'mermaid.min.js')
@@ -1097,6 +1098,7 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
         reviewDocument.threads.map(thread => [thread.id, getReplyShortcutDescriptors(thread)])
       ),
       tables,
+      canEditMarkdown,
       sourceLines: documentText.split(/\r\n|\r|\n/),
       sourceLineEnding,
       documentVersion: document.version,
@@ -1127,7 +1129,8 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
     }
     .layout {
       display: grid;
-      grid-template-columns: minmax(0, 1fr) 340px;
+      grid-template-columns: minmax(0, 1fr) minmax(320px, 380px);
+      gap: 18px;
       min-height: 100vh;
     }
     main {
@@ -1202,7 +1205,14 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
       z-index: 1;
     }
     aside {
-      border-left: 1px solid var(--border);
+      align-self: start;
+      position: sticky;
+      top: 16px;
+      max-height: calc(100vh - 32px);
+      margin: 16px 16px 16px 0;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
       background: var(--panel);
       padding: 16px;
       overflow: auto;
@@ -1770,9 +1780,8 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
     }
     .block-edit-actions {
       position: absolute;
-      top: 0;
-      right: 0;
-      transform: translateY(calc(-100% - 4px));
+      top: 6px;
+      right: 6px;
       display: flex;
       gap: 4px;
       padding: 2px;
@@ -1801,6 +1810,23 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
     .block-edit-actions button.danger {
       color: var(--vscode-errorForeground);
       border-color: var(--vscode-errorForeground);
+    }
+    .table-cell-comment {
+      position: absolute;
+      top: 4px;
+      right: 4px;
+      opacity: 0;
+      transition: opacity 120ms ease;
+      z-index: 3;
+    }
+    td.reviewable-table-cell,
+    th.reviewable-table-cell {
+      position: relative;
+    }
+    td.reviewable-table-cell:hover > .table-cell-comment,
+    th.reviewable-table-cell:hover > .table-cell-comment,
+    .table-cell-comment:focus {
+      opacity: 1;
     }
     button.danger {
       color: var(--vscode-errorForeground);
@@ -2019,8 +2045,9 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
         flex-direction: column;
       }
       aside {
-        border-left: 0;
-        border-top: 1px solid var(--border);
+        position: static;
+        max-height: none;
+        margin: 0 12px 16px;
       }
       main {
         padding: 20px;
@@ -2109,6 +2136,7 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
   <script nonce="${nonce}">
     const vscode = acquireVsCodeApi();
     const state = ${state};
+    const canEditMarkdown = state.canEditMarkdown !== false;
     const markerLineHints = state.markerLineHints || {};
     const anchorIdentityByThreadId = state.anchorIdentityByThreadId || {};
     const replyShortcutsByThreadId = state.replyShortcutsByThreadId || {};
@@ -2539,6 +2567,30 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
         return;
       }
 
+      const tableCommentButton = target.closest('[data-comment-markdown-table-cell], [data-comment-markdown-table]');
+
+      if (tableCommentButton) {
+        event.preventDefault();
+        event.stopPropagation();
+
+        if (tableCommentButton.hasAttribute('data-comment-markdown-table-cell')) {
+          const cell = tableCommentButton.closest('td, th');
+
+          if (cell) {
+            openComposerForTableCell(cell);
+          }
+        } else {
+          const wrapper = tableCommentButton.closest('[data-table-edit-wrapper]');
+          const table = wrapper?.querySelector('table[data-source-line]');
+
+          if (table) {
+            openComposerForTable(table);
+          }
+        }
+
+        return;
+      }
+
       const blockAddButton = target.closest('[data-add-markdown-block]');
 
       if (blockAddButton) {
@@ -2829,8 +2881,10 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
     decorateMermaidReviewBadges(locatableOpenThreads);
     attachRelatedThreadIds(locatableOpenThreads);
     markMissingAnchors(openThreads);
-    decorateEditableMarkdownBlocks();
-    decorateEditableMarkdownTables();
+    if (canEditMarkdown) {
+      decorateEditableMarkdownBlocks();
+      decorateEditableMarkdownTables();
+    }
     restorePreviewState();
     renderMermaidDiagrams();
 
@@ -2960,6 +3014,7 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
 
       for (const table of tables) {
         if (table.closest('[data-table-edit-wrapper]')) {
+          decorateReviewableTableCells(table);
           continue;
         }
 
@@ -2971,9 +3026,87 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
 
         const actions = document.createElement('span');
         actions.className = 'block-edit-actions';
-        actions.innerHTML = '<button type="button" class="secondary compact" title="Edit this Markdown table as a grid" data-edit-markdown-table>Edit Table</button>';
+        actions.innerHTML = [
+          '<button type="button" class="secondary compact" title="Comment on this table" data-comment-markdown-table>Comment Table</button>',
+          '<button type="button" class="secondary compact" title="Edit this Markdown table as a grid" data-edit-markdown-table>Edit Table</button>'
+        ].join('');
         wrapper.appendChild(actions);
+        decorateReviewableTableCells(table);
       }
+    }
+
+    function decorateReviewableTableCells(table) {
+      const cells = Array.from(table.querySelectorAll('th, td'));
+
+      for (const cell of cells) {
+        cell.classList.add('reviewable-table-cell');
+
+        if (cell.querySelector(':scope > .table-cell-comment')) {
+          continue;
+        }
+
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'secondary compact table-cell-comment';
+        button.title = 'Comment on this table cell';
+        button.setAttribute('data-comment-markdown-table-cell', '');
+        button.textContent = 'Comment';
+        cell.appendChild(button);
+      }
+    }
+
+    function openComposerForTable(table) {
+      const text = getCleanTableText(table);
+
+      if (!text) {
+        return;
+      }
+
+      openComposerForElementText(
+        table,
+        text,
+        getSourceLine(table),
+        getSourceLineEnd(table)
+      );
+    }
+
+    function openComposerForTableCell(cell) {
+      const text = getCleanTableText(cell);
+
+      if (!text) {
+        return;
+      }
+
+      openComposerForElementText(
+        cell,
+        text,
+        getSourceLine(cell) || getSourceLine(cell.closest('tr')) || getSourceLine(cell.closest('table')),
+        getSourceLineEnd(cell) || getSourceLineEnd(cell.closest('tr')) || getSourceLineEnd(cell.closest('table'))
+      );
+    }
+
+    function openComposerForElementText(element, text, lineStart, lineEnd) {
+      clearDraftSelectionHighlight();
+      activeSelectionText = text;
+      activeSelectionOccurrence = 0;
+      activeSourceLine = lineStart;
+      activeSourceLineEnd = lineEnd || lineStart;
+      activeSelectionRange = null;
+
+      const rect = element.getBoundingClientRect();
+      activeSelectionRect = {
+        left: rect.left,
+        right: rect.right,
+        top: rect.top,
+        bottom: rect.bottom
+      };
+      openComposer();
+    }
+
+    function getCleanTableText(element) {
+      const clone = element.cloneNode(true);
+      clone.querySelectorAll('button, .table-cell-comment, .block-edit-actions, .review-badge').forEach((child) => child.remove());
+      return normalizeInline(clone.textContent || '');
     }
 
     function openBlockEditor(block, intent) {
@@ -4238,7 +4371,7 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
       }
 
       if (state === 'recovered') {
-        return 'Recovered';
+        return 'Found nearby';
       }
 
       if (state === 'approximate') {
