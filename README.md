@@ -70,10 +70,21 @@ Installed usage:
 
 - `AI Markdown Review: Open Review Beside`
 - `AI Markdown Review: Open Review Preview`
-- `AI Markdown Review: Review Document`
+- `AI Markdown Review: Run Local Checks`
 - `AI Markdown Review: Export Feedback for Agent`
 - `AI Markdown Review: Open AI Context Bootstrap Prompt`
 - `AI Markdown Review: Open AI Feedback Loop Prompt`
+
+`Run Local Checks` checks placeholders, long prose, and acceptance headings using
+local rules. It recognizes English and Korean acceptance headings, skips code
+examples, and reports how many findings are new, already open, or previously
+closed. Matching local findings at the same source location and context stay
+closed after you resolve or decline them.
+This command does not run an AI model or certify the document's quality.
+
+Prompt commands also work while the review preview is active. Bootstrap remains
+a generic prompt; the feedback-loop prompt identifies the current document.
+If a command fails, `Retry` retries the same document even if you changed focus.
 
 ## Shortcuts
 
@@ -82,6 +93,11 @@ Installed usage:
 - Editor context menu on Markdown files: open review preview, run local review, or export feedback.
 - Keyboard shortcut: `Cmd+Alt+R` on macOS, `Ctrl+Alt+R` elsewhere.
 - Split keyboard shortcut: `Cmd+Alt+Shift+R` on macOS, `Ctrl+Alt+Shift+R` elsewhere.
+
+Use `Previous` and `Next` to visit each open thread, including comments that share
+the same text. The position indicator shows your progress. `Show in document`
+moves keyboard focus to the associated content. An empty open list distinguishes
+first use from a review whose threads are all closed.
 
 ## Mermaid
 
@@ -136,7 +152,11 @@ If the commented text changes and the original text snippet no longer matches, t
 
 If an older Markdown file already contains legacy `ai-review-anchor`, `ai-review-anchors`, or `ai-review-log` comments, the custom preview hides them and can clean that legacy metadata on request. Those inline comments are treated as legacy recovery hints, not the source of truth for new review state.
 
+Use **Reattach** on an open thread to repair a missing or incorrect review location. Select the new text in the Markdown preview, review the selection, and choose **Attach to this selection**. This preserves the thread ID, replies, and open status and records the change without editing Markdown. Cancel or Escape leaves the original location intact. Reattachment waits until other drafts are finished or canceled, and a failed save keeps the selected target available for retry. If the selected text has multiple possible source locations, select a longer unique phrase. Existing suggested patches remain visible, but a patch at a different target stays unavailable until it is revised or the correct target is selected.
+
 Accepted, resolved, or rejected review threads move from `openThreads` to `closedThreads` inside the same sidecar. The preview keeps closed feedback visible under `Review Threads` as history. Closed cards use different decision colors for accepted, resolved, and rejected feedback, show who closed the thread when that metadata is available, and show whether the original anchor text is still `Linked` in the current Markdown or `Outdated` because the link target no longer appears. `Restore` reopens a closed thread, moves it back to `openThreads`, and focuses the restored thread without writing new Markdown metadata.
+
+Closed-history links also recognize matching text that spans multiple Markdown lines. Explicitly missing anchors remain outdated until the thread is restored and reattached to a confirmed location.
 
 Open thread actions are intentionally discussion-first. Reply shortcuts appear only once the thread has AI or automated-review participation, so human-only notes do not show AI-response actions before an AI has joined the discussion. The shortcuts then adapt to the thread type: questions offer answer/clarify/not-applicable drafts, risks offer acknowledge/mitigate/challenge drafts, and fixes or suggestions offer agree/revise/disagree drafts. These shortcuts prefill a reply instead of closing the thread. Weak replies like `ok` show agent-handoff warnings because they can poison the next AI turn. `Continue with AI` opens a feedback-loop prompt focused on that exact `rv_*` thread. `Resolve` closes a thread after the issue is handled or no longer applies, while `Close as Declined` closes feedback that is wrong or intentionally not applicable. For threads with a reliable suggested replacement, `Apply Patch and Close` is the action that changes Markdown, refreshes anchors, records an edit outcome reply, and closes the thread as `accepted`.
 
@@ -177,9 +197,23 @@ Rendered block edits use the same review-aware edit pipeline. The editor is inte
 
 Rendered Markdown tables get a dedicated grid editor instead of the generic block editor. Use `Edit Table` from the preview table controls to edit header/body cells, add or remove rows and columns, choose column alignment, and save back to pipe-table Markdown through the same review-aware edit and undo path.
 
-Review-aware Markdown edits register sidecar snapshots with the text edit. Undo and redo restore the matching `.ai-review.json` sidecar state when the Markdown text rolls backward or forward.
+Review-aware Markdown edits record the associated review changes with the text edit. Undo and redo reverse those changes while preserving comments, replies, and explicit review decisions made afterward.
 
-If a sidecar write fails during a review-aware change, the extension rolls the Markdown and sidecar files back together instead of leaving a half-applied review state behind.
+Stale preview edits are rejected if the source document has changed. If a sidecar write fails during a review-aware change, the extension attempts to roll back its own edit. Newer Markdown or external sidecar changes are preserved, and conflicts are reported for review instead of overwriting that work.
+
+Comment, reply, block, table, and Mermaid editors keep their contents until the
+save is confirmed. While a save is pending, repeat submissions are disabled;
+failed saves leave the draft available for retry. Drafts are kept in the local
+VS Code webview state through preview refreshes. If the Markdown changed, use
+`Copy draft`, reopen the current target, and review the draft before pasting.
+An interrupted save with no confirmation is kept for inspection without being
+automatically submitted again. `Discard draft` removes that recovered draft.
+
+If review data becomes temporarily unreadable, the last usable preview remains
+visible with `Retry refresh`. When the initial preview cannot load, the error
+screen still offers draft recovery and retry. Draft recovery is scoped to the
+current webview/document; it is not a backup across uninstall or cleared VS Code
+application data.
 
 ## Privacy And Storage
 
@@ -188,6 +222,7 @@ If a sidecar write fails during a review-aware change, the extension rolls the M
 - Existing inline `ai-review-*` comments are treated as legacy cleanup hints, not the source of truth.
 - The extension does not send document text to an AI provider.
 - Export and prompt commands produce Markdown you can inspect before giving it to an agent.
+- Unsaved drafts stay in local VS Code webview state. They are not added to sidecars or included in feedback exports until explicitly saved.
 
 ## License And Notices
 

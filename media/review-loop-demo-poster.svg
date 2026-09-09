@@ -28,7 +28,7 @@
   <text x="790" y="185" fill="#dbeafe" font-size="14" font-family="Inter, Arial, sans-serif">Located</text>
   <text x="790" y="205" fill="#bfdbfe" font-size="13" font-family="Inter, Arial, sans-serif">AI thread</text>
   <rect x="776" y="238" width="108" height="58" rx="9" fill="#14532d" stroke="#84cc16"/>
-  <text x="790" y="263" fill="#dcfce7" font-size="14" font-family="Inter, Arial, sans-serif">Accepted</text>
+  <text x="790" y="263" fill="#dcfce7" font-size="13" font-family="Inter, Arial, sans-serif">Patch applied</text>
   <text x="790" y="283" fill="#bbf7d0" font-size="13" font-family="Inter, Arial, sans-serif">History</text>
   <text x="54" y="492" fill="#cbd5e1" font-size="20" font-family="Inter, Arial, sans-serif">Apply reliable patches or continue the exact thread with AI.</text>
 </svg>

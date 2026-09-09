@@ -76,11 +76,11 @@ function heroSvg() {
   <text x="90" y="374" fill="#d1d5db" font-size="18" font-family="SFMono-Regular, Menlo, monospace">- Preserve anchors</text>
   <rect x="88" y="398" width="286" height="38" rx="8" fill="#14532d"/>
   <text x="104" y="423" fill="#dcfce7" font-size="17" font-family="SFMono-Regular, Menlo, monospace">- Apply safe patches only</text>
-  <text x="90" y="474" fill="#94a3b8" font-size="16" font-family="SFMono-Regular, Menlo, monospace">&lt;!-- ai-review-anchors:{...} --&gt;</text>
+  <text x="90" y="474" fill="#94a3b8" font-size="16" font-family="SFMono-Regular, Menlo, monospace">.launch-plan.md.ai-review.json</text>
 
   <rect x="438" y="220" width="438" height="390" rx="14" fill="#18212f" stroke="#475569"/>
   <text x="466" y="263" fill="#f8fafc" font-size="31" font-family="Inter, Arial, sans-serif" font-weight="800">Agent Handoff</text>
-  <text x="466" y="312" fill="#e5e7eb" font-size="23" font-family="Inter, Arial, sans-serif">Feedback exports put open threads first.</text>
+  <text x="466" y="312" fill="#e5e7eb" font-size="23" font-family="Inter, Arial, sans-serif">Open threads lead the handoff.</text>
   <rect x="466" y="344" width="320" height="46" rx="9" fill="#3f6212"/>
   <text x="484" y="375" fill="#ecfccb" font-size="22" font-family="Inter, Arial, sans-serif">This criterion is not testable</text>
   <circle cx="806" cy="367" r="22" fill="#84cc16"/>
@@ -103,7 +103,7 @@ function heroSvg() {
   <text x="950" y="423" fill="#e5e7eb" font-size="17" font-family="Inter, Arial, sans-serif" font-weight="700">You replied</text>
   <text x="950" y="450" fill="#cbd5e1" font-size="16" font-family="Inter, Arial, sans-serif">Continue with AI</text>
   <rect x="932" y="492" width="232" height="78" rx="10" fill="#202c1a" stroke="#84cc16"/>
-  <text x="950" y="523" fill="#ecfccb" font-size="17" font-family="Inter, Arial, sans-serif" font-weight="700">Accepted</text>
+  <text x="950" y="523" fill="#ecfccb" font-size="17" font-family="Inter, Arial, sans-serif" font-weight="700">Patch applied</text>
   <text x="950" y="550" fill="#d9f99d" font-size="16" font-family="Inter, Arial, sans-serif">History linked</text>
 
   <rect x="66" y="632" width="230" height="34" rx="17" fill="#84cc16"/>
@@ -157,7 +157,7 @@ function demoFrame(step) {
   <text x="790" y="185" fill="#dbeafe" font-size="14" font-family="Inter, Arial, sans-serif">${step >= 2 ? 'Located' : 'None yet'}</text>
   <text x="790" y="205" fill="#bfdbfe" font-size="13" font-family="Inter, Arial, sans-serif">${step >= 2 ? 'AI thread' : 'Drag text'}</text>
   <rect x="776" y="238" width="108" height="58" rx="9" fill="${patch ? '#14532d' : '#1f2937'}" stroke="${patch ? '#84cc16' : '#334155'}"/>
-  <text x="790" y="263" fill="#dcfce7" font-size="14" font-family="Inter, Arial, sans-serif">${patch ? 'Accepted' : 'Open'}</text>
+  <text x="790" y="263" fill="#dcfce7" font-size="13" font-family="Inter, Arial, sans-serif">${patch ? 'Patch applied' : 'Open'}</text>
   <text x="790" y="283" fill="#bbf7d0" font-size="13" font-family="Inter, Arial, sans-serif">${patch ? 'History' : 'Reply'}</text>
   <text x="54" y="492" fill="#cbd5e1" font-size="20" font-family="Inter, Arial, sans-serif">${subtitle}</text>
 </svg>`;

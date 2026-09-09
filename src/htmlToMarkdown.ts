@@ -1,4 +1,5 @@
 import TurndownService = require('turndown');
+import { randomUUID } from 'crypto';
 import {
   createMarkdownTableReplacement,
   type TableAlignment
@@ -19,97 +20,187 @@ type DomElementLike = DomNodeLike & {
 
 const emptyInlineTags = new Set(['b', 'i', 'em', 'strong', 'span', 's', 'u', 'font']);
 
-const turndown = new TurndownService({
-  headingStyle: 'atx',
-  bulletListMarker: '-',
-  codeBlockStyle: 'fenced',
-  emDelimiter: '*',
-  strongDelimiter: '**',
-  linkStyle: 'inlined'
-});
-
 export interface HtmlBlockSourceContext {
   sourceMarkdown: string;
   oneBasedLineStart: number;
 }
 
-turndown.addRule('emptyLink', {
-  filter: node => {
-    return node.nodeName.toLowerCase() === 'a' && !normalizeInlineText(node.textContent || '');
-  },
-  replacement: (_content, node) => {
-    return boundarySpacer(node);
-  }
-});
+function createTurndown(preserve: (markdown: string) => string): TurndownService {
+  const turndown = new TurndownService({
+    headingStyle: 'atx',
+    bulletListMarker: '-',
+    codeBlockStyle: 'fenced',
+    emDelimiter: '*',
+    strongDelimiter: '**',
+    linkStyle: 'inlined',
+    preformattedCode: true,
+    blankReplacement: (_content, node) => {
+      if (node.getAttribute('data-markdown-image') !== null) {
+        return preserve(originalImageMarkdown(node));
+      }
+      if (node.nodeName === 'CODE') {
+        return preserve(toCodeSpan(String(node.textContent || '')));
+      }
+      return (node as unknown as { isBlock: boolean }).isBlock ? '\n\n' : '';
+    }
+  });
 
-turndown.addRule('emptyInline', {
-  filter: node => {
-    return emptyInlineTags.has(node.nodeName.toLowerCase())
-      && !normalizeInlineText(node.textContent || '');
-  },
-  replacement: (_content, node) => {
-    return boundarySpacer(node);
-  }
-});
+  turndown.addRule('emptyLink', {
+    filter: node => {
+      return node.nodeName.toLowerCase() === 'a' && !normalizeInlineText(node.textContent || '');
+    },
+    replacement: (_content, node) => {
+      return boundarySpacer(node);
+    }
+  });
 
-turndown.addRule('taskListInput', {
-  filter: node => {
-    return node.nodeName.toLowerCase() === 'input'
-      && String(node.getAttribute('type') || '').toLowerCase() === 'checkbox';
-  },
-  replacement: (_content, node) => {
-    return node.getAttribute('checked') === null ? '[ ] ' : '[x] ';
-  }
-});
+  turndown.addRule('emptyInline', {
+    filter: node => {
+      return emptyInlineTags.has(node.nodeName.toLowerCase())
+        && !normalizeInlineText(node.textContent || '');
+    },
+    replacement: (_content, node) => {
+      return boundarySpacer(node);
+    }
+  });
 
-turndown.addRule('fencedCodeBlock', {
-  filter: 'pre',
-  replacement: (_content, node) => {
-    return renderFencedCodeBlock(node);
-  }
-});
+  turndown.addRule('taskListInput', {
+    filter: node => {
+      return node.nodeName.toLowerCase() === 'input'
+        && String(node.getAttribute('type') || '').toLowerCase() === 'checkbox';
+    },
+    replacement: (_content, node) => {
+      return node.getAttribute('checked') === null ? '[ ] ' : '[x] ';
+    }
+  });
 
-turndown.addRule('htmlTable', {
-  filter: 'table',
-  replacement: (_content, node) => {
-    return renderMarkdownTable(node);
-  }
-});
+  turndown.addRule('fencedCodeBlock', {
+    filter: 'pre',
+    replacement: (_content, node) => {
+      return renderFencedCodeBlock(node);
+    }
+  });
 
-turndown.addRule('fontCode', {
-  filter: node => {
-    return node.nodeName.toLowerCase() === 'font'
-      && String(node.getAttribute('face') || '').toLowerCase().includes('monospace');
-  },
-  replacement: (_content, node) => {
-    return toCodeSpan(String(node.textContent || ''));
-  }
-});
+  turndown.addRule('htmlTable', {
+    filter: 'table',
+    replacement: (_content, node) => {
+      return renderMarkdownTable(node);
+    }
+  });
 
-turndown.addRule('styleCode', {
-  filter: node => {
-    const style = String(node.getAttribute('style') || '').toLowerCase();
-    return style.includes('font-family') && style.includes('monospace');
-  },
-  replacement: (_content, node) => {
-    return toCodeSpan(String(node.textContent || ''));
-  }
-});
+  turndown.addRule('fontCode', {
+    filter: node => {
+      return node.nodeName.toLowerCase() === 'font'
+        && String(node.getAttribute('face') || '').toLowerCase().includes('monospace');
+    },
+    replacement: (_content, node) => {
+      return preserve(toCodeSpan(String(node.textContent || '')));
+    }
+  });
+
+  turndown.addRule('styleCode', {
+    filter: node => {
+      const style = String(node.getAttribute('style') || '').toLowerCase();
+      return node.nodeName !== 'PRE' && style.includes('font-family') && style.includes('monospace');
+    },
+    replacement: (_content, node) => {
+      return preserve(toCodeSpan(String(node.textContent || '')));
+    }
+  });
+
+  turndown.addRule('inlineCode', {
+    filter: node => node.nodeName === 'CODE' && node.parentNode?.nodeName !== 'PRE',
+    replacement: (_content, node) => preserve(toCodeSpan(String(node.textContent || '')))
+  });
+
+  turndown.addRule('reviewImage', {
+    filter: node => node.getAttribute('data-markdown-image') !== null,
+    replacement: (_content, node) => preserve(originalImageMarkdown(node))
+  });
+
+  return turndown;
+}
 
 export function htmlBlockToMarkdown(
   html: string,
   sourceContext?: HtmlBlockSourceContext
 ): string {
-  const markdown = cleanMarkdown(turndown.turndown(html));
-  return sourceContext ? preserveSourceBlockSyntax(markdown, sourceContext) : markdown;
+  const protectedParts: string[] = [];
+  const prefix = `AMRL${randomUUID().replace(/-/g, '')}Q`;
+  const preserve = (markdown: string) => markdown.split('\n').map(line => {
+    const index = protectedParts.push(line) - 1;
+    return `${prefix}${index}Z`;
+  }).join('\n');
+  const turndown = createTurndown(preserve);
+  const markdown = cleanMarkdown(turndown.turndown(normalizeRichCodeElements(html)));
+  const contextualMarkdown = sourceContext ? preserveSourceBlockSyntax(markdown, sourceContext) : markdown;
+  return contextualMarkdown.replace(new RegExp(`${prefix}(\\d+)Z`, 'g'), (_match, index: string) => protectedParts[Number(index)]);
 }
 
 function toCodeSpan(value: string): string {
-  const backtick = '`';
-  const normalized = value.replace(/\s+/g, ' ').trim();
-  const fence = normalized.includes(backtick) ? '``' : backtick;
-  const padding = fence.length > 1 ? ' ' : '';
+  if (!value) {
+    return '';
+  }
+
+  const normalized = value.replace(/\r\n|\r|\n/g, ' ');
+  const longestRun = Math.max(0, ...Array.from(normalized.matchAll(/`+/g), match => match[0].length));
+  const fence = '`'.repeat(longestRun + 1);
+  const needsPadding = normalized.startsWith('`') || normalized.endsWith('`')
+    || (normalized.startsWith(' ') && normalized.endsWith(' '));
+  const padding = needsPadding ? ' ' : '';
   return `${fence}${padding}${normalized}${padding}${fence}`;
+}
+
+function originalImageMarkdown(node: DomElementLike): string {
+  const original = node.getAttribute('data-image-markdown');
+  if (original !== null) {
+    return original;
+  }
+
+  const src = node.getAttribute('data-image-src');
+  if (src === null) {
+    throw new Error('Cannot save this image without its original image source. Reopen the block editor.');
+  }
+
+  const alt = String(node.getAttribute('data-image-alt') || '').replace(/([\\[\]])/g, '\\$1');
+  const escapedDestination = src.replace(/([\\<>()])/g, '\\$1');
+  const destination = /\s/.test(escapedDestination) ? `<${escapedDestination}>` : escapedDestination;
+  const title = node.getAttribute('data-image-title') || '';
+  const titleSuffix = title ? ` "${title.replace(/([\\"])/g, '\\$1')}"` : '';
+  return `![${alt}](${destination}${titleSuffix})`;
+}
+
+// Normalize browser-produced monospace wrappers before Turndown's whitespace pass.
+// A rule alone runs too late: Turndown collapses FONT/SPAN text before dispatching it.
+function normalizeRichCodeElements(html: string): string {
+  const stack: Array<{ original: string; replacement: string }> = [];
+  return html.replace(/<!--[\s\S]*?-->|<\/?([A-Za-z][\w:-]*)\b(?:[^"'<>]|"[^"]*"|'[^']*')*>/g, (tag, name: string | undefined) => {
+    if (!name) {
+      return tag;
+    }
+    const original = name.toLowerCase();
+    if (tag.startsWith('</')) {
+      const index = stack.map(entry => entry.original).lastIndexOf(original);
+      if (index < 0) {
+        return tag;
+      }
+      const entry = stack[index];
+      stack.splice(index);
+      return entry.replacement === original ? tag : `</${entry.replacement}>`;
+    }
+
+    const readAttribute = (attribute: string) => {
+      const match = tag.match(new RegExp(`\\s${attribute}\\s*=\\s*(?:"([^"]*)"|'([^']*)'|([^\\s"'=<>\x60]+))`, 'i'));
+      return (match?.[1] ?? match?.[2] ?? match?.[3] ?? '').toLowerCase();
+    };
+    const monospace = (original === 'font' && readAttribute('face').includes('monospace'))
+      || /font-family\s*:[^;]*monospace/.test(readAttribute('style'));
+    const replacement = monospace && original !== 'pre' ? 'code' : original;
+    if (!/^(?:area|base|br|col|embed|hr|img|input|link|meta|param|source|track|wbr)$/.test(original) && !/\/\s*>$/.test(tag)) {
+      stack.push({ original, replacement });
+    }
+    return replacement === original ? tag : tag.replace(/^<[A-Za-z][\w:-]*/, `<${replacement}`);
+  });
 }
 
 function renderFencedCodeBlock(node: DomElementLike): string {

@@ -1,18 +1,45 @@
-import * as vscode from 'vscode';
+import type * as vscode from 'vscode';
+import MarkdownIt from 'markdown-it';
 import { randomUUID } from 'crypto';
-import { ReviewThread } from './types';
-import { hashAnchor, normalizeAnchorText } from './anchors';
+import type { ReviewThread } from './types';
+import { hashAnchor, normalizeAnchorText } from './anchorText';
+
+const markdown = new MarkdownIt({ html: false });
 
 export function createLocalReviewThreads(document: vscode.TextDocument): ReviewThread[] {
   const text = document.getText();
   const lines = text.split(/\r?\n/);
+  const tokens = markdown.parse(text, {});
+  const codeLines = new Set<number>();
+  for (const token of tokens) {
+    if ((token.type === 'fence' || token.type === 'code_block') && token.map) {
+      for (let line = token.map[0]; line < token.map[1]; line++) {
+        codeLines.add(line);
+      }
+    }
+  }
+  const hasAcceptanceHeading = tokens.some((token, index) => {
+    if (token.type !== 'heading_open' || tokens[index + 1]?.type !== 'inline') {
+      return false;
+    }
+    const heading = (tokens[index + 1].children ?? [])
+      .filter(child => child.type === 'text' || child.type === 'code_inline')
+      .map(child => child.content).join('').trim().replace(/\s+/g, ' ');
+    return /^(?:Acceptance(?: Criteria)?|완료 기준|검증 기준)(?:$|[\s:：—–-])/iu.test(heading);
+  });
   const now = new Date().toISOString();
   const threads: ReviewThread[] = [];
 
   for (let index = 0; index < lines.length; index += 1) {
+    if (codeLines.has(index)) {
+      continue;
+    }
     const line = lines[index];
+    const prose = (markdown.parseInline(line, {})[0]?.children ?? [])
+      .filter(token => token.type === 'text')
+      .map(token => token.content).join(' ');
 
-    if (/\b(TBD|TODO|FIXME)\b/i.test(line)) {
+    if (/\b(TBD|TODO|FIXME)\b/i.test(prose)) {
       threads.push(createThread(document, {
         line,
         lineNumber: index + 1,
@@ -23,7 +50,7 @@ export function createLocalReviewThreads(document: vscode.TextDocument): ReviewT
       }));
     }
 
-    if (line.length > 220 && !line.trim().startsWith('|')) {
+    if (prose.length > 220 && !line.trim().startsWith('|')) {
       threads.push(createThread(document, {
         line,
         lineNumber: index + 1,
@@ -35,11 +62,11 @@ export function createLocalReviewThreads(document: vscode.TextDocument): ReviewT
     }
   }
 
-  if (!/^#{1,3}\s+(Acceptance Criteria|Acceptance|완료 기준|검증 기준)\b/im.test(text)) {
-    const firstMeaningfulLine = lines.find(line => line.trim().length > 0) ?? document.fileName;
+  if (!hasAcceptanceHeading) {
+    const firstMeaningfulIndex = lines.findIndex((line, index) => !codeLines.has(index) && line.trim().length > 0);
     threads.push(createThread(document, {
-      line: firstMeaningfulLine,
-      lineNumber: Math.max(1, lines.findIndex(line => line === firstMeaningfulLine) + 1),
+      line: lines[firstMeaningfulIndex] ?? document.fileName,
+      lineNumber: Math.max(1, firstMeaningfulIndex + 1),
       type: 'fix',
       severity: 'high',
       comment: 'Add explicit acceptance criteria so an AI agent or reviewer can tell when the document is actually satisfied.',

@@ -13,6 +13,19 @@ const replacePatch: SuggestedPatch = {
 };
 
 describe('selectSuggestedPatchReplacement', () => {
+  it('does not activate an old patch at a different location after its thread was reattached', () => {
+    for (const markdown of ['new target\nold sentence', 'new target and old sentence']) {
+      assert.deepEqual(selectSuggestedPatchReplacement(markdown, replacePatch, anchor({ text: 'new target', lineStart: 1, lineEnd: 1, confidence: 'exact' })),
+        { result: 'lowConfidenceAnchor' });
+    }
+  });
+
+  it('keeps a compatible enclosing multiline patch available after explicit reattachment', () => {
+    const markdown = 'Before\r\nold sentence\r\nAfter';
+    const patch = { ...replacePatch, original: markdown };
+    assert.equal(selectSuggestedPatchReplacement(markdown, patch, anchor({ lineStart: 2, lineEnd: 2, confidence: 'exact' })).result, 'applied');
+  });
+
   it('selects a single exact replacement target', () => {
     const result = selectSuggestedPatchReplacement(
       'Intro\nold sentence\nOutro',

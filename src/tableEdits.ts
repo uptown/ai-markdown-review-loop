@@ -17,6 +17,35 @@ export interface MarkdownTableAnchorCandidate {
   length: number;
 }
 
+/** Original body-row and column indices for each replacement row and column. */
+export interface MarkdownTableSourceMapping {
+  rowSources: Array<number | null>;
+  columnSources: Array<number | null>;
+}
+
+export function parseMarkdownTableSourceMapping(value: unknown): MarkdownTableSourceMapping | undefined {
+  if (!value || typeof value !== 'object') {
+    return undefined;
+  }
+
+  const input = value as Record<string, unknown>;
+  const validIndices = (indices: unknown): indices is Array<number | null> => {
+    if (!Array.isArray(indices)
+      || !indices.every(index => index === null || (Number.isSafeInteger(index) && index >= 0))) {
+      return false;
+    }
+
+    const originalIndices = indices.filter(index => index !== null);
+    return new Set(originalIndices).size === originalIndices.length;
+  };
+
+  if (!validIndices(input.rowSources) || !validIndices(input.columnSources)) {
+    return undefined;
+  }
+
+  return { rowSources: [...input.rowSources], columnSources: [...input.columnSources] };
+}
+
 interface CellAnchorCandidate {
   text: string;
   start: number;
@@ -121,7 +150,8 @@ export function findTableAnchorReplacementCandidate(
   editedTableMarkdown: string,
   replacementTableMarkdown: string,
   anchorText: string,
-  preferredTableLineIndex?: number
+  preferredTableLineIndex?: number,
+  sourceMapping?: MarkdownTableSourceMapping
 ): MarkdownTableAnchorCandidate | undefined {
   const sourceTable = parseMarkdownTableLines(editedTableMarkdown.replace(/\r\n?/g, '\n').split('\n'));
   const replacementTable = parseMarkdownTableLines(
@@ -138,7 +168,15 @@ export function findTableAnchorReplacementCandidate(
     return undefined;
   }
 
-  const replacementCellText = cellTextAt(replacementTable, sourceCell.tableLineIndex, sourceCell.columnIndex);
+  const replacementPosition = findReplacementCellPosition(sourceTable, replacementTable, sourceCell, sourceMapping);
+
+  if (!replacementPosition) {
+    return undefined;
+  }
+
+  const replacementCellText = cellTextAt(
+    replacementTable, replacementPosition.tableLineIndex, replacementPosition.columnIndex
+  );
 
   if (!replacementCellText) {
     return undefined;
@@ -152,11 +190,43 @@ export function findTableAnchorReplacementCandidate(
 
   return createReplacementCellAnchorCandidate(
     replacementTableMarkdown.replace(/\r\n?/g, '\n'),
-    sourceCell.tableLineIndex,
-    sourceCell.columnIndex,
+    replacementPosition.tableLineIndex,
+    replacementPosition.columnIndex,
     replacementCellText,
     cellCandidate
   );
+}
+
+function findReplacementCellPosition(
+  source: MarkdownTableData,
+  replacement: MarkdownTableData,
+  sourceCell: SourceTableCell,
+  mapping?: MarkdownTableSourceMapping
+): Pick<SourceTableCell, 'tableLineIndex' | 'columnIndex'> | undefined {
+  if (!mapping) {
+    // Older callers can only infer an edited cell when the table shape is unchanged.
+    return source.rows.length === replacement.rows.length && source.headers.length === replacement.headers.length
+      ? sourceCell
+      : undefined;
+  }
+
+  const parsed = parseMarkdownTableSourceMapping(mapping);
+
+  if (!parsed || parsed.rowSources.length !== replacement.rows.length
+    || parsed.columnSources.length !== replacement.headers.length
+    || parsed.rowSources.some(index => index !== null && index >= source.rows.length)
+    || parsed.columnSources.some(index => index !== null && index >= source.headers.length)) {
+    return undefined;
+  }
+
+  const columnIndex = parsed.columnSources.indexOf(sourceCell.columnIndex);
+  const rowIndex = sourceCell.tableLineIndex === 0 ? -2 : parsed.rowSources.indexOf(sourceCell.tableLineIndex - 2);
+
+  if (columnIndex < 0 || rowIndex === -1) {
+    return undefined;
+  }
+
+  return { tableLineIndex: rowIndex + 2, columnIndex };
 }
 
 function parseMarkdownTableLines(lines: string[]): MarkdownTableData | undefined {
@@ -197,6 +267,10 @@ function findSourceTableCell(
     .filter(candidate => candidate.score < Number.POSITIVE_INFINITY));
 
   candidates.sort((left, right) => left.score - right.score);
+  if (candidates[0]?.score === candidates[1]?.score) {
+    return undefined;
+  }
+
   return candidates[0]
     ? {
         tableLineIndex: candidates[0].tableLineIndex,

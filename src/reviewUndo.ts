@@ -1,7 +1,12 @@
 import * as vscode from 'vscode';
 import { ReviewStore } from './reviewStore';
+import { createEmptyReviewDocument, parsePortableReviewSidecar } from './reviewSidecarCodec';
+import type { ReviewDocumentPair } from './reviewSidecarCodec';
+import { mergeReviewUndoDelta } from './reviewUndoMerge';
+import type { ReviewUndoProtection } from './reviewUndoMerge';
 
 export interface ReviewSidecarSnapshot {
+  documents?: ReviewDocumentPair;
   reviewUri: vscode.Uri;
   reviewBytes: Uint8Array | undefined;
   resolvedUri: vscode.Uri;
@@ -9,6 +14,7 @@ export interface ReviewSidecarSnapshot {
 }
 
 interface ReviewUndoEntry {
+  protection: ReviewUndoProtection;
   beforeText: string;
   afterText: string;
   beforeSnapshot: ReviewSidecarSnapshot;
@@ -24,15 +30,22 @@ export class ReviewUndoController {
   constructor(private readonly store: ReviewStore) {}
 
   async capture(documentUri: vscode.Uri): Promise<ReviewSidecarSnapshot> {
-    const reviewUri = await this.store.getReviewFileUri(documentUri);
-    const resolvedUri = await this.store.getResolvedReviewFileUri(documentUri);
-
-    return {
-      reviewUri,
-      reviewBytes: await readFileIfExists(reviewUri),
-      resolvedUri,
-      resolvedBytes: await readFileIfExists(resolvedUri)
-    };
+    return this.store.withDocumentTransaction(documentUri, async () => {
+      const reviewUri = await this.store.getReviewFileUri(documentUri);
+      const resolvedUri = await this.store.getResolvedReviewFileUri(documentUri);
+      const documents = {
+        reviewDocument: await this.store.load(documentUri),
+        resolvedReviewDocument: await this.store.loadResolved(documentUri)
+      };
+      const reviewBytes = await readFileIfExists(reviewUri);
+      return {
+        documents,
+        reviewUri,
+        reviewBytes,
+        resolvedUri,
+        resolvedBytes: reviewUri.toString() === resolvedUri.toString() ? reviewBytes : await readFileIfExists(resolvedUri)
+      };
+    });
   }
 
   register(
@@ -49,6 +62,7 @@ export class ReviewUndoController {
     const key = documentUri.toString();
     const doneEntries = this.done.get(key) ?? [];
     doneEntries.push({
+      protection: { fields: new Map(), decisions: new Set() },
       beforeText,
       afterText,
       beforeSnapshot,
@@ -64,59 +78,50 @@ export class ReviewUndoController {
   }
 
   async handleTextDocumentChange(event: vscode.TextDocumentChangeEvent): Promise<boolean> {
-    if (event.reason === vscode.TextDocumentChangeReason.Undo) {
-      return this.restoreForUndo(event.document);
+    // Capture the event's text before queueing; TextDocument can advance during the wait.
+    const text = event.document.getText();
+    if (event.reason !== vscode.TextDocumentChangeReason.Undo && event.reason !== vscode.TextDocumentChangeReason.Redo) {
+      return false;
     }
-
-    if (event.reason === vscode.TextDocumentChangeReason.Redo) {
-      return this.restoreForRedo(event.document);
-    }
-
-    return false;
+    return this.store.withDocumentTransaction(event.document.uri, () =>
+      this.restoreForChange(event.document.uri, text, event.reason === vscode.TextDocumentChangeReason.Undo));
   }
 
-  private async restoreForUndo(document: vscode.TextDocument): Promise<boolean> {
-    const key = document.uri.toString();
-    const doneEntries = this.done.get(key) ?? [];
-    const entry = doneEntries[doneEntries.length - 1];
-
-    if (!entry || entry.beforeText !== document.getText()) {
+  private async restoreForChange(documentUri: vscode.Uri, text: string, undo: boolean): Promise<boolean> {
+    const key = documentUri.toString();
+    const source = undo ? this.done : this.undone;
+    const destination = undo ? this.undone : this.done;
+    const entries = source.get(key) ?? [];
+    const entry = entries[entries.length - 1];
+    if (!entry || (undo ? entry.beforeText : entry.afterText) !== text) {
       return false;
     }
 
-    doneEntries.pop();
-    await restoreSnapshot(entry.beforeSnapshot);
+    const current = {
+      reviewDocument: await this.store.load(documentUri),
+      resolvedReviewDocument: await this.store.loadResolved(documentUri)
+    };
+    const from = snapshotDocuments(undo ? entry.afterSnapshot : entry.beforeSnapshot, documentUri);
+    const to = snapshotDocuments(undo ? entry.beforeSnapshot : entry.afterSnapshot, documentUri);
+    const protection = structuredClone(entry.protection);
+    const merged = mergeReviewUndoDelta(current, from, to, protection);
+    await this.store.saveBoth(documentUri, merged.reviewDocument, merged.resolvedReviewDocument);
+    entry.protection = protection;
 
-    const undoneEntries = this.undone.get(key) ?? [];
-    undoneEntries.push(entry);
-    this.undone.set(key, undoneEntries);
-    return true;
-  }
-
-  private async restoreForRedo(document: vscode.TextDocument): Promise<boolean> {
-    const key = document.uri.toString();
-    const undoneEntries = this.undone.get(key) ?? [];
-    const entry = undoneEntries[undoneEntries.length - 1];
-
-    if (!entry || entry.afterText !== document.getText()) {
-      return false;
-    }
-
-    undoneEntries.pop();
-    await restoreSnapshot(entry.afterSnapshot);
-
-    const doneEntries = this.done.get(key) ?? [];
-    doneEntries.push(entry);
-    this.done.set(key, doneEntries);
+    // Preserve the entry if persistence fails so the operation remains retryable.
+    entries.pop();
+    const destinationEntries = destination.get(key) ?? [];
+    destinationEntries.push(entry);
+    destination.set(key, destinationEntries);
     return true;
   }
 }
 
 async function restoreSnapshot(snapshot: ReviewSidecarSnapshot): Promise<void> {
-  await Promise.all([
-    restoreFile(snapshot.reviewUri, snapshot.reviewBytes),
-    restoreFile(snapshot.resolvedUri, snapshot.resolvedBytes)
-  ]);
+  await restoreFile(snapshot.reviewUri, snapshot.reviewBytes);
+  if (snapshot.reviewUri.toString() !== snapshot.resolvedUri.toString()) {
+    await restoreFile(snapshot.resolvedUri, snapshot.resolvedBytes);
+  }
 }
 
 export async function restoreReviewSidecarSnapshot(snapshot: ReviewSidecarSnapshot): Promise<void> {
@@ -169,4 +174,17 @@ function bytesEqual(left: Uint8Array | undefined, right: Uint8Array | undefined)
 
 function isFileNotFoundError(error: unknown): boolean {
   return error instanceof vscode.FileSystemError && error.code === 'FileNotFound';
+}
+
+function snapshotDocuments(snapshot: ReviewSidecarSnapshot, documentUri: vscode.Uri): ReviewDocumentPair {
+  if (snapshot.documents) {
+    return snapshot.documents;
+  }
+  if (snapshot.reviewBytes) {
+    return parsePortableReviewSidecar(documentUri.toString(), JSON.parse(new TextDecoder().decode(snapshot.reviewBytes)));
+  }
+  return {
+    reviewDocument: createEmptyReviewDocument(documentUri.toString()),
+    resolvedReviewDocument: createEmptyReviewDocument(documentUri.toString())
+  };
 }

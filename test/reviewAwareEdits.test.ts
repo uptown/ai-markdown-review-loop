@@ -14,6 +14,116 @@ import type { ReviewThread } from '../src/types';
 const now = '2026-05-22T10:00:00.000Z';
 
 describe('review-aware edits', () => {
+  function repeatedAnchorUpdate(before: string, replacement: string, reviewThread: ReviewThread) {
+    const plan = createLineRangeEditPlan(before, {
+      lineStart: 1,
+      lineEnd: before.split('\n').length,
+      replacement,
+      actor: 'user',
+      intent: 'manual_block_edit'
+    });
+    return buildReviewAwareThreadUpdates(before, [reviewThread], plan, now)[0].update.anchor;
+  }
+
+  it('keeps a repeated phrase on its original line after a block edit', () => {
+    const reviewThread = thread('rv_second', { anchorText: 'Pending', lineStart: 2 });
+    reviewThread.anchor.occurrence = 1;
+    const anchor = repeatedAnchorUpdate('First Pending task.\nSecond Pending task.',
+      'First Pending task.\nSecond Pending task updated.', reviewThread);
+    assert.equal(anchor?.lineStart, 2);
+    assert.equal(anchor?.occurrence, 1);
+    assert.equal(anchor?.confidence, 'exact');
+    assert.equal(anchor?.contextBefore, 'First Pending task. Second');
+  });
+
+  it('preserves the selected occurrence when duplicates share one line', () => {
+    const reviewThread = thread('rv_second', { anchorText: 'Pending', lineStart: 1 });
+    reviewThread.anchor.occurrence = 1;
+    const anchor = repeatedAnchorUpdate('First Pending and second Pending.',
+      'First Pending and second Pending updated.', reviewThread);
+    assert.equal(anchor?.occurrence, 1);
+    assert.equal(anchor?.contextBefore, 'First Pending and second');
+    assert.equal(anchor?.confidence, 'exact');
+  });
+
+  it('edits the second repeated phrase without borrowing the first surviving text', () => {
+    const reviewThread = thread('rv_second', { anchorText: 'Pending', lineStart: 1 });
+    reviewThread.anchor.occurrence = 1;
+    const anchor = repeatedAnchorUpdate('First Pending and second Pending.',
+      'First Pending and second Done.', reviewThread);
+    assert.equal(anchor?.text, 'Done');
+    assert.equal(anchor?.occurrence, 0);
+    assert.equal(anchor?.confidence, 'exact');
+  });
+
+  it('tracks surviving duplicate phrases across a distinct earlier deletion', () => {
+    const reviewThread = thread('rv_second', { anchorText: 'Pending', lineStart: 2 });
+    reviewThread.anchor.occurrence = 1;
+    const anchor = repeatedAnchorUpdate('First Pending task.\nSecond Pending task.',
+      'Second Pending task.', reviewThread);
+    assert.equal(anchor?.lineStart, 1);
+    assert.equal(anchor?.occurrence, 0);
+    assert.equal(anchor?.confidence, 'exact');
+  });
+
+  it('updates occurrence after a new matching phrase is inserted earlier', () => {
+    const reviewThread = thread('rv_second', { anchorText: 'Pending', lineStart: 2 });
+    reviewThread.anchor.occurrence = 1;
+    const anchor = repeatedAnchorUpdate('First Pending task.\nSecond Pending task.',
+      'New Pending task.\nFirst Pending task.\nSecond Pending task.', reviewThread);
+    assert.equal(anchor?.lineStart, 3);
+    assert.equal(anchor?.occurrence, 2);
+    assert.equal(anchor?.confidence, 'exact');
+  });
+
+  it('leaves indistinguishable adjacent-duplicate deletion missing', () => {
+    const reviewThread = thread('rv_second', { anchorText: 'Pending', lineStart: 2 });
+    reviewThread.anchor.occurrence = 1;
+    const anchor = repeatedAnchorUpdate('Pending\nPending', 'Pending', reviewThread);
+    assert.equal(anchor?.confidence, 'missing');
+  });
+
+  it('uses corroborating context when a same-line occurrence was not recorded', () => {
+    const reviewThread = thread('rv_second', { anchorText: 'Pending', lineStart: 1 });
+    reviewThread.anchor.contextBefore = 'First Pending and second';
+    reviewThread.anchor.contextAfter = '.';
+    const anchor = repeatedAnchorUpdate('First Pending and second Pending.',
+      'First Pending and second Pending updated.', reviewThread);
+    assert.equal(anchor?.occurrence, 1);
+    assert.equal(anchor?.confidence, 'exact');
+  });
+
+  it('prefers matching source context when an earlier duplicate made the occurrence stale', () => {
+    const reviewThread = thread('rv_second', { anchorText: 'Pending', lineStart: 1 });
+    reviewThread.anchor.occurrence = 0;
+    reviewThread.anchor.contextBefore = 'and second';
+    reviewThread.anchor.contextAfter = '.';
+    const anchor = repeatedAnchorUpdate('First Pending and second Pending.',
+      'First Pending and second Pending updated.', reviewThread);
+    assert.equal(anchor?.occurrence, 1);
+    assert.equal(anchor?.confidence, 'exact');
+  });
+
+  it('leaves repeated source text missing when neither occurrence nor context identifies it', () => {
+    const reviewThread = thread('rv_unknown', { anchorText: 'Pending', lineStart: 1 });
+    const anchor = repeatedAnchorUpdate('First Pending and second Pending.',
+      'First Pending and second Pending updated.', reviewThread);
+    assert.equal(anchor?.confidence, 'missing');
+  });
+
+  it('keeps unrelated same-line comments unchanged when applying a narrow suggestion', () => {
+    const markdown = 'Old wording. Preserve rollback steps.';
+    const plan = createOffsetEditPlan(markdown, {
+      start: 0, end: 3, replacement: 'New', actor: 'user', intent: 'apply_suggestion',
+      targetThreadId: 'rv_target', closeTargetAs: 'accepted'
+    });
+    const updates = buildReviewAwareThreadUpdates(markdown, [
+      thread('rv_target', { anchorText: 'Old', lineStart: 1 }),
+      thread('rv_other', { anchorText: 'rollback steps', lineStart: 1 })
+    ], plan, now);
+    assert.deepEqual(updates.map(update => update.threadId), ['rv_target']);
+  });
+
   it('creates a line range edit plan and replaces only the selected lines', () => {
     const markdown = ['Intro', 'Old paragraph', 'Outro'].join('\n');
     const plan = createLineRangeEditPlan(markdown, {

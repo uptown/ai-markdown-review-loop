@@ -1,4 +1,5 @@
 import { normalizeAnchorText } from './anchorText';
+import { findSourceAnchorMatches, type SourceAnchorMatch } from './anchorSourceMatches';
 import type { ReviewThread } from './types';
 
 export type ReviewHistoryAnchorState = 'linked' | 'outdated';
@@ -19,28 +20,36 @@ export function getReviewHistoryAnchorStates(
 }
 
 export function hasLinkedHistoryAnchor(markdown: string, thread: ReviewThread): boolean {
+  return Boolean(findLinkedHistoryAnchor(markdown, thread));
+}
+
+export function getReviewHistoryAnchorLocations(markdown: string, threads: ReviewThread[]): Record<string, SourceAnchorMatch> {
+  const locations: Record<string, SourceAnchorMatch> = {};
+  for (const thread of threads) {
+    const match = findLinkedHistoryAnchor(markdown, thread);
+    if (match) locations[thread.id] = match;
+  }
+  return locations;
+}
+
+function findLinkedHistoryAnchor(markdown: string, thread: ReviewThread): SourceAnchorMatch | undefined {
   const anchorText = normalizeAnchorText(thread.anchor.text);
 
-  if (!anchorText) {
-    return false;
+  if (!anchorText || thread.anchor.confidence === 'missing') {
+    return undefined;
   }
 
-  const lines = markdown.split(/\r?\n/);
-  const candidates = lines
-    .map((line, index) => ({
-      lineNumber: index + 1,
-      text: normalizeAnchorText(line)
-    }))
-    .filter(candidate => candidate.text.includes(anchorText));
+  const candidates = findSourceAnchorMatches(markdown, anchorText);
 
   if (candidates.length === 0) {
-    return false;
+    return undefined;
   }
 
   const preferredLine = thread.anchor.lastLocatedLine ?? thread.anchor.lineStart;
 
-  if (preferredLine !== undefined && candidates.some(candidate => candidate.lineNumber === preferredLine)) {
-    return true;
+  const matchingLine = candidates.find(candidate => candidate.lineStart === preferredLine);
+  if (preferredLine !== undefined && matchingLine) {
+    return matchingLine;
   }
 
   const occurrence = normalizeOccurrence(thread.anchor.occurrence);
@@ -49,25 +58,25 @@ export function hasLinkedHistoryAnchor(markdown: string, thread: ReviewThread): 
     : undefined;
 
   if (candidates.length === 1 && occurrence === undefined) {
-    return true;
+    return candidates[0];
   }
 
   const contextBefore = normalizeAnchorText(thread.anchor.contextBefore || '');
   const contextAfter = normalizeAnchorText(thread.anchor.contextAfter || '');
 
   if (!contextBefore && !contextAfter) {
-    return false;
+    return undefined;
   }
 
   const contextCandidates = occurrenceCandidate
     ? [occurrenceCandidate]
     : candidates;
 
-  return contextCandidates.some(candidate => {
-    const before = normalizeAnchorText(lines.slice(Math.max(0, candidate.lineNumber - 3), candidate.lineNumber - 1).join('\n'));
-    const after = normalizeAnchorText(lines.slice(candidate.lineNumber, Math.min(lines.length, candidate.lineNumber + 2)).join('\n'));
-    return (!contextBefore || before.includes(contextBefore))
-      && (!contextAfter || after.includes(contextAfter));
+  return contextCandidates.find(candidate => {
+    const before = normalizeAnchorText(markdown.slice(0, candidate.start));
+    const after = normalizeAnchorText(markdown.slice(candidate.start + candidate.length));
+    return (!contextBefore || before.endsWith(contextBefore))
+      && (!contextAfter || after.startsWith(contextAfter));
   });
 }
 

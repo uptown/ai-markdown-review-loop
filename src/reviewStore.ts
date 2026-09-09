@@ -1,5 +1,7 @@
 import * as vscode from 'vscode';
 import { createHash } from 'crypto';
+import { AsyncLocalStorage } from 'async_hooks';
+import { stat } from 'fs/promises';
 import path from 'path';
 import { createRestoredReviewThread } from './reviewHistory';
 import {
@@ -17,6 +19,7 @@ import {
   createColocatedReviewSidecarFileName
 } from './reviewSidecarPaths';
 import { isDuplicateReviewThread } from './reviewThreadDedup';
+import { createReviewAnchorIdentityKey } from './reviewAnchorIdentity';
 import { AnchorConfidence, ReviewDocument, ReviewThread } from './types';
 
 const encoder = new TextEncoder();
@@ -25,6 +28,11 @@ const decoder = new TextDecoder('utf-8');
 interface AddThreadsResult {
   reviewDocument: ReviewDocument;
   addedThreads: ReviewThread[];
+}
+
+interface AddLocalReviewThreadsResult extends AddThreadsResult {
+  existingOpenCount: number;
+  previouslyClosedCount: number;
 }
 
 interface ReviewSidecarLocations {
@@ -42,14 +50,139 @@ export interface AnchorLocationUpdate {
   locatedAt: string;
 }
 
+export class ReviewStorageConflictError extends Error {
+  constructor() {
+    super('Review state changed during this operation. Reload the review and try again.');
+    this.name = 'ReviewStorageConflictError';
+  }
+}
+
+interface DocumentTransaction {
+  active: boolean;
+  reads: Map<string, { uri: vscode.Uri; bytes: Uint8Array | undefined }>;
+}
+
 export class ReviewStore {
+  private readonly queues = new Map<string, Promise<void>>();
+  private readonly transactionContext = new AsyncLocalStorage<Map<string, DocumentTransaction>>();
+
   constructor(private readonly context: vscode.ExtensionContext) {}
+
+  /** Keep the complete read/modify/write operation inside this callback. Nested calls are reentrant. */
+  async withDocumentTransaction<T>(documentUri: vscode.Uri, operation: () => Promise<T>): Promise<T> {
+    const key = documentUri.toString();
+    const inherited = this.transactionContext.getStore();
+
+    if (inherited?.get(key)?.active) {
+      return operation();
+    }
+
+    const previous = this.queues.get(key) ?? Promise.resolve();
+    let release!: () => void;
+    const tail = new Promise<void>(resolve => { release = resolve; });
+    this.queues.set(key, tail);
+    await previous;
+    const transaction: DocumentTransaction = { active: true, reads: new Map() };
+    const context = new Map(inherited);
+    context.set(key, transaction);
+
+    try {
+      return await this.transactionContext.run(context, operation);
+    } finally {
+      transaction.active = false;
+      release();
+      if (this.queues.get(key) === tail) {
+        this.queues.delete(key);
+      }
+    }
+  }
+
+  async save(documentUri: vscode.Uri, reviewDocument: ReviewDocument): Promise<void> {
+    return this.withDocumentTransaction(documentUri, () => this.saveUnlocked(documentUri, reviewDocument));
+  }
+
+  async saveBoth(documentUri: vscode.Uri, open: ReviewDocument, closed: ReviewDocument): Promise<void> {
+    return this.withDocumentTransaction(documentUri, () => this.saveBothUnlocked(documentUri, open, closed));
+  }
+
+  async addThread(documentUri: vscode.Uri, thread: ReviewThread): Promise<ReviewDocument> {
+    return this.withDocumentTransaction(documentUri, () => this.addThreadUnlocked(documentUri, thread));
+  }
+
+  async addThreads(documentUri: vscode.Uri, threads: ReviewThread[]): Promise<AddThreadsResult> {
+    return this.withDocumentTransaction(documentUri, () => this.addThreadsUnlocked(documentUri, threads));
+  }
+
+  async addLocalReviewThreads(documentUri: vscode.Uri, threads: ReviewThread[]): Promise<AddLocalReviewThreadsResult> {
+    return this.withDocumentTransaction(documentUri, async () => {
+      if (threads.some(thread => thread.source !== 'local')) {
+        throw new Error('Local checks can only create local review threads.');
+      }
+      const reviewDocument = await this.load(documentUri);
+      const closedDocument = await this.loadResolved(documentUri);
+      const addedThreads: ReviewThread[] = [];
+      let existingOpenCount = 0;
+      let previouslyClosedCount = 0;
+
+      for (const thread of threads) {
+        const sameFinding = (existing: ReviewThread) => existing.source === 'local'
+          && existing.type === thread.type
+          && existing.comment === thread.comment
+          && createReviewAnchorIdentityKey(existing) === createReviewAnchorIdentityKey(thread);
+        if (reviewDocument.threads.some(sameFinding)) {
+          existingOpenCount++;
+        } else if (closedDocument.threads.some(sameFinding)) {
+          previouslyClosedCount++;
+        } else {
+          reviewDocument.threads.push(thread);
+          addedThreads.push(thread);
+        }
+      }
+      if (addedThreads.length > 0) {
+        await this.save(documentUri, reviewDocument);
+      }
+      return { reviewDocument, addedThreads, existingOpenCount, previouslyClosedCount };
+    });
+  }
+
+  async updateThread(documentUri: vscode.Uri, threadId: string, update: Partial<ReviewThread>): Promise<ReviewDocument> {
+    return this.withDocumentTransaction(documentUri, () => this.updateThreadUnlocked(documentUri, threadId, update));
+  }
+
+  async updateThreadAnchors(documentUri: vscode.Uri, updates: AnchorLocationUpdate[]): Promise<boolean> {
+    return this.withDocumentTransaction(documentUri, () => this.updateThreadAnchorsUnlocked(documentUri, updates));
+  }
+
+  async addReply(documentUri: vscode.Uri, threadId: string, text: string): Promise<ReviewDocument> {
+    return this.withDocumentTransaction(documentUri, () => this.addReplyUnlocked(documentUri, threadId, text));
+  }
+
+  async restoreThread(documentUri: vscode.Uri, threadId: string): Promise<ReviewThread> {
+    return this.withDocumentTransaction(documentUri, () => this.restoreThreadUnlocked(documentUri, threadId));
+  }
+
+  async migrateDocument(oldDocumentUri: vscode.Uri, newDocumentUri: vscode.Uri): Promise<{
+    reviewMoved: boolean;
+    resolvedMoved: boolean;
+  }> {
+    const ordered = [oldDocumentUri, newDocumentUri].sort((left, right) => left.toString().localeCompare(right.toString()));
+    return this.withDocumentTransaction(ordered[0], () => this.withDocumentTransaction(ordered[1],
+      () => this.migrateDocumentUnlocked(oldDocumentUri, newDocumentUri)));
+  }
+
+  async deleteDocumentSidecars(documentUri: vscode.Uri, preservedDocumentUri?: vscode.Uri): Promise<void> {
+    return this.withDocumentTransaction(documentUri, () => this.deleteDocumentSidecarsUnlocked(documentUri, preservedDocumentUri));
+  }
+
+  async saveResolved(documentUri: vscode.Uri, reviewDocument: ReviewDocument): Promise<void> {
+    return this.withDocumentTransaction(documentUri, () => this.saveResolvedUnlocked(documentUri, reviewDocument));
+  }
 
   async load(documentUri: vscode.Uri): Promise<ReviewDocument> {
     return (await this.readReviewDocuments(documentUri)).reviewDocument;
   }
 
-  async save(documentUri: vscode.Uri, reviewDocument: ReviewDocument): Promise<void> {
+  private async saveUnlocked(documentUri: vscode.Uri, reviewDocument: ReviewDocument): Promise<void> {
     const { reviewUri } = await this.getSidecarLocations(documentUri);
     const { resolvedReviewDocument } = await this.readReviewDocuments(documentUri);
     await this.writePortableReviewDocuments(
@@ -60,7 +193,7 @@ export class ReviewStore {
     );
   }
 
-  async saveBoth(
+  private async saveBothUnlocked(
     documentUri: vscode.Uri,
     reviewDocument: ReviewDocument,
     resolvedReviewDocument: ReviewDocument
@@ -76,19 +209,21 @@ export class ReviewStore {
         resolvedReviewDocument
       );
     } catch (error) {
-      await this.restoreSidecarBytes(reviewUri, resolvedUri, before);
+      if (!(error instanceof ReviewStorageConflictError)) {
+        await this.restoreSidecarBytes(reviewUri, resolvedUri, before);
+      }
       throw error;
     }
   }
 
-  async addThread(documentUri: vscode.Uri, thread: ReviewThread): Promise<ReviewDocument> {
+  private async addThreadUnlocked(documentUri: vscode.Uri, thread: ReviewThread): Promise<ReviewDocument> {
     const reviewDocument = await this.load(documentUri);
     reviewDocument.threads.push(thread);
     await this.save(documentUri, reviewDocument);
     return reviewDocument;
   }
 
-  async addThreads(documentUri: vscode.Uri, threads: ReviewThread[]): Promise<AddThreadsResult> {
+  private async addThreadsUnlocked(documentUri: vscode.Uri, threads: ReviewThread[]): Promise<AddThreadsResult> {
     const reviewDocument = await this.load(documentUri);
     const addedThreads: ReviewThread[] = [];
 
@@ -108,7 +243,7 @@ export class ReviewStore {
     return { reviewDocument, addedThreads };
   }
 
-  async updateThread(
+  private async updateThreadUnlocked(
     documentUri: vscode.Uri,
     threadId: string,
     update: Partial<ReviewThread>
@@ -134,7 +269,7 @@ export class ReviewStore {
     return reviewDocument;
   }
 
-  async updateThreadAnchors(
+  private async updateThreadAnchorsUnlocked(
     documentUri: vscode.Uri,
     updates: AnchorLocationUpdate[]
   ): Promise<boolean> {
@@ -182,7 +317,7 @@ export class ReviewStore {
     return true;
   }
 
-  async addReply(
+  private async addReplyUnlocked(
     documentUri: vscode.Uri,
     threadId: string,
     text: string
@@ -209,7 +344,7 @@ export class ReviewStore {
     return (await this.readReviewDocuments(documentUri)).resolvedReviewDocument;
   }
 
-  async restoreThread(
+  private async restoreThreadUnlocked(
     documentUri: vscode.Uri,
     threadId: string
   ): Promise<ReviewThread> {
@@ -285,7 +420,7 @@ export class ReviewStore {
     });
   }
 
-  async migrateDocument(oldDocumentUri: vscode.Uri, newDocumentUri: vscode.Uri): Promise<{
+  private async migrateDocumentUnlocked(oldDocumentUri: vscode.Uri, newDocumentUri: vscode.Uri): Promise<{
     reviewMoved: boolean;
     resolvedMoved: boolean;
   }> {
@@ -317,21 +452,25 @@ export class ReviewStore {
 
       return { reviewMoved, resolvedMoved };
     } catch (error) {
-      await this.restoreSidecarBytes(newLocations.reviewUri, newLocations.resolvedUri, beforeNewSidecars);
+      if (!(error instanceof ReviewStorageConflictError)) {
+        await this.restoreSidecarBytes(newLocations.reviewUri, newLocations.resolvedUri, beforeNewSidecars);
+      }
       throw error;
     }
   }
 
-  async deleteDocumentSidecars(documentUri: vscode.Uri): Promise<void> {
+  private async deleteDocumentSidecarsUnlocked(documentUri: vscode.Uri, preservedDocumentUri?: vscode.Uri): Promise<void> {
     const { reviewUri, legacyReviewUri, legacyResolvedUri } = await this.getSidecarLocations(documentUri);
+    const preservedUri = preservedDocumentUri ? (await this.getSidecarLocations(preservedDocumentUri)).reviewUri : undefined;
+    const samePortableFile = preservedUri ? await sameFile(reviewUri, preservedUri) : false;
     await Promise.all([
-      restoreFile(reviewUri, undefined),
+      samePortableFile ? Promise.resolve() : restoreFile(reviewUri, undefined),
       restoreFile(legacyReviewUri, undefined),
       restoreFile(legacyResolvedUri, undefined)
     ]);
   }
 
-  async saveResolved(documentUri: vscode.Uri, reviewDocument: ReviewDocument): Promise<void> {
+  private async saveResolvedUnlocked(documentUri: vscode.Uri, reviewDocument: ReviewDocument): Promise<void> {
     const { reviewUri } = await this.getSidecarLocations(documentUri);
     const { reviewDocument: openReviewDocument } = await this.readReviewDocuments(documentUri);
     await this.writePortableReviewDocuments(
@@ -363,6 +502,7 @@ export class ReviewStore {
   }> {
     const { reviewUri, legacyReviewUri, legacyResolvedUri } = await this.getSidecarLocations(documentUri);
     const portableBytes = await readFileIfExists(reviewUri);
+    this.observeRead(documentUri, reviewUri, portableBytes);
 
     if (portableBytes) {
       try {
@@ -395,6 +535,7 @@ export class ReviewStore {
     label: string
   ): Promise<ReviewDocument> {
     const bytes = await readFileIfExists(uri);
+    this.observeRead(documentUri, uri, bytes);
 
     if (!bytes) {
       return createEmptyReviewDocument(documentUri.toString());
@@ -422,10 +563,35 @@ export class ReviewStore {
     );
 
     await vscode.workspace.fs.createDirectory(dirnameUri(uri));
-    await vscode.workspace.fs.writeFile(
-      uri,
-      encoder.encode(`${JSON.stringify(payload, null, 2)}\n`)
-    );
+    await this.assertUnchangedReads(documentUri);
+    const bytes = encoder.encode(`${JSON.stringify(payload, null, 2)}\n`);
+    await vscode.workspace.fs.writeFile(uri, bytes);
+    const transaction = this.transactionContext.getStore()?.get(documentUri.toString());
+    transaction?.reads.set(uri.toString(), { uri, bytes });
+  }
+
+  private observeRead(documentUri: vscode.Uri, uri: vscode.Uri, bytes: Uint8Array | undefined): void {
+    const transaction = this.transactionContext.getStore()?.get(documentUri.toString());
+    if (!transaction?.active) {
+      return;
+    }
+    const previous = transaction.reads.get(uri.toString());
+    if (previous && !bytesEqual(previous.bytes, bytes)) {
+      throw new ReviewStorageConflictError();
+    }
+    transaction.reads.set(uri.toString(), { uri, bytes });
+  }
+
+  private async assertUnchangedReads(documentUri: vscode.Uri): Promise<void> {
+    const transaction = this.transactionContext.getStore()?.get(documentUri.toString());
+    if (!transaction?.active) {
+      return;
+    }
+    for (const { uri, bytes } of transaction.reads.values()) {
+      if (!bytesEqual(bytes, await readFileIfExists(uri))) {
+        throw new ReviewStorageConflictError();
+      }
+    }
   }
 
   private async captureSidecarBytes(
@@ -435,9 +601,10 @@ export class ReviewStore {
     reviewBytes: Uint8Array | undefined;
     resolvedBytes: Uint8Array | undefined;
   }> {
+    const reviewBytes = await readFileIfExists(reviewUri);
     return {
-      reviewBytes: await readFileIfExists(reviewUri),
-      resolvedBytes: await readFileIfExists(resolvedUri)
+      reviewBytes,
+      resolvedBytes: reviewUri.toString() === resolvedUri.toString() ? reviewBytes : await readFileIfExists(resolvedUri)
     };
   }
 
@@ -449,10 +616,10 @@ export class ReviewStore {
       resolvedBytes: Uint8Array | undefined;
     }
   ): Promise<void> {
-    await Promise.all([
-      restoreFile(reviewUri, snapshot.reviewBytes),
-      restoreFile(resolvedUri, snapshot.resolvedBytes)
-    ]);
+    await restoreFile(reviewUri, snapshot.reviewBytes);
+    if (reviewUri.toString() !== resolvedUri.toString()) {
+      await restoreFile(resolvedUri, snapshot.resolvedBytes);
+    }
   }
 }
 
@@ -541,6 +708,30 @@ async function readFileIfExists(uri: vscode.Uri): Promise<Uint8Array | undefined
       return undefined;
     }
 
+    throw error;
+  }
+}
+
+function bytesEqual(left: Uint8Array | undefined, right: Uint8Array | undefined): boolean {
+  return left === undefined || right === undefined
+    ? left === right
+    : left.length === right.length && left.every((value, index) => value === right[index]);
+}
+
+async function sameFile(left: vscode.Uri, right: vscode.Uri): Promise<boolean> {
+  if (left.toString() === right.toString()) {
+    return true;
+  }
+  if (left.scheme !== 'file' || right.scheme !== 'file') {
+    return false;
+  }
+  try {
+    const [leftStat, rightStat] = await Promise.all([stat(left.fsPath, { bigint: true }), stat(right.fsPath, { bigint: true })]);
+    return leftStat.ino !== 0n && leftStat.dev === rightStat.dev && leftStat.ino === rightStat.ino;
+  } catch (error) {
+    if (isFileNotFoundError(error)) {
+      return false;
+    }
     throw error;
   }
 }

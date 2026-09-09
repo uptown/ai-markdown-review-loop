@@ -1,7 +1,13 @@
 import * as vscode from 'vscode';
 import MarkdownIt from 'markdown-it';
-import { randomUUID } from 'crypto';
+import { createHash, randomUUID } from 'crypto';
 import path from 'path';
+import { renderReviewableCodeFence } from './codeFenceRendering';
+import { findNormalizedTextSpan } from './normalizedText';
+import { renderErrorDraftScript, renderWebviewDraftScript } from './webviewDrafts';
+import { renderReanchorPanel, renderReanchorScript } from './webviewReanchor';
+import { resolveReanchorSelection } from './reanchorThread';
+import { applyMarkdownImageSourceMapping } from './markdownImageSource';
 import { openContextBootstrapPrompt } from './contextBootstrap';
 import { openFeedbackLoopPrompt } from './feedbackLoopPrompt';
 import { AnchorMaintenanceController } from './anchorMaintenance';
@@ -20,6 +26,7 @@ import {
 import { createPreviewMarkdown } from './previewMarkdown';
 import { applyReviewThreadUpdatesToDocuments } from './reviewDocumentUpdates';
 import { ReviewStore } from './reviewStore';
+import { createPortableReviewSidecarPayload, type ReviewDocumentPair } from './reviewSidecarCodec';
 import {
   applyReviewAwareEditToMarkdown,
   buildReviewAwareThreadUpdates,
@@ -32,8 +39,8 @@ import {
 } from './reviewAwareEdits';
 import { createReviewAnchorIdentityKey } from './reviewAnchorIdentity';
 import { getReplyShortcutDescriptors } from './replyShortcuts';
-import { createRestoredReviewThread, getReviewHistoryAnchorStates } from './reviewHistory';
-import { restoreReviewSidecarSnapshot, ReviewUndoController } from './reviewUndo';
+import { getReviewHistoryAnchorLocations } from './reviewHistory';
+import { ReviewUndoController } from './reviewUndo';
 import { applySourceLineMapping } from './sourceMappedMarkdown';
 import {
   ApplyPatchResult,
@@ -42,17 +49,24 @@ import {
 } from './suggestedPatches';
 import {
   collectMarkdownTables,
-  createMarkdownTableReplacement
+  createMarkdownTableReplacement,
+  parseMarkdownTableSourceMapping
 } from './tableEdits';
 import { AnchorConfidence, ReviewDocument, ReviewStatus, ReviewThread } from './types';
 import type { ReviewSidecarSnapshot } from './reviewUndo';
 
 const viewType = 'aiMarkdownReviewLoop.reviewEditor';
+const sourceRevisionMessageTypes = new Set([
+  'addComment', 'editMarkdownBlock', 'insertMarkdownBlock', 'deleteMarkdownBlock',
+  'editMermaidSource', 'editMarkdownTable', 'applySuggestedPatch',
+  'cleanupStaleAnchors', 'cleanupLegacyMetadata', 'convertMarkdownBlockHtml', 'reanchorThread'
+]);
 
 interface PreviewRestoreState {
   focusThreadId?: string;
   overlayThreadIds?: string[];
   replyThreadId?: string;
+  mutationResults?: Record<string, { ok: boolean; error?: string }>;
 }
 
 export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vscode.Disposable {
@@ -72,8 +86,8 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
   ) {
     this.anchorMaintenance = new AnchorMaintenanceController(store);
     this.reviewUndo = new ReviewUndoController(store);
-    const defaultFence = this.markdown.renderer.rules.fence;
     applySourceLineMapping(this.markdown);
+    applyMarkdownImageSourceMapping(this.markdown);
 
     this.markdown.renderer.rules.image = (tokens, index, _options, env) => {
       const token = tokens[index];
@@ -82,9 +96,11 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
       const title = token.attrGet('title') ?? '';
       const label = markdownImageReviewLabel({ alt, src, title });
       const anchorText = createMarkdownImageAnchorText({ alt, src, title });
+      const sourceMarkdown = token.meta?.reviewSourceMarkdown ?? anchorText;
+      const imageSourceAttributes = `data-image-markdown="${escapeHtml(sourceMarkdown)}" data-image-title="${escapeHtml(title)}" contenteditable="false"`;
 
       if (isRemoteMarkdownImageSource(src)) {
-        return `<span class="markdown-image markdown-image-remote" data-markdown-image data-image-anchor="${escapeHtml(anchorText)}" data-image-src="${escapeHtml(src)}" data-image-alt="${escapeHtml(alt)}">
+        return `<span class="markdown-image markdown-image-remote" data-markdown-image ${imageSourceAttributes} data-image-anchor="${escapeHtml(anchorText)}" data-image-src="${escapeHtml(src)}" data-image-alt="${escapeHtml(alt)}">
   <span class="markdown-image-placeholder">
     <strong>${escapeHtml(label)}</strong>
     <span>Remote image preview is blocked by default.</span>
@@ -97,7 +113,7 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
       const resolvedSrc = this.resolveMarkdownImageSrc(src, env);
 
       if (!resolvedSrc) {
-        return `<span class="markdown-image markdown-image-missing" data-markdown-image data-image-anchor="${escapeHtml(anchorText)}" data-image-src="${escapeHtml(src)}" data-image-alt="${escapeHtml(alt)}">
+        return `<span class="markdown-image markdown-image-missing" data-markdown-image ${imageSourceAttributes} data-image-anchor="${escapeHtml(anchorText)}" data-image-src="${escapeHtml(src)}" data-image-alt="${escapeHtml(alt)}">
   <span class="markdown-image-placeholder">
     <strong>${escapeHtml(label)}</strong>
     <span>Image source could not be resolved.</span>
@@ -107,7 +123,7 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
       }
 
       const titleAttribute = title ? ` title="${escapeHtml(title)}"` : '';
-      return `<span class="markdown-image" data-markdown-image data-image-anchor="${escapeHtml(anchorText)}" data-image-src="${escapeHtml(src)}" data-image-alt="${escapeHtml(alt)}">
+      return `<span class="markdown-image" data-markdown-image ${imageSourceAttributes} data-image-anchor="${escapeHtml(anchorText)}" data-image-src="${escapeHtml(src)}" data-image-alt="${escapeHtml(alt)}">
   <img src="${escapeHtml(resolvedSrc)}" alt="${escapeHtml(alt)}"${titleAttribute}>
   <span class="markdown-image-actions">
     <button type="button" class="secondary compact" data-image-feedback>Feedback</button>
@@ -123,11 +139,7 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
         return this.renderMermaidFence(token.content, token.map?.[0], token.map?.[1]);
       }
 
-      if (defaultFence) {
-        return defaultFence(tokens, index, options, env, self);
-      }
-
-      return self.renderToken(tokens, index, options);
+      return renderReviewableCodeFence(token.content, token.info, token.map?.[0], token.map?.[1]);
     };
   }
 
@@ -194,19 +206,46 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
       localResourceRoots: this.getLocalResourceRoots(document.uri)
     };
 
+    let activeMutations = 0;
+    let refreshPending = false;
+    let pendingRestoreState: PreviewRestoreState | undefined;
+    let renderSequence = 0;
+    let hasRenderedPreview = false;
+    const mutationResults: NonNullable<PreviewRestoreState['mutationResults']> = {};
+    const pendingRequests = new Set<string>();
+    const trackedMutationTypes = new Set(['addComment', 'addReply', 'editMarkdownBlock', 'insertMarkdownBlock', 'editMermaidSource', 'editMarkdownTable', 'reanchorThread']);
     const render = async (restoreState?: PreviewRestoreState) => {
+      if (restoreState) pendingRestoreState = restoreState;
+      if (activeMutations > 0) {
+        refreshPending = true;
+        return;
+      }
+      const sequence = ++renderSequence;
       try {
-        const reviewDocument = await this.store.load(document.uri);
-        const resolvedReviewDocument = await this.store.loadResolved(document.uri);
+        const [reviewDocument, resolvedReviewDocument] = await this.store.withDocumentTransaction(document.uri, async () => [
+          await this.store.load(document.uri), await this.store.loadResolved(document.uri)
+        ]);
+        if (sequence !== renderSequence || activeMutations > 0) {
+          refreshPending = true;
+          return;
+        }
         webviewPanel.webview.html = this.renderHtml(
           webviewPanel.webview,
           document,
           reviewDocument,
           resolvedReviewDocument,
-          restoreState
+          { ...pendingRestoreState, mutationResults }
         );
+        hasRenderedPreview = true;
+        pendingRestoreState = undefined;
+        refreshPending = false;
       } catch (error) {
-        webviewPanel.webview.html = this.renderErrorHtml(document, formatError(error));
+        if (sequence !== renderSequence || activeMutations > 0) return;
+        if (hasRenderedPreview) {
+          await webviewPanel.webview.postMessage({ type: 'reviewRefreshFailed', error: formatError(error) });
+        } else {
+          webviewPanel.webview.html = this.renderErrorHtml(document, formatError(error));
+        }
       }
     };
 
@@ -245,17 +284,50 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
     });
 
     webviewPanel.webview.onDidReceiveMessage(async message => {
+      const sourceMarkdownAtMessage = document.getText();
+      const sourceVersion = parseDocumentVersion(message?.documentVersion);
+      const requestId = trackedMutationTypes.has(message?.type) && typeof message?.requestId === 'string'
+        ? message.requestId.slice(0, 160) : '';
+      if (requestId && mutationResults[requestId]) {
+        await webviewPanel.webview.postMessage({ type: 'reviewMutationResult', requestId, ...mutationResults[requestId] });
+        return;
+      }
+      if (requestId && pendingRequests.has(requestId)) return;
+      if (requestId) {
+        pendingRequests.add(requestId);
+        activeMutations++;
+      }
+      let mutationSucceeded = false;
+      let mutationError = 'Save did not complete. Your draft is kept; check the notification and retry.';
+      const completeRender = async (restoreState?: PreviewRestoreState) => {
+        mutationSucceeded = true;
+        await render(restoreState);
+      };
       try {
+        if (message?.type === 'refreshPreview') {
+          await render();
+          return;
+        }
+        if (sourceRevisionMessageTypes.has(message?.type)) {
+          this.ensureDocumentRevision(document, sourceVersion);
+        }
         if (message?.type === 'addComment') {
-          await this.addComment(
+          const added = await this.addComment(
             document,
             String(message.anchorText ?? ''),
             typeof message.comment === 'string' ? message.comment : undefined,
             parseOccurrence(message.anchorOccurrence),
             parseSourceLine(message.sourceLine),
-            parseSourceLine(message.sourceLineEnd)
+            parseSourceLine(message.sourceLineEnd),
+            sourceVersion
           );
-          await render();
+          if (!added) return;
+          await completeRender();
+        }
+
+        if (message?.type === 'reanchorThread') {
+          await this.reanchorReviewThread(document, message, sourceVersion);
+          await completeRender({ focusThreadId: String(message.threadId) });
         }
 
         if (message?.type === 'updateStatus') {
@@ -268,11 +340,11 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
 
           await this.anchorMaintenance.flush(document);
           await this.updateThreadStatus(document, String(message.threadId), status);
-          await render();
+          await completeRender();
         }
 
         if (message?.type === 'cleanupStaleAnchors' || message?.type === 'cleanupLegacyMetadata') {
-          const cleaned = await this.cleanupLegacyReviewMetadata(document);
+          const cleaned = await this.cleanupLegacyReviewMetadata(document, sourceVersion);
 
           if (!cleaned) {
             vscode.window.showWarningMessage('Legacy review metadata could not be cleaned up.');
@@ -280,7 +352,7 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
           }
 
           vscode.window.showInformationMessage('Cleaned legacy inline review metadata.');
-          await render();
+          await completeRender();
         }
 
         if (message?.type === 'restoreThread') {
@@ -294,7 +366,7 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
           await this.restoreThread(document, threadId);
 
           vscode.window.showInformationMessage('Restored review thread to open feedback.');
-          await render({ focusThreadId: threadId });
+          await completeRender({ focusThreadId: threadId });
         }
 
         if (message?.type === 'openContextBootstrapPrompt') {
@@ -388,7 +460,7 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
             threadId,
             replyText
           );
-          await render({
+          await completeRender({
             focusThreadId: threadId,
             overlayThreadIds: message.origin === 'overlay'
               ? parseThreadIds(message.threadIds, threadId)
@@ -409,7 +481,7 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
             return;
           }
 
-          const result = await this.applySuggestedPatch(document, thread);
+          const result = await this.applySuggestedPatch(document, thread, sourceVersion);
 
           if (result !== 'applied') {
             vscode.window.showWarningMessage(formatApplyPatchResult(result));
@@ -417,7 +489,7 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
           }
 
           vscode.window.showInformationMessage('Applied suggested edit, refreshed review anchors, and marked the thread accepted.');
-          await render();
+          await completeRender();
         }
 
         if (message?.type === 'editMarkdownBlock') {
@@ -430,7 +502,7 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
             return;
           }
 
-          const sourceMarkdown = document.getText();
+          const sourceMarkdown = sourceMarkdownAtMessage;
           const replacementMarkdown = createMarkdownBlockReplacement(message, sourceMarkdown, lineStart);
 
           if (!replacementMarkdown.trim()) {
@@ -446,7 +518,7 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
             actor: 'user',
             intent
           });
-          const applied = await this.applyReviewAwareEdit(document, plan);
+          const applied = await this.applyReviewAwareEdit(document, plan, sourceMarkdownAtMessage, sourceVersion);
 
           if (!applied) {
             vscode.window.showWarningMessage('Markdown block edit could not be applied.');
@@ -454,7 +526,7 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
           }
 
           vscode.window.showInformationMessage('Updated Markdown and refreshed affected review anchors.');
-          await render();
+          await completeRender();
         }
 
         if (message?.type === 'insertMarkdownBlock') {
@@ -465,7 +537,7 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
             return;
           }
 
-          const sourceMarkdown = document.getText();
+          const sourceMarkdown = sourceMarkdownAtMessage;
           const replacementMarkdown = createMarkdownBlockReplacement(message, sourceMarkdown, afterLine + 1);
 
           if (!replacementMarkdown.trim()) {
@@ -480,7 +552,7 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
             actor: 'user',
             intent: 'insert_block'
           });
-          const applied = await this.applyReviewAwareEdit(document, plan);
+          const applied = await this.applyReviewAwareEdit(document, plan, sourceMarkdownAtMessage, sourceVersion);
 
           if (!applied) {
             vscode.window.showWarningMessage('Markdown block insert could not be applied.');
@@ -488,7 +560,7 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
           }
 
           vscode.window.showInformationMessage('Inserted Markdown block.');
-          await render();
+          await completeRender();
         }
 
         if (message?.type === 'deleteMarkdownBlock') {
@@ -511,13 +583,13 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
           }
 
           await this.anchorMaintenance.flush(document);
-          const plan = createLineRangeDeletePlan(document.getText(), {
+          const plan = createLineRangeDeletePlan(sourceMarkdownAtMessage, {
             lineStart,
             lineEnd,
             actor: 'user',
             intent: 'delete_block'
           });
-          const applied = await this.applyReviewAwareEdit(document, plan);
+          const applied = await this.applyReviewAwareEdit(document, plan, sourceMarkdownAtMessage, sourceVersion);
 
           if (!applied) {
             vscode.window.showWarningMessage('Markdown block could not be deleted.');
@@ -525,7 +597,7 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
           }
 
           vscode.window.showInformationMessage('Deleted Markdown block and refreshed affected review anchors.');
-          await render();
+          await completeRender();
         }
 
         if (message?.type === 'editMermaidSource') {
@@ -539,14 +611,14 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
           }
 
           await this.anchorMaintenance.flush(document);
-          const plan = createLineRangeEditPlan(document.getText(), {
+          const plan = createLineRangeEditPlan(sourceMarkdownAtMessage, {
             lineStart,
             lineEnd,
             replacement: createMermaidFenceReplacement(source),
             actor: 'user',
             intent: 'manual_mermaid_edit'
           });
-          const applied = await this.applyReviewAwareEdit(document, plan);
+          const applied = await this.applyReviewAwareEdit(document, plan, sourceMarkdownAtMessage, sourceVersion);
 
           if (!applied) {
             vscode.window.showWarningMessage('Mermaid source edit could not be applied.');
@@ -554,7 +626,7 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
           }
 
           vscode.window.showInformationMessage('Updated Mermaid source and refreshed affected review anchors.');
-          await render();
+          await completeRender();
         }
 
         if (message?.type === 'editMarkdownTable') {
@@ -566,8 +638,14 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
             return;
           }
 
+          const tableSourceMapping = parseMarkdownTableSourceMapping(message.tableSourceMapping);
+          if (!tableSourceMapping) {
+            vscode.window.showWarningMessage('Table edit is stale. Reopen the table editor and retry.');
+            return;
+          }
+
           await this.anchorMaintenance.flush(document);
-          const plan = createLineRangeEditPlan(document.getText(), {
+          const plan = createLineRangeEditPlan(sourceMarkdownAtMessage, {
             lineStart,
             lineEnd,
             replacement: createMarkdownTableReplacement({
@@ -576,9 +654,10 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
               rows: message.rows
             }),
             actor: 'user',
-            intent: 'manual_table_edit'
+            intent: 'manual_table_edit',
+            tableSourceMapping
           });
-          const applied = await this.applyReviewAwareEdit(document, plan);
+          const applied = await this.applyReviewAwareEdit(document, plan, sourceMarkdownAtMessage, sourceVersion);
 
           if (!applied) {
             vscode.window.showWarningMessage('Markdown table edit could not be applied.');
@@ -586,7 +665,17 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
           }
 
           vscode.window.showInformationMessage('Updated Markdown table and refreshed affected review anchors.');
-          await render();
+          await completeRender();
+        }
+
+        if (message?.type === 'copyDraft') {
+          const text = typeof message.html === 'string'
+            ? htmlBlockToMarkdown(message.html, { sourceMarkdown: String(message.sourceMarkdown ?? ''), oneBasedLineStart: 1 })
+            : message.table
+              ? createMarkdownTableReplacement(message.table)
+              : String(message.text ?? '');
+          await vscode.env.clipboard.writeText(text);
+          vscode.window.showInformationMessage('Copied draft. Review the current target before pasting.');
         }
 
         if (message?.type === 'copyText') {
@@ -594,7 +683,22 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
           vscode.window.showInformationMessage('Copied Mermaid source.');
         }
       } catch (error) {
+        mutationError = formatError(error);
+        if (message?.type === 'convertMarkdownBlockHtml') {
+          await webviewPanel.webview.postMessage({ type: 'convertedMarkdownBlockHtml', requestId: message.requestId, error: mutationError });
+        }
         vscode.window.showErrorMessage(`AI Markdown Review failed: ${formatError(error)}`);
+      } finally {
+        if (requestId) {
+          const result = mutationSucceeded ? { ok: true } : { ok: false, error: mutationError };
+          mutationResults[requestId] = result;
+          pendingRequests.delete(requestId);
+          activeMutations--;
+          const completedIds = Object.keys(mutationResults);
+          for (const id of completedIds.slice(0, Math.max(0, completedIds.length - 100))) delete mutationResults[id];
+          await webviewPanel.webview.postMessage({ type: 'reviewMutationResult', requestId, ...result });
+          if (mutationSucceeded || refreshPending) await render();
+        }
       }
     });
 
@@ -631,19 +735,61 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
 </figure>`;
   }
 
+  private async reanchorReviewThread(
+    document: vscode.TextDocument,
+    message: Record<string, unknown>,
+    expectedVersion: number | undefined
+  ): Promise<void> {
+    await this.store.withDocumentTransaction(document.uri, async () => {
+      this.ensureDocumentRevision(document, expectedVersion);
+      const threadId = String(message.threadId ?? '');
+      const thread = (await this.store.load(document.uri)).threads.find(candidate => candidate.id === threadId);
+      if (!thread || thread.status !== 'open') {
+        throw new Error('This thread is no longer open. Refresh the preview before reattaching it.');
+      }
+      if (message.anchorIdentity !== createReviewAnchorIdentityKey(thread)) {
+        throw new Error('The review location changed. Refresh the preview and choose the new target again.');
+      }
+      this.ensureDocumentRevision(document, expectedVersion);
+      const selection = resolveReanchorSelection(document.getText(), {
+        anchorText: String(message.anchorText ?? ''),
+        sourceLine: parseSourceLine(message.sourceLine) ?? 0,
+        sourceLineEnd: parseSourceLine(message.sourceLineEnd) ?? 0,
+        contextBefore: typeof message.contextBefore === 'string' ? message.contextBefore : undefined,
+        contextAfter: typeof message.contextAfter === 'string' ? message.contextAfter : undefined
+      });
+      const now = new Date().toISOString();
+      const anchor = createAnchor(document, selection.text, {
+        occurrence: selection.occurrence,
+        lineHint: selection.lineStart,
+        lineEndHint: selection.lineEnd
+      });
+      await this.store.updateThread(document.uri, thread.id, {
+        anchor: { ...anchor, confidence: 'exact', lastLocatedLine: selection.lineStart, lastLocatedAt: now },
+        thread: [...thread.thread, {
+          role: 'user',
+          text: 'Review update: reattached this thread to the selected text.'
+            + (thread.suggestedPatch ? ' The existing suggested patch was kept; review its target before applying it.' : ''),
+          createdAt: now
+        }]
+      });
+    });
+  }
+
   private async addComment(
     document: vscode.TextDocument,
     selectedText: string,
     providedComment?: string,
     anchorOccurrence?: number,
     sourceLine?: number,
-    sourceLineEnd?: number
-  ): Promise<void> {
+    sourceLineEnd?: number,
+    expectedVersion = document.version
+  ): Promise<boolean> {
     const normalizedSelection = selectedText.trim();
 
     if (!normalizedSelection) {
       vscode.window.showWarningMessage('Select text in the review preview before adding feedback.');
-      return;
+      return false;
     }
 
     const comment = providedComment?.trim() || await vscode.window.showInputBox({
@@ -653,7 +799,7 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
     });
 
     if (!comment?.trim()) {
-      return;
+      return false;
     }
 
     const now = new Date().toISOString();
@@ -675,23 +821,11 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
       updatedAt: now
     };
 
-    const beforeMarkdown = document.getText();
-    const beforeSnapshot = await this.reviewUndo.capture(document.uri);
-    const reviewDocument = await this.store.load(document.uri);
-    reviewDocument.threads.push(thread);
-
-    const committed = await this.commitReviewMutation(
-      document,
-      beforeMarkdown,
-      beforeMarkdown,
-      beforeSnapshot,
-      async () => this.store.save(document.uri, reviewDocument)
-    );
-
-    if (!committed) {
-      vscode.window.showWarningMessage('Feedback could not be saved.');
-      return;
-    }
+    await this.store.withDocumentTransaction(document.uri, async () => {
+      this.ensureDocumentRevision(document, expectedVersion);
+      await this.store.addThread(document.uri, thread);
+    });
+    return true;
   }
 
   private async updateThreadStatus(
@@ -700,46 +834,13 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
     status: ReviewStatus,
     update: Partial<ReviewThread> = {}
   ): Promise<void> {
-    const beforeMarkdown = document.getText();
-    const beforeSnapshot = await this.reviewUndo.capture(document.uri);
     const now = new Date().toISOString();
-    const reviewDocument = await this.store.load(document.uri);
-    const resolvedReviewDocument = await this.store.loadResolved(document.uri);
-
-    if (!reviewDocument.threads.some(thread => thread.id === threadId)) {
-      throw new Error(`Review thread not found: ${threadId}`);
-    }
-
-    const appliedUpdates = applyReviewThreadUpdatesToDocuments(
-      reviewDocument,
-      resolvedReviewDocument,
-      [{
-        threadId,
-        update: {
-          ...update,
-          status,
-          closedBy: status === 'open' ? undefined : 'user',
-          closedAt: status === 'open' ? undefined : now
-        }
-      }],
-      now
-    );
-    const committed = await this.commitReviewMutation(
-      document,
-      beforeMarkdown,
-      beforeMarkdown,
-      beforeSnapshot,
-      async () => this.store.saveBoth(
-        document.uri,
-        appliedUpdates.reviewDocument,
-        appliedUpdates.resolvedReviewDocument
-      )
-    );
-
-    if (!committed) {
-      vscode.window.showWarningMessage('Review status could not be saved.');
-      return;
-    }
+    await this.store.updateThread(document.uri, threadId, {
+      ...update,
+      status,
+      closedBy: status === 'open' ? undefined : 'user',
+      closedAt: status === 'open' ? undefined : now
+    });
   }
 
   private async openReviewSidecar(
@@ -830,43 +931,52 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
 
   private async applyReviewAwareEdit(
     document: vscode.TextDocument,
-    plan: ReviewAwareEditPlan
+    plan: ReviewAwareEditPlan,
+    beforeMarkdown = document.getText(),
+    expectedVersion = document.version
   ): Promise<boolean> {
-    const beforeMarkdown = document.getText();
-    const beforeSnapshot = await this.reviewUndo.capture(document.uri);
-    const now = new Date().toISOString();
-    const reviewDocument = await this.store.load(document.uri);
-    const resolvedReviewDocument = await this.store.loadResolved(document.uri);
-    const updates = buildReviewAwareThreadUpdates(
-      beforeMarkdown,
-      reviewDocument.threads,
-      plan,
-      now
-    );
-    const appliedUpdates = applyReviewThreadUpdatesToDocuments(
-      reviewDocument,
-      resolvedReviewDocument,
-      updates,
-      now
-    );
-    const editedMarkdown = applyReviewAwareEditToMarkdown(beforeMarkdown, plan);
+    return this.store.withDocumentTransaction(document.uri, async () => {
+      if (document.version !== expectedVersion || document.getText() !== beforeMarkdown) {
+        return false;
+      }
+      plan = { ...plan, replacement: plan.replacement.replace(/\r\n|\r|\n/g, detectLineEnding(beforeMarkdown)) };
+      const beforeSnapshot = await this.reviewUndo.capture(document.uri);
+      const now = new Date().toISOString();
+      const reviewDocument = await this.store.load(document.uri);
+      const resolvedReviewDocument = await this.store.loadResolved(document.uri);
+      const updates = buildReviewAwareThreadUpdates(
+        beforeMarkdown,
+        reviewDocument.threads,
+        plan,
+        now
+      );
+      const appliedUpdates = applyReviewThreadUpdatesToDocuments(
+        reviewDocument,
+        resolvedReviewDocument,
+        updates,
+        now
+      );
+      const editedMarkdown = applyReviewAwareEditToMarkdown(beforeMarkdown, plan);
 
-    const committed = await this.commitReviewMutation(
-      document,
-      beforeMarkdown,
-      editedMarkdown,
-      beforeSnapshot,
-      async () => this.store.saveBoth(
-        document.uri,
-        appliedUpdates.reviewDocument,
-        appliedUpdates.resolvedReviewDocument
-      )
-    );
+      const committed = await this.commitReviewMutation(
+        document,
+        beforeMarkdown,
+        editedMarkdown,
+        beforeSnapshot,
+        expectedVersion,
+        appliedUpdates,
+        async () => this.store.saveBoth(
+          document.uri,
+          appliedUpdates.reviewDocument,
+          appliedUpdates.resolvedReviewDocument
+        )
+      );
 
-    if (!committed) {
-      return false;
-    }
-    return true;
+      if (!committed) {
+        return false;
+      }
+      return true;
+    });
   }
 
   private async watchReviewSidecars(
@@ -916,69 +1026,55 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
     document: vscode.TextDocument,
     threadId: string
   ): Promise<void> {
-    const beforeMarkdown = document.getText();
-    const beforeSnapshot = await this.reviewUndo.capture(document.uri);
-    const now = new Date().toISOString();
-    const reviewDocument = await this.store.load(document.uri);
-    const existingOpenThread = reviewDocument.threads.find(thread => thread.id === threadId);
+    await this.store.restoreThread(document.uri, threadId);
+  }
 
-    if (existingOpenThread) {
-      return;
-    }
-
-    const resolvedReviewDocument = await this.store.loadResolved(document.uri);
-    const resolvedIndex = resolvedReviewDocument.threads.findIndex(thread => thread.id === threadId);
-
-    if (resolvedIndex < 0) {
-      throw new Error(`Resolved review thread not found: ${threadId}`);
-    }
-
-    const restoredThread = createRestoredReviewThread(
-      resolvedReviewDocument.threads[resolvedIndex],
-      now
-    );
-    resolvedReviewDocument.threads.splice(resolvedIndex, 1);
-    reviewDocument.threads.push(restoredThread);
-
-    const committed = await this.commitReviewMutation(
-      document,
-      beforeMarkdown,
-      beforeMarkdown,
-      beforeSnapshot,
-      async () => this.store.saveBoth(
-        document.uri,
-        reviewDocument,
-        resolvedReviewDocument
-      )
-    );
-
-    if (!committed) {
-      throw new Error('Review thread could not be restored.');
+  private ensureDocumentRevision(document: vscode.TextDocument, expectedVersion: number | undefined): void {
+    if (expectedVersion === undefined || document.version !== expectedVersion) {
+      throw new Error('The Markdown document changed. Refresh the preview and retry the edit.');
     }
   }
 
   private async replaceDocumentMarkdown(
     document: vscode.TextDocument,
     beforeMarkdown: string,
-    afterMarkdown: string
+    afterMarkdown: string,
+    expectedVersion: number
   ): Promise<boolean> {
+    if (document.version !== expectedVersion || document.getText() !== beforeMarkdown) {
+      return false;
+    }
+    afterMarkdown = afterMarkdown.replace(/\r\n|\r|\n/g, detectLineEnding(beforeMarkdown));
     if (beforeMarkdown === afterMarkdown) {
       return true;
     }
 
+    // Limit the WorkspaceEdit to the changed span, preserving surrounding source.
+    let start = 0;
+    while (start < beforeMarkdown.length && start < afterMarkdown.length
+      && beforeMarkdown[start] === afterMarkdown[start]) {
+      start += 1;
+    }
+    let end = beforeMarkdown.length;
+    let replacementEnd = afterMarkdown.length;
+    while (end > start && replacementEnd > start
+      && beforeMarkdown[end - 1] === afterMarkdown[replacementEnd - 1]) {
+      end -= 1;
+      replacementEnd -= 1;
+    }
     const edit = new vscode.WorkspaceEdit();
     edit.replace(
       document.uri,
-      new vscode.Range(document.positionAt(0), document.positionAt(beforeMarkdown.length)),
-      afterMarkdown
+      new vscode.Range(document.positionAt(start), document.positionAt(end)),
+      afterMarkdown.slice(start, replacementEnd)
     );
     return vscode.workspace.applyEdit(edit);
   }
 
-  private async cleanupLegacyReviewMetadata(document: vscode.TextDocument): Promise<boolean> {
+  private async cleanupLegacyReviewMetadata(document: vscode.TextDocument, expectedVersion = document.version): Promise<boolean> {
+    this.ensureDocumentRevision(document, expectedVersion);
     const beforeMarkdown = document.getText();
-    const afterMarkdown = stripInlineAnchorMarkers(beforeMarkdown);
-    return this.replaceDocumentMarkdown(document, beforeMarkdown, afterMarkdown);
+    return this.replaceDocumentMarkdown(document, beforeMarkdown, stripInlineAnchorMarkers(beforeMarkdown), expectedVersion);
   }
 
   private async commitReviewMutation(
@@ -986,70 +1082,85 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
     beforeMarkdown: string,
     afterMarkdown: string,
     beforeSnapshot: ReviewSidecarSnapshot,
+    expectedVersion: number,
+    afterDocuments: ReviewDocumentPair,
     writeSidecars: () => Promise<void>
   ): Promise<boolean> {
-    const documentUpdated = await this.replaceDocumentMarkdown(document, beforeMarkdown, afterMarkdown);
-
+    // VS Code uses one EOL convention per document. Match it before computing
+    // positions or registering Undo; CRLF interiors are not addressable positions.
+    afterMarkdown = afterMarkdown.replace(/\r\n|\r|\n/g, detectLineEnding(beforeMarkdown));
+    const documentUpdated = await this.replaceDocumentMarkdown(document, beforeMarkdown, afterMarkdown, expectedVersion);
     if (!documentUpdated) {
       return false;
     }
-
+    const appliedVersion = document.version;
     try {
       await writeSidecars();
     } catch (error) {
-      if (!await this.rollbackReviewMutation(document, beforeMarkdown, beforeSnapshot)) {
-        throw new Error(`Review sidecar write failed and Markdown rollback was rejected by VS Code: ${formatError(error)}`);
+      // The store owns rollback of its I/O failures and preserves external writes.
+      // A second raw snapshot restore here could overwrite those newer writes.
+      const rolledBack = beforeMarkdown === afterMarkdown
+        || await this.replaceDocumentMarkdown(document, afterMarkdown, beforeMarkdown, appliedVersion);
+      if (!rolledBack) {
+        throw new Error(`Review save failed; newer Markdown changes were preserved and rollback was not applied: ${formatError(error)}`);
       }
       throw error;
     }
 
-    if (beforeMarkdown !== document.getText()) {
-      const afterSnapshot = await this.reviewUndo.capture(document.uri);
-      this.reviewUndo.register(document.uri, beforeMarkdown, document.getText(), beforeSnapshot, afterSnapshot);
+    if (beforeMarkdown !== afterMarkdown) {
+      // The committed payload is already known. A new filesystem read here could
+      // fail after a successful save and leave the source edit without Undo state.
+      const bytes = new TextEncoder().encode(JSON.stringify(createPortableReviewSidecarPayload(
+        document.uri.toString(), afterDocuments.reviewDocument,
+        afterDocuments.resolvedReviewDocument, afterDocuments.reviewDocument.updatedAt
+      )));
+      const afterSnapshot: ReviewSidecarSnapshot = {
+        documents: structuredClone(afterDocuments),
+        reviewUri: beforeSnapshot.reviewUri,
+        resolvedUri: beforeSnapshot.resolvedUri,
+        reviewBytes: bytes,
+        resolvedBytes: bytes
+      };
+      this.reviewUndo.register(document.uri, beforeMarkdown, afterMarkdown, beforeSnapshot, afterSnapshot);
     }
-
-    return true;
-  }
-
-  private async rollbackReviewMutation(
-    document: vscode.TextDocument,
-    beforeMarkdown: string,
-    beforeSnapshot: ReviewSidecarSnapshot
-  ): Promise<boolean> {
-    await restoreReviewSidecarSnapshot(beforeSnapshot);
-
-    if (document.getText() !== beforeMarkdown) {
-      return this.replaceDocumentMarkdown(document, document.getText(), beforeMarkdown);
-    }
-
     return true;
   }
 
   private async applySuggestedPatch(
     document: vscode.TextDocument,
-    thread: ReviewThread
+    thread: ReviewThread,
+    expectedVersion = document.version
   ): Promise<ApplyPatchResult> {
-    const selection = selectSuggestedPatchReplacement(
-      document.getText(),
-      thread.suggestedPatch,
-      thread.anchor
-    );
+    return this.store.withDocumentTransaction(document.uri, async () => {
+      this.ensureDocumentRevision(document, expectedVersion);
+      const current = (await this.store.load(document.uri)).threads.find(candidate => candidate.id === thread.id);
+      if (!current || current.status !== 'open' || JSON.stringify(current.suggestedPatch) !== JSON.stringify(thread.suggestedPatch)) {
+        return 'failed';
+      }
+      this.ensureDocumentRevision(document, expectedVersion);
+      thread = current;
+      const selection = selectSuggestedPatchReplacement(
+        document.getText(),
+        thread.suggestedPatch,
+        thread.anchor
+      );
 
-    if (selection.result !== 'applied') {
-      return selection.result;
-    }
+      if (selection.result !== 'applied') {
+        return selection.result;
+      }
 
-    const plan = createOffsetEditPlan(document.getText(), {
-      start: selection.start,
-      end: selection.end,
-      replacement: selection.replacement,
-      actor: 'user',
-      intent: 'apply_suggestion',
-      targetThreadId: thread.id,
-      closeTargetAs: 'accepted'
+      const plan = createOffsetEditPlan(document.getText(), {
+        start: selection.start,
+        end: selection.end,
+        replacement: selection.replacement,
+        actor: 'user',
+        intent: 'apply_suggestion',
+        targetThreadId: thread.id,
+        closeTargetAs: 'accepted'
+      });
+
+      return await this.applyReviewAwareEdit(document, plan, document.getText(), expectedVersion) ? 'applied' : 'failed';
     });
-
-    return await this.applyReviewAwareEdit(document, plan) ? 'applied' : 'failed';
   }
 
   private renderHtml(
@@ -1071,10 +1182,13 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
     const contextBootstrapNotice = this.renderContextBootstrapPromptAction(reviewDocument);
     const storageWarning = this.renderStorageWarning(documentText, reviewDocument);
     const markerLineHints = this.getMarkerLineHints(reviewDocument);
-    const historyAnchorStates = getReviewHistoryAnchorStates(
+    const historyAnchorLocations = getReviewHistoryAnchorLocations(
       previewMarkdown,
       resolvedReviewDocument.threads
     );
+    const historyAnchorStates = Object.fromEntries(resolvedReviewDocument.threads.map(thread => [
+      thread.id, historyAnchorLocations[thread.id] ? 'linked' : 'outdated'
+    ]));
     const mermaidThreadMatchesByFigure = matchMermaidReviewThreadsToBlocks(
       collectMermaidSourceBlocks(previewMarkdown),
       reviewDocument.threads.filter(thread => thread.status === 'open')
@@ -1088,6 +1202,7 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
       threads: reviewDocument.threads,
       resolvedThreads: resolvedReviewDocument.threads,
       historyAnchorStates,
+      historyAnchorLocations,
       suggestedPatchResults,
       markerLineHints,
       anchorIdentityByThreadId: Object.fromEntries(
@@ -1102,6 +1217,8 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
       sourceLines: documentText.split(/\r\n|\r|\n/),
       sourceLineEnding,
       documentVersion: document.version,
+      documentUri: document.uri.toString(),
+      sourceFingerprint: createHash('sha256').update(documentText).digest('hex'),
       restoreState: restoreState ?? {}
     }).replace(/</g, '\\u003c');
 
@@ -1258,6 +1375,21 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
       min-width: 32px;
       font-size: 14px;
       line-height: 1;
+    }
+    .review-navigation-actions {
+      align-items: center;
+    }
+    .review-position {
+      color: var(--muted);
+      font-size: 12px;
+      white-space: nowrap;
+    }
+    .review-navigation-actions button:focus-visible,
+    .thread button:focus-visible,
+    .review-badge:focus-visible,
+    #markdown-body [tabindex="-1"]:focus-visible {
+      outline: 2px solid var(--vscode-focusBorder);
+      outline-offset: 2px;
     }
     .context-bootstrap-actions {
       justify-content: flex-end;
@@ -2036,6 +2168,15 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
     .mermaid-review-badge {
       margin-left: 0;
     }
+    .draft-recovery {
+      border: 1px solid var(--vscode-inputValidation-warningBorder, var(--border));
+      padding: 12px;
+      margin-bottom: 16px;
+    }
+    .draft-recovery[hidden] { display: none; }
+    .draft-recovery textarea { display: block; width: 100%; min-height: 90px; margin: 8px 0; }
+    .draft-recovery button { margin-right: 8px; }
+    [data-save-status] { color: var(--muted); font-size: 12px; margin: 8px 0 0; }
     @media (max-width: 900px) {
       .layout {
         grid-template-columns: 1fr;
@@ -2075,7 +2216,7 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
   </div>
   <form id="comment-composer" class="comment-composer">
     <p class="comment-composer-label">Comment on selected text</p>
-    <textarea id="comment-body" placeholder="Add feedback for this selection"></textarea>
+    <textarea id="comment-body" aria-label="Comment on selected text" placeholder="Add feedback for this selection"></textarea>
     <p id="comment-quality-warning" class="quality-warning" hidden></p>
     <div class="comment-composer-actions">
       <button type="button" id="comment-cancel" class="secondary compact">Cancel</button>
@@ -2098,8 +2239,8 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
       <button type="button" class="secondary compact" id="block-editor-raw-toggle" title="Edit raw Markdown for this block">Raw</button>
       <span id="block-editor-status" class="block-editor-status" aria-live="polite"></span>
     </div>
-    <div id="block-editor-surface" class="block-editor-surface" contenteditable="true"></div>
-    <textarea id="block-editor-raw" class="block-editor-raw" spellcheck="false"></textarea>
+    <div id="block-editor-surface" class="block-editor-surface" contenteditable="true" role="textbox" aria-multiline="true" aria-label="Markdown block content"></div>
+    <textarea id="block-editor-raw" class="block-editor-raw" spellcheck="false" aria-label="Raw Markdown block"></textarea>
     <div class="block-editor-actions">
       <button type="button" id="block-editor-delete" class="secondary compact danger">Delete</button>
       <button type="button" id="block-editor-cancel" class="secondary compact">Cancel</button>
@@ -2111,7 +2252,7 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
       <strong>Edit Mermaid source</strong>
       <span id="mermaid-editor-lines"></span>
     </div>
-    <textarea id="mermaid-editor-source" class="mermaid-editor-source" spellcheck="false"></textarea>
+    <textarea id="mermaid-editor-source" class="mermaid-editor-source" spellcheck="false" aria-label="Mermaid source"></textarea>
     <div class="mermaid-editor-actions">
       <button type="button" id="mermaid-editor-cancel" class="secondary compact">Cancel</button>
       <button type="submit" class="compact">Save</button>
@@ -2132,6 +2273,7 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
       <button type="submit" class="compact">Save</button>
     </div>
   </form>
+  ${renderReanchorPanel()}
   <script nonce="${nonce}" src="${mermaidScriptUri}"></script>
   <script nonce="${nonce}">
     const vscode = acquireVsCodeApi();
@@ -2144,6 +2286,12 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
     const sourceLines = Array.isArray(state.sourceLines) ? state.sourceLines : [];
     const sourceLineEnding = typeof state.sourceLineEnding === 'string' ? state.sourceLineEnding : '\\n';
     const documentVersion = Number(state.documentVersion);
+    const findNormalizedTextSpan = ${findNormalizedTextSpan.toString()};
+    let draftSession;
+    function postReviewMessage(message) {
+      if (draftSession?.submit(message)) return;
+      vscode.postMessage({ ...message, documentVersion });
+    }
     const restoreState = state.restoreState || {};
     const markdownBody = document.getElementById('markdown-body');
     const selectionPopover = document.getElementById('selection-popover');
@@ -2182,6 +2330,7 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
     let selectionTimer = undefined;
     let activeBlockEdit = undefined;
     let pendingBlockRawConversionId = '';
+    let pendingBlockRawConversionHtml = '';
     let activeMermaidEdit = undefined;
     let activeTableEdit = undefined;
     const draftSelectionHighlightLayer = document.createElement('div');
@@ -2224,6 +2373,11 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
         focusActiveBlockEditorInput();
         return;
       }
+      if (serializeBlockEditorHtml() !== pendingBlockRawConversionHtml) {
+        setBlockEditorStatus('The draft changed during conversion. Try Raw again to include your latest edits.');
+        focusActiveBlockEditorInput();
+        return;
+      }
       blockEditorRaw.value = String(message.rawMarkdown || '');
       setBlockEditorRawMode(true);
       setBlockEditorStatus('');
@@ -2252,7 +2406,7 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
         return;
       }
 
-      vscode.postMessage({
+      postReviewMessage({
         type: 'deleteMarkdownBlock',
         lineStart: activeBlockEdit.lineStart,
         lineEnd: activeBlockEdit.lineEnd
@@ -2274,6 +2428,7 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
     tableEditorAddRow.addEventListener('click', () => {
       const table = readTableEditorData();
       table.rows.push(Array.from({ length: table.headers.length }, () => ''));
+      activeTableEdit?.rowSources.push(null);
       renderTableEditorGrid(table);
       focusTableCell(table.rows.length, 0);
     });
@@ -2281,6 +2436,7 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
     tableEditorAddColumn.addEventListener('click', () => {
       const table = readTableEditorData();
       table.headers.push('Column ' + (table.headers.length + 1));
+      activeTableEdit?.columnSources.push(null);
       table.alignments.push('none');
       table.rows = table.rows.map((row) => [...row, '']);
       renderTableEditorGrid(table);
@@ -2302,6 +2458,7 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
 
         if (table.headers.length > 1 && Number.isFinite(columnIndex)) {
           table.headers.splice(columnIndex, 1);
+          activeTableEdit?.columnSources.splice(columnIndex, 1);
           table.alignments.splice(columnIndex, 1);
           table.rows = table.rows.map((row) => row.filter((_, index) => index !== columnIndex));
           renderTableEditorGrid(table);
@@ -2318,6 +2475,7 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
 
         if (Number.isFinite(rowIndex)) {
           table.rows.splice(rowIndex, 1);
+          activeTableEdit?.rowSources.splice(rowIndex, 1);
           renderTableEditorGrid(table);
         }
       }
@@ -2335,13 +2493,13 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
         : { html: serializeBlockEditorHtml() };
 
       if (activeBlockEdit.mode === 'insert') {
-        vscode.postMessage({
+        postReviewMessage({
           type: 'insertMarkdownBlock',
           afterLine: activeBlockEdit.afterLine,
           ...payload
         });
       } else {
-        vscode.postMessage({
+        postReviewMessage({
           type: 'editMarkdownBlock',
           lineStart: activeBlockEdit.lineStart,
           lineEnd: activeBlockEdit.lineEnd,
@@ -2349,7 +2507,6 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
           ...payload
         });
       }
-      hideBlockEditor();
     });
 
     mermaidEditor.addEventListener('submit', (event) => {
@@ -2359,13 +2516,12 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
         return;
       }
 
-      vscode.postMessage({
+      postReviewMessage({
         type: 'editMermaidSource',
         lineStart: activeMermaidEdit.lineStart,
         lineEnd: activeMermaidEdit.lineEnd,
         source: mermaidEditorSource.value
       });
-      hideMermaidEditor();
     });
 
     tableEditor.addEventListener('submit', (event) => {
@@ -2376,15 +2532,15 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
       }
 
       const table = readTableEditorData();
-      vscode.postMessage({
+      postReviewMessage({
         type: 'editMarkdownTable',
         lineStart: activeTableEdit.lineStart,
         lineEnd: activeTableEdit.lineEnd,
         headers: table.headers,
         alignments: table.alignments,
-        rows: table.rows
+        rows: table.rows,
+        tableSourceMapping: { rowSources: activeTableEdit.rowSources, columnSources: activeTableEdit.columnSources }
       });
-      hideTableEditor();
     });
 
     blockEditor.addEventListener('click', (event) => {
@@ -2467,7 +2623,7 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
         return;
       }
 
-      vscode.postMessage({
+      postReviewMessage({
         type: 'addComment',
         anchorText: activeSelectionText,
         anchorOccurrence: activeSelectionOccurrence,
@@ -2476,9 +2632,6 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
         comment: body
       });
       hideSelectionPopover();
-      hideComposer();
-      clearDraftSelectionHighlight();
-      window.getSelection()?.removeAllRanges();
     });
 
     commentBody.addEventListener('input', () => {
@@ -2502,7 +2655,7 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
 
       updateReplyQualityWarningForForm(target);
 
-      vscode.postMessage({
+      postReviewMessage({
         type: 'addReply',
         threadId: target.getAttribute('data-thread-id'),
         threadIds: getThreadIds(commentOverlay),
@@ -2614,7 +2767,7 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
         const lineRange = block ? getEditableLineRange(block) : undefined;
 
         if (lineRange) {
-          vscode.postMessage({
+          postReviewMessage({
             type: 'deleteMarkdownBlock',
             lineStart: lineRange.lineStart,
             lineEnd: lineRange.lineEnd
@@ -2643,7 +2796,7 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
       if (applyPatchButton) {
         event.preventDefault();
         event.stopPropagation();
-        vscode.postMessage({
+        postReviewMessage({
           type: 'applySuggestedPatch',
           threadId: applyPatchButton.getAttribute('data-thread-id')
         });
@@ -2655,7 +2808,7 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
       if (cleanupButton) {
         event.preventDefault();
         event.stopPropagation();
-        vscode.postMessage({
+        postReviewMessage({
           type: 'cleanupLegacyMetadata'
         });
         return;
@@ -2675,7 +2828,7 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
       if (openReviewSidecarButton) {
         event.preventDefault();
         event.stopPropagation();
-        vscode.postMessage({
+        postReviewMessage({
           type: 'openReviewSidecar',
           sidecarPath: openReviewSidecarButton.getAttribute('data-sidecar-path')
         });
@@ -2687,7 +2840,7 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
       if (findReviewSidecarsButton) {
         event.preventDefault();
         event.stopPropagation();
-        vscode.postMessage({ type: 'findReviewSidecars' });
+        postReviewMessage({ type: 'findReviewSidecars' });
         return;
       }
 
@@ -2705,7 +2858,7 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
       if (openContextBootstrapPromptButton) {
         event.preventDefault();
         event.stopPropagation();
-        vscode.postMessage({ type: 'openContextBootstrapPrompt' });
+        postReviewMessage({ type: 'openContextBootstrapPrompt' });
         return;
       }
 
@@ -2714,7 +2867,7 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
       if (openFeedbackLoopPromptButton) {
         event.preventDefault();
         event.stopPropagation();
-        vscode.postMessage({
+        postReviewMessage({
           type: 'openFeedbackLoopPrompt',
           threadId: openFeedbackLoopPromptButton.getAttribute('data-thread-id')
         });
@@ -2726,7 +2879,7 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
       if (restoreButton) {
         event.preventDefault();
         event.stopPropagation();
-        vscode.postMessage({
+        postReviewMessage({
           type: 'restoreThread',
           threadId: restoreButton.getAttribute('data-thread-id')
         });
@@ -2737,7 +2890,7 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
 
       if (overlayAction) {
         event.stopPropagation();
-        vscode.postMessage({
+        postReviewMessage({
           type: 'updateStatus',
           threadId: overlayAction.getAttribute('data-thread-id'),
           status: overlayAction.getAttribute('data-overlay-status')
@@ -2760,24 +2913,12 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
         }
 
         if (target.matches('[data-mermaid-feedback]')) {
-          clearDraftSelectionHighlight();
-          activeSelectionText = source;
-          activeSelectionOccurrence = 0;
-          activeSourceLine = getSourceLine(figure);
-          activeSourceLineEnd = getSourceLineEnd(figure);
-          const rect = target.getBoundingClientRect();
-          activeSelectionRect = {
-            left: rect.left,
-            right: rect.right,
-            top: rect.top,
-            bottom: rect.bottom
-          };
-          openComposer();
+          openComposerForElementText(figure, source, getSourceLine(figure), getSourceLineEnd(figure));
           return;
         }
 
         if (target.matches('[data-mermaid-copy]')) {
-          vscode.postMessage({ type: 'copyText', text: source });
+          postReviewMessage({ type: 'copyText', text: source });
           return;
         }
       }
@@ -2790,19 +2931,7 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
         const image = imageFeedbackButton.closest('[data-markdown-image]');
 
         if (image) {
-          clearDraftSelectionHighlight();
-          activeSelectionText = getImageReviewAnchor(image);
-          activeSelectionOccurrence = 0;
-          activeSourceLine = getSourceLine(image);
-          activeSourceLineEnd = getSourceLineEnd(image);
-          const rect = image.getBoundingClientRect();
-          activeSelectionRect = {
-            left: rect.left,
-            right: rect.right,
-            top: rect.top,
-            bottom: rect.bottom
-          };
-          openComposer();
+          openComposerForElementText(image, getImageReviewAnchor(image), getSourceLine(image), getSourceLineEnd(image));
         }
 
         return;
@@ -2834,7 +2963,9 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
     const historyContainer = document.getElementById('history');
 
     if (openThreads.length === 0) {
-      threadsContainer.innerHTML = '<p class="empty">No open feedback yet.</p>';
+      threadsContainer.innerHTML = closedThreads.length > 0
+        ? '<p class="empty">No open feedback. Closed threads remain below.</p>'
+        : '<p class="empty">No feedback yet. Select text to add a comment.</p>';
     } else {
       for (const thread of openThreads) {
         const element = document.createElement('section');
@@ -2860,9 +2991,14 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
           focusAnchor(thread.id);
         });
 
+        element.querySelector('[data-jump-thread]')?.addEventListener('click', (event) => {
+          event.stopPropagation();
+          focusAnchor(thread.id);
+        });
+
         for (const button of element.querySelectorAll('button[data-status]')) {
           button.addEventListener('click', () => {
-            vscode.postMessage({
+            postReviewMessage({
               type: 'updateStatus',
               threadId: thread.id,
               status: button.getAttribute('data-status')
@@ -2881,11 +3017,13 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
     decorateMermaidReviewBadges(locatableOpenThreads);
     attachRelatedThreadIds(locatableOpenThreads);
     markMissingAnchors(openThreads);
+    updateReviewNavigation();
     if (canEditMarkdown) {
       decorateEditableMarkdownBlocks();
       decorateEditableMarkdownTables();
     }
     restorePreviewState();
+    ${renderWebviewDraftScript()}
     renderMermaidDiagrams();
 
     function renderClosedHistory(threads) {
@@ -2917,6 +3055,9 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
           '<p>' + escapeHtml(thread.comment) + '</p>',
           renderReplies(thread),
           '<div class="thread-actions">',
+          historyState === 'linked'
+            ? '<button type="button" class="secondary" aria-label="Show closed comment in document: ' + escapeHtml(thread.comment) + '" data-jump-thread>Show in document</button>'
+            : '',
           '<button class="secondary" title="Restore this closed review thread to open feedback." data-thread-id="' + escapeHtml(thread.id) + '" data-restore-thread>Restore</button>',
           '</div>'
         ].join('');
@@ -2929,6 +3070,11 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
           if (historyState === 'linked') {
             focusHistoryAnchor(thread);
           }
+        });
+
+        element.querySelector('[data-jump-thread]')?.addEventListener('click', (event) => {
+          event.stopPropagation();
+          focusHistoryAnchor(thread);
         });
 
         historyContainer.appendChild(element);
@@ -2983,6 +3129,9 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
     }
 
     function decorateEditableMarkdownBlocks() {
+      markdownBody.querySelectorAll('[data-mermaid-edit]').forEach((button) => {
+        button.hidden = Boolean(button.closest('li, blockquote'));
+      });
       const blocks = getEditableBlocks();
 
       for (const block of blocks) {
@@ -3006,11 +3155,13 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
       const selectors = 'p, h1, h2, h3, h4, h5, h6, li, blockquote';
       return Array.from(markdownBody.querySelectorAll(selectors))
         .filter((element) => element.hasAttribute('data-source-line'))
+        .filter((element) => !element.parentElement?.closest('li, blockquote'))
         .filter((element) => !element.closest('pre, code, table, .mermaid-source, [data-mermaid-diagram]'));
     }
 
     function decorateEditableMarkdownTables() {
-      const tables = Array.from(markdownBody.querySelectorAll('table[data-source-line]'));
+      const tables = Array.from(markdownBody.querySelectorAll('table[data-source-line]'))
+        .filter((table) => !table.parentElement?.closest('li, blockquote'));
 
       for (const table of tables) {
         if (table.closest('[data-table-edit-wrapper]')) {
@@ -3086,6 +3237,7 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
     }
 
     function openComposerForElementText(element, text, lineStart, lineEnd) {
+      if (protectCommentDraft()) return;
       clearDraftSelectionHighlight();
       activeSelectionText = text;
       activeSelectionOccurrence = 0;
@@ -3129,7 +3281,7 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
 
       blockEditorSurface.innerHTML = wrapEditableBlockHtml(block, clone.innerHTML);
       blockEditorRaw.value = rawMarkdown;
-      setBlockEditorRawMode(false, { force: true });
+      setBlockEditorRawMode(Boolean(block.querySelector('table, [data-mermaid-diagram]')), { force: true });
       setBlockEditorStatus('');
       activeBlockEdit = {
         ...lineRange,
@@ -3161,7 +3313,7 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
       const emptyHtml = '<p><br></p>';
       blockEditorSurface.innerHTML = emptyHtml;
       blockEditorRaw.value = '';
-      setBlockEditorRawMode(false, { force: true });
+      setBlockEditorRawMode(Boolean(block.querySelector('table, [data-mermaid-diagram]')), { force: true });
       setBlockEditorStatus('');
       activeBlockEdit = {
         mode: 'insert',
@@ -3179,6 +3331,7 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
     }
 
     function prepareBlockEditor() {
+      if (draftSession && !draftSession.canOpen('block')) return false;
       if (commentComposer.style.display === 'block' && commentBody.value.trim()) {
         commentBody.focus();
         return false;
@@ -3276,13 +3429,14 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
         ? activeBlockEdit.afterLine + 1
         : activeBlockEdit.lineStart;
       pendingBlockRawConversionId = 'block-raw-' + Date.now() + '-' + Math.random().toString(16).slice(2);
+      pendingBlockRawConversionHtml = serializeBlockEditorHtml();
       blockEditorRawToggle.disabled = true;
       setBlockEditorStatus('Converting to Markdown...');
-      vscode.postMessage({
+      postReviewMessage({
         type: 'convertMarkdownBlockHtml',
         requestId: pendingBlockRawConversionId,
         lineStart,
-        html: serializeBlockEditorHtml()
+        html: pendingBlockRawConversionHtml
       });
     }
 
@@ -3318,6 +3472,7 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
     }
 
     function openTableEditor(tableElement) {
+      if (draftSession && !draftSession.canOpen('table')) return;
       const lineRange = getEditableLineRange(tableElement);
 
       if (!lineRange) {
@@ -3360,6 +3515,8 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
       hideMermaidEditorIfClean();
       activeTableEdit = {
         ...lineRange,
+        rowSources: table.rows.map((_, index) => index),
+        columnSources: table.headers.map((_, index) => index),
         originalSignature: ''
       };
       renderTableEditorGrid(table);
@@ -3504,6 +3661,10 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
     }
 
     function openMermaidEditor(figure, source) {
+      if (draftSession && !draftSession.canOpen('mermaid')) return;
+      if (figure.parentElement?.closest('li, blockquote')) {
+        return;
+      }
       const lineRange = getEditableLineRange(figure);
 
       if (!lineRange) {
@@ -3730,6 +3891,7 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
     }
 
     function hideBlockEditor() {
+      if (blockEditor.getAttribute('aria-busy') === 'true') return;
       blockEditor.style.display = 'none';
       blockEditorSurface.innerHTML = '';
       blockEditorRaw.value = '';
@@ -3753,6 +3915,7 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
     }
 
     function hideMermaidEditor() {
+      if (mermaidEditor.getAttribute('aria-busy') === 'true') return;
       mermaidEditor.style.display = 'none';
       mermaidEditorSource.value = '';
       activeMermaidEdit = undefined;
@@ -3771,6 +3934,7 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
     }
 
     function hideTableEditor() {
+      if (tableEditor.getAttribute('aria-busy') === 'true') return;
       tableEditor.style.display = 'none';
       tableEditorGrid.innerHTML = '';
       activeTableEdit = undefined;
@@ -3834,15 +3998,16 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
         let index = normalizedNode.indexOf(anchorText, searchStart);
 
         while (index >= 0) {
-          const rawIndex = findRawIndexForNormalizedText(node.nodeValue, anchorText, index);
+          const rawMatch = findNormalizedTextSpan(node.nodeValue, anchorText, index);
 
-          if (rawIndex < 0) {
+          if (!rawMatch) {
             searchStart = index + anchorText.length;
             index = normalizedNode.indexOf(anchorText, searchStart);
             continue;
           }
 
-          const matchLength = findRawLengthForNormalizedText(node.nodeValue.slice(rawIndex), anchorText);
+          const rawIndex = rawMatch.start;
+          const matchLength = rawMatch.length;
 
           if (matchLength > 0) {
             candidates.push({
@@ -3887,7 +4052,7 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
     }
 
     function highlightContainingBlock(thread, anchorText) {
-      const candidates = Array.from(markdownBody.querySelectorAll('p, li, h1, h2, h3, h4, h5, h6, td, th, blockquote, [data-markdown-image]'));
+      const candidates = Array.from(markdownBody.querySelectorAll('p, li, h1, h2, h3, h4, h5, h6, td, th, blockquote, pre[data-review-code-fence], [data-markdown-image]'));
       const matches = candidates.filter((element) => {
         return !shouldSkipHighlightParent(element)
           && normalizeInline(getSearchableElementText(element)).includes(anchorText);
@@ -4165,7 +4330,7 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
         return;
       }
 
-      vscode.postMessage({
+      postReviewMessage({
         type: 'anchorLocated',
         threadId: thread.id,
         sourceLine,
@@ -4244,6 +4409,7 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
       badge.type = 'button';
       badge.className = ('review-badge ' + sourceClass(thread) + ' ' + extraClass).trim();
       badge.title = sourceLabel(thread) + ' comment';
+      badge.setAttribute('aria-label', 'Open comment: ' + String(thread.comment || sourceLabel(thread) + ' comment'));
       badge.textContent = label || '1';
       badge.dataset.threadId = thread.id;
       return badge;
@@ -4722,6 +4888,7 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
       }, 360);
       commentOverlay.style.display = 'block';
       document.body.classList.add('has-comment-overlay');
+      draftSession?.restoreReplies();
     }
 
     function renderCommentOverlayItem(thread) {
@@ -4840,7 +5007,7 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
     function renderReplyForm(thread) {
       return [
         '<form class="reply-form" data-reply-form data-thread-id="' + escapeHtml(thread.id) + '">',
-        '<textarea placeholder="Reply to this thread"></textarea>',
+        '<textarea aria-label="Reply to: ' + escapeHtml(thread.comment) + '" placeholder="Reply to this thread"></textarea>',
         '<p class="quality-warning" data-reply-quality-warning hidden></p>',
         '<div class="reply-actions">',
         '<button type="submit" class="compact">Reply</button>',
@@ -4852,6 +5019,7 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
     function renderThreadActions(thread) {
       return [
         '<div class="thread-actions">',
+        '<button type="button" class="secondary" aria-label="Show comment in document: ' + escapeHtml(thread.comment) + '" data-jump-thread>Show in document</button>',
         renderReplyShortcutButtons(thread, ''),
         '<button class="secondary" title="Continue this exact thread with the AI feedback-loop prompt." data-thread-id="' + escapeHtml(thread.id) + '" data-open-feedback-loop-prompt>Continue with AI</button>',
         '<button class="secondary" title="Close this thread after the issue is handled or no longer applies." data-status="resolved">Resolve</button>',
@@ -4953,7 +5121,9 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
         return badge;
       }
 
-      return markdownBody.querySelector('[data-thread-id="' + cssEscape(threadId) + '"]');
+      return markdownBody.querySelector('[data-thread-id="' + cssEscape(threadId) + '"]')
+        || Array.from(markdownBody.querySelectorAll('.review-badge, [data-thread-ids]'))
+          .find((element) => getThreadIds(element).includes(threadId));
     }
 
     function focusReplyInput(threadId) {
@@ -5009,6 +5179,13 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
     }
 
     function getCurrentReviewThreadId(threadIds) {
+      const activeThread = document.querySelector('.thread.is-active[data-thread-id]:not(.is-closed)');
+      const activeThreadId = activeThread?.getAttribute('data-thread-id') || '';
+
+      if (threadIds.includes(activeThreadId)) {
+        return activeThreadId;
+      }
+
       const overlayThreadIds = commentOverlay.style.display === 'block'
         ? getThreadIds(commentOverlay)
         : [];
@@ -5016,13 +5193,6 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
 
       if (overlayThreadId) {
         return overlayThreadId;
-      }
-
-      const activeThread = document.querySelector('.thread.is-active[data-thread-id]:not(.is-closed)');
-      const activeThreadId = activeThread?.getAttribute('data-thread-id') || '';
-
-      if (threadIds.includes(activeThreadId)) {
-        return activeThreadId;
       }
 
       const activeAnchor = markdownBody.querySelector('.is-active[data-thread-id]');
@@ -5035,7 +5205,45 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
       return '';
     }
 
+    function updateReviewNavigation(currentThreadId) {
+      const threadIds = getReviewNavigationIds();
+      const currentIndex = threadIds.indexOf(currentThreadId || getCurrentReviewThreadId(threadIds));
+      const position = document.querySelector('[data-review-position]');
+      if (position) {
+        position.textContent = threadIds.length === 0
+          ? 'No open comments'
+          : currentIndex >= 0
+            ? String(currentIndex + 1) + ' of ' + String(threadIds.length)
+            : String(threadIds.length) + ' open';
+      }
+      document.querySelectorAll('[data-review-nav]').forEach((button) => {
+        button.disabled = threadIds.length === 0;
+      });
+      document.querySelectorAll('.thread:not(.is-closed) [data-jump-thread]').forEach((button) => {
+        const threadId = button.closest('.thread')?.getAttribute('data-thread-id');
+        button.disabled = !findOverlaySourceElement(threadId);
+        button.title = button.disabled ? 'The original text is not currently located in this document.' : 'Jump to this comment in the document.';
+      });
+    }
+
+    function focusReviewElement(element, shouldFocus = true) {
+      if (!element) {
+        return;
+      }
+      const reducedMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+      element.scrollIntoView({ behavior: reducedMotion ? 'auto' : 'smooth', block: 'center', inline: 'nearest' });
+      if (shouldFocus) {
+        if (!element.matches('button, a[href], input, textarea, select, [tabindex]')) {
+          element.setAttribute('tabindex', '-1');
+        }
+        element.focus({ preventScroll: true });
+      }
+    }
+
     function revealReviewThread(threadId) {
+      if (!hideCommentOverlayIfClean()) {
+        return;
+      }
       const sourceElement = findOverlaySourceElement(threadId);
 
       if (!sourceElement) {
@@ -5051,40 +5259,48 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
 
     function focusThread(threadId, shouldScroll) {
       document.querySelectorAll('.is-active').forEach((element) => element.classList.remove('is-active'));
+      document.querySelectorAll('.thread[aria-current]').forEach((element) => element.removeAttribute('aria-current'));
       document.querySelectorAll('[data-thread-id="' + cssEscape(threadId) + '"]').forEach((element) => {
         element.classList.add('is-active');
       });
+      const threadCard = document.querySelector('.thread[data-thread-id="' + cssEscape(threadId) + '"]');
+      threadCard?.setAttribute('aria-current', 'true');
+      updateReviewNavigation(threadId);
 
       if (!shouldScroll) {
         return;
       }
 
-      const threadCard = document.querySelector('.thread[data-thread-id="' + cssEscape(threadId) + '"]');
-      threadCard?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      focusReviewElement(threadCard);
     }
 
     function focusAnchor(threadId) {
-      document.querySelectorAll('.is-active').forEach((element) => element.classList.remove('is-active'));
-      document.querySelectorAll('[data-thread-id="' + cssEscape(threadId) + '"]').forEach((element) => {
-        element.classList.add('is-active');
-      });
-
-      const anchor = markdownBody.querySelector('[data-thread-id="' + cssEscape(threadId) + '"]');
+      if (!hideCommentOverlayIfClean()) {
+        return;
+      }
+      focusThread(threadId, false);
+      const anchor = findOverlaySourceElement(threadId);
 
       if (anchor) {
-        anchor.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'nearest' });
+        focusReviewElement(anchor);
         return;
       }
 
       const threadCard = document.querySelector('.thread[data-thread-id="' + cssEscape(threadId) + '"]');
-      threadCard?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      focusReviewElement(threadCard);
     }
 
     function focusHistoryAnchor(thread) {
+      if (!hideCommentOverlayIfClean()) {
+        return;
+      }
       document.querySelectorAll('.is-active').forEach((element) => element.classList.remove('is-active'));
+      document.querySelectorAll('.thread[aria-current]').forEach((element) => element.removeAttribute('aria-current'));
       document.querySelectorAll('[data-thread-id="' + cssEscape(thread.id) + '"]').forEach((element) => {
         element.classList.add('is-active');
       });
+      document.querySelector('.thread[data-thread-id="' + cssEscape(thread.id) + '"]')?.setAttribute('aria-current', 'true');
+      updateReviewNavigation(thread.id);
 
       const anchor = findHistoryAnchorElement(thread);
 
@@ -5093,7 +5309,7 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
       }
 
       anchor.classList.add('history-anchor-target', 'is-active');
-      anchor.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'nearest' });
+      focusReviewElement(anchor);
     }
 
     function findHistoryAnchorElement(thread) {
@@ -5109,7 +5325,7 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
       });
 
       if (candidates.length === 0) {
-        return undefined;
+        return findVerifiedHistorySourceBlock(thread.id);
       }
 
       const preferredLine = Number(thread.anchor?.lastLocatedLine || thread.anchor?.lineStart || 0);
@@ -5127,8 +5343,25 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
       return candidates[Math.min(getAnchorOccurrence(thread), candidates.length - 1)];
     }
 
+    function findVerifiedHistorySourceBlock(threadId) {
+      const location = state.historyAnchorLocations?.[threadId];
+      if (historyAnchorStates[threadId] !== 'linked' || !location
+        || !Number.isSafeInteger(location.lineStart) || !Number.isSafeInteger(location.lineEnd)
+        || location.lineStart < 1 || location.lineEnd < location.lineStart) {
+        return undefined;
+      }
+      return Array.from(markdownBody.querySelectorAll('[data-source-line]'))
+        .filter(element => !shouldSkipHighlightParent(element))
+        .map(element => ({ element,
+          start: Number(element.getAttribute('data-source-line')),
+          end: Number(element.getAttribute('data-source-line-end') || element.getAttribute('data-source-line'))
+        }))
+        .filter(candidate => candidate.start <= location.lineStart && candidate.end >= location.lineStart)
+        .sort((left, right) => (left.end - left.start) - (right.end - right.start))[0]?.element;
+    }
+
     function shouldSkipHighlightParent(element) {
-      return Boolean(element.closest('button, textarea, pre, code, .review-anchor, .comment-composer, .selection-popover, .comment-overlay, .mermaid-source'));
+      return Boolean(element.closest('button, textarea, .review-anchor, .comment-composer, .selection-popover, .comment-overlay, .mermaid-source'));
     }
 
     function isTextEntryTarget(element) {
@@ -5192,52 +5425,6 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
       return String(value).replace(/"/g, '\\\\"');
     }
 
-    function findRawIndexForNormalizedText(rawText, normalizedNeedle, normalizedIndex) {
-      let normalizedCursor = 0;
-      let inWhitespace = false;
-
-      for (let rawIndex = 0; rawIndex < rawText.length; rawIndex += 1) {
-        const char = rawText[rawIndex];
-        const isWhitespace = /\\s/.test(char);
-
-        if (isWhitespace) {
-          if (!inWhitespace) {
-            if (normalizedCursor === normalizedIndex) {
-              return rawIndex;
-            }
-            normalizedCursor += 1;
-          }
-          inWhitespace = true;
-        } else {
-          inWhitespace = false;
-          if (normalizedCursor === normalizedIndex) {
-            return rawIndex;
-          }
-          normalizedCursor += 1;
-        }
-
-        if (normalizedCursor > normalizedIndex + normalizedNeedle.length) {
-          break;
-        }
-      }
-
-      return normalizedIndex;
-    }
-
-    function findRawLengthForNormalizedText(rawText, normalizedNeedle) {
-      let normalizedValue = '';
-
-      for (let rawIndex = 0; rawIndex < rawText.length; rawIndex += 1) {
-        normalizedValue = normalizeInline(rawText.slice(0, rawIndex + 1));
-
-        if (normalizedValue.length >= normalizedNeedle.length) {
-          return rawIndex + 1;
-        }
-      }
-
-      return rawText.length;
-    }
-
     function scheduleSelectionComposer(openImmediately) {
       window.clearTimeout(selectionTimer);
       selectionTimer = window.setTimeout(() => {
@@ -5278,6 +5465,7 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
     }
 
     function captureCurrentSelection() {
+      if (protectCommentDraft()) return false;
       const selection = window.getSelection();
 
       if (!selection || selection.rangeCount === 0 || selection.isCollapsed) {
@@ -5470,7 +5658,17 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
       }
     }
 
+    function protectCommentDraft() {
+      if (draftSession && !draftSession.canOpen('comment')) return true;
+      if (commentComposer.style.display === 'block' && commentBody.value.trim()) {
+        commentBody.focus();
+        return true;
+      }
+      return false;
+    }
+
     function openComposer() {
+      if (protectCommentDraft()) return;
       if (!activeSelectionText || !activeSelectionRect) {
         return;
       }
@@ -5492,6 +5690,7 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
     }
 
     function hideComposer() {
+      if (commentComposer.getAttribute('aria-busy') === 'true') return;
       commentComposer.style.display = 'none';
       commentBody.value = '';
       updateCommentQualityWarning();
@@ -5639,6 +5838,7 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
         '</details>'
       ].join('');
     }
+    ${renderReanchorScript()}
   </script>
 </body>
 </html>`;
@@ -5665,9 +5865,10 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
     const disabledAttribute = openThreadCount > 0 ? '' : ' disabled';
 
     return `<section class="context-bootstrap-bar" aria-label="AI prompt handoff">
-    <div class="review-navigation-actions" aria-label="Review comment navigation">
-      <button type="button" class="secondary compact" title="Previous comment (Left Arrow)" data-review-nav="previous"${disabledAttribute}>←</button>
-      <button type="button" class="secondary compact" title="Next comment (Right Arrow)" data-review-nav="next"${disabledAttribute}>→</button>
+    <div class="review-navigation-actions" role="group" aria-label="Review comment navigation">
+      <button type="button" class="secondary compact" aria-label="Previous comment" title="Previous comment (Left Arrow)" data-review-nav="previous"${disabledAttribute}>← Previous</button>
+      <span class="review-position" data-review-position role="status" aria-live="polite" aria-atomic="true">${openThreadCount > 0 ? `${openThreadCount} open` : 'No open comments'}</span>
+      <button type="button" class="secondary compact" aria-label="Next comment" title="Next comment (Right Arrow)" data-review-nav="next"${disabledAttribute}>Next →</button>
     </div>
     <div class="context-bootstrap-actions">
       <button type="button" class="secondary compact" data-open-context-bootstrap-prompt>Open Bootstrap Prompt</button>
@@ -5695,10 +5896,12 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
   }
 
   private renderErrorHtml(document: vscode.TextDocument, message: string): string {
+    const nonce = randomUUID();
     return `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-${nonce}';">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>AI Markdown Review</title>
   <style>
@@ -5726,7 +5929,10 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
     <h2>Review data needs attention</h2>
     <p>The sidecar for <code>${escapeHtml(document.fileName)}</code> could not be loaded, so this preview is paused to avoid overwriting existing review feedback.</p>
     <p>${escapeHtml(message)}</p>
+    <button type="button" id="retry-preview">Retry refresh</button>
+    <div id="error-drafts"></div>
   </section>
+  <script nonce="${nonce}">${renderErrorDraftScript(document.uri.toString())}</script>
 </body>
 </html>`;
   }

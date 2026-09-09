@@ -1,8 +1,23 @@
 # Changelog
 
-## Unreleased
+## 0.0.21 - 2026-09-09
 
-- None.
+- Keeps unsaved comment, reply, block, table, and Mermaid drafts through preview refreshes; waits for save confirmation, supports failed-save retries, and recovers stale drafts through explicit copy/discard.
+- Adds manual `Reattach` for existing review threads while preserving discussion history, and prevents a relocated thread from applying a patch at an unrelated target.
+- Fixes navigation through overlapping comments, adds keyboard-accessible source jumps and review position, and distinguishes first-use and completed-feedback empty states.
+- Recognizes multiline closed-history anchors and navigates to their verified current source ranges.
+- Clarifies `Run Local Checks`, recognizes Korean acceptance headings, excludes code examples, and avoids repeating unchanged local findings already closed by the reviewer.
+- Resolves prompt commands from the active review preview and offers retry against the same document after command failures.
+- Preserves later comments, replies, and human decisions through review-aware Undo and Redo, and serializes review writes to prevent lost updates.
+- Rejects stale preview edits and conflicting sidecar writes without overwriting newer work; preserves document line endings during edit and rollback.
+- Keeps review files when a Markdown rename changes only filename casing.
+- Preserves original image Markdown and inline-code whitespace during rich editing, and keeps nested quote/list content inside its source-owning editor.
+- Tracks table row/column identity and repeated text anchors through edits, and fixes highlighted selections inside indented code fences.
+
+## 0.0.20 - 2026-05-28
+
+- Makes ordinary fenced code blocks reviewable by preserving source line ranges in the rendered preview.
+- Allows selected code block text, including multiline selections, to receive comment popovers, highlights, badges, and thread navigation.
 
 ## 0.0.19 - 2026-05-27
 

@@ -2,7 +2,7 @@
   "name": "ai-markdown-review-loop",
   "displayName": "AI Markdown Review Loop",
   "description": "Turn Markdown specs into review threads: comment on rendered text, images, tables, and diagrams while preserving AI/human feedback.",
-  "version": "0.0.19",
+  "version": "0.0.21",
   "publisher": "uptown",
   "license": "MIT",
   "repository": {
@@ -73,7 +73,7 @@
       },
       {
         "command": "aiMarkdownReviewLoop.reviewDocument",
-        "title": "AI Markdown Review: Review Document"
+        "title": "AI Markdown Review: Run Local Checks"
       },
       {
         "command": "aiMarkdownReviewLoop.exportFeedback",
@@ -241,7 +241,7 @@
     "watch": "tsc -watch -p ./",
     "check": "tsc -p ./ --noEmit && npm run test:unit",
     "test": "npm run check",
-    "test:unit": "tsc -p tsconfig.test.json && node --test .test-out/test",
+    "test:unit": "tsc -p tsconfig.test.json && node scripts/run-unit-tests.mjs",
     "assets:marketplace": "node scripts/render-marketplace-assets.mjs",
     "notices:check": "node scripts/check-third-party-notices.mjs",
     "package:hygiene": "node scripts/check-vsix-hygiene.mjs",

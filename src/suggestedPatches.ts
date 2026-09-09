@@ -1,4 +1,5 @@
 import type { ReviewAnchor, ReviewThread, SuggestedPatch } from './types';
+import { findSourceAnchorMatches } from './anchorSourceMatches';
 
 export type ApplyPatchResult =
   | 'applied'
@@ -46,12 +47,41 @@ export function selectSuggestedPatchReplacement(
     return { result: 'ambiguous' };
   }
 
+  if (!patchOverlapsAnchor(markdown, match.index, patch.original.length, anchor)) {
+    return { result: 'lowConfidenceAnchor' };
+  }
+
   return {
     result: 'applied',
     start: match.index,
     end: match.index + patch.original.length,
     replacement: patch.replacement
   };
+}
+
+function patchOverlapsAnchor(markdown: string, start: number, length: number, anchor: ReviewAnchor): boolean {
+  const lineStart = anchor.lastLocatedLine ?? anchor.lineStart;
+  if (lineStart === undefined) {
+    return true;
+  }
+  const lineEnd = Math.max(lineStart, anchor.lineEnd ?? lineStart);
+  const patchLineStart = lineNumberAtOffset(markdown, start);
+  const patchLineEnd = lineNumberAtOffset(markdown, start + length - 1);
+  if (!Number.isSafeInteger(lineStart) || lineStart < 1 || patchLineStart > lineEnd || patchLineEnd < lineStart) {
+    return false;
+  }
+  const allMatches = findSourceAnchorMatches(markdown, anchor.text);
+  const candidates = allMatches.filter(match => match.lineStart >= lineStart && match.lineEnd <= lineEnd);
+  // Rich Markdown anchors may include rendered text with source delimiters between words.
+  // In that case the corroborated source-line span remains the available identity check.
+  if (candidates.length === 0) {
+    return true;
+  }
+  const occurrence = anchor.occurrence;
+  const selected = candidates.length === 1 ? candidates[0]
+    : Number.isSafeInteger(occurrence) && occurrence !== undefined && candidates.includes(allMatches[occurrence])
+      ? allMatches[occurrence] : undefined;
+  return Boolean(selected && selected.start < start + length && selected.start + selected.length > start);
 }
 
 export function getSuggestedPatchResults(
@@ -108,7 +138,7 @@ function selectPatchMatch(
   const lineEnd = Math.max(lineStart, anchor.lineEnd ?? lineStart);
   const matchingLineMatches = matches.filter(match => {
     const startLine = lineNumberAtOffset(markdown, match.index);
-    const endLine = lineNumberAtOffset(markdown, match.index + originalLength);
+    const endLine = lineNumberAtOffset(markdown, match.index + originalLength - 1);
     return startLine <= lineEnd && endLine >= lineStart;
   });
 
@@ -120,7 +150,7 @@ function lineNumberAtOffset(text: string, offset: number): number {
   const end = Math.max(0, Math.min(offset, text.length));
 
   for (let index = 0; index < end; index += 1) {
-    if (text.charCodeAt(index) === 10) {
+    if (text.charCodeAt(index) === 10 || (text.charCodeAt(index) === 13 && text.charCodeAt(index + 1) !== 10)) {
       line += 1;
     }
   }

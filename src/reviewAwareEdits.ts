@@ -1,6 +1,6 @@
 import { hashAnchor, normalizeAnchorText } from './anchorText';
-import { findTableAnchorReplacementCandidate } from './tableEdits';
-import type { ReviewStatus, ReviewThread } from './types';
+import { findTableAnchorReplacementCandidate, type MarkdownTableSourceMapping } from './tableEdits';
+import type { ReviewAnchor, ReviewStatus, ReviewThread } from './types';
 
 const contextRadius = 180;
 
@@ -26,6 +26,7 @@ export interface ReviewAwareEditPlan {
   targetThreadId?: string;
   closeTargetAs?: ClosingReviewStatus;
   affectsExistingThreads?: boolean;
+  tableSourceMapping?: MarkdownTableSourceMapping;
 }
 
 export interface CreateOffsetEditPlanInput {
@@ -46,6 +47,7 @@ export interface CreateLineRangeEditPlanInput {
   intent: ReviewAwareEditIntent;
   targetThreadId?: string;
   closeTargetAs?: ClosingReviewStatus;
+  tableSourceMapping?: MarkdownTableSourceMapping;
 }
 
 export interface CreateLineRangeDeletePlanInput {
@@ -111,7 +113,8 @@ export function createLineRangeEditPlan(
     actor: input.actor,
     intent: input.intent,
     targetThreadId: input.targetThreadId,
-    closeTargetAs: input.closeTargetAs
+    closeTargetAs: input.closeTargetAs,
+    tableSourceMapping: input.tableSourceMapping
   };
 }
 
@@ -186,13 +189,14 @@ export function buildReviewAwareThreadUpdates(
   const updates: ReviewAwareThreadUpdate[] = [];
 
   for (const thread of threads) {
-    if (!isAffectedThread(thread, plan)) {
+    if (!isAffectedThread(thread, plan, beforeMarkdown)) {
       continue;
     }
 
     const nextAnchor = createNextAnchor(
       thread,
       plan,
+      beforeMarkdown,
       afterMarkdown,
       editedRangeText,
       replacementAnchorText,
@@ -204,7 +208,7 @@ export function buildReviewAwareThreadUpdates(
         ...thread.thread,
         {
           role: plan.actor === 'assistant' ? 'assistant' : 'user',
-          text: createOutcomeReplyText(thread, plan),
+          text: createOutcomeReplyText(thread, plan, nextAnchor.confidence === 'missing'),
           createdAt: now
         }
       ]
@@ -245,6 +249,7 @@ export function lineNumberAtOffset(text: string, offset: number): number {
 function createNextAnchor(
   thread: ReviewThread,
   plan: ReviewAwareEditPlan,
+  beforeMarkdown: string,
   afterMarkdown: string,
   editedRangeText: string,
   replacementAnchorText: string,
@@ -274,7 +279,8 @@ function createNextAnchor(
       editedRangeText,
       plan.replacement,
       thread.anchor.text,
-      preferredTableLineIndex
+      preferredTableLineIndex,
+      plan.tableSourceMapping
     );
 
     if (tableCandidate) {
@@ -288,10 +294,12 @@ function createNextAnchor(
     }
   }
 
-  const candidate = findReplacementAnchorCandidate(
+  // A missing table cell must not fall back to a matching value in another cell.
+  const candidate = plan.intent === 'manual_table_edit' ? undefined : findReplacementAnchorCandidate(
+    beforeMarkdown,
     editedRangeText,
-    plan.replacement,
-    thread.anchor.text
+    plan,
+    thread.anchor
   );
 
   if (candidate) {
@@ -345,7 +353,7 @@ function createExactReplacementAnchor(
     lineStart,
     lineEnd,
     hash: hashAnchor(nextAnchorText),
-    occurrence: undefined,
+    occurrence: occurrenceAtOffset(afterMarkdown, nextAnchorText, candidateOffset),
     contextBefore: context.contextBefore,
     contextAfter: context.contextAfter,
     confidence: 'exact',
@@ -354,49 +362,126 @@ function createExactReplacementAnchor(
   };
 }
 
-function findReplacementAnchorCandidate(
-  editedRangeText: string,
-  replacementText: string,
-  anchorText: string
-): ReplacementAnchorCandidate | undefined {
-  const exactStart = replacementText.indexOf(anchorText);
-
-  if (exactStart >= 0) {
-    return {
-      text: replacementText.slice(exactStart, exactStart + anchorText.length),
-      start: exactStart,
-      length: anchorText.length
-    };
-  }
-
-  const editedAnchorStart = editedRangeText.indexOf(anchorText);
-
-  if (editedAnchorStart < 0) {
+function occurrenceAtOffset(markdown: string, anchorText: string, offset: number): number | undefined {
+  if (!anchorText || !markdown.startsWith(anchorText, offset)) {
     return undefined;
   }
 
-  const prefix = editedRangeText.slice(0, editedAnchorStart);
-  const suffix = editedRangeText.slice(editedAnchorStart + anchorText.length);
-
-  if (!replacementText.startsWith(prefix) || !replacementText.endsWith(suffix)) {
-    return undefined;
+  let occurrence = 0;
+  let index = markdown.indexOf(anchorText);
+  while (index >= 0 && index < offset) {
+    occurrence += 1;
+    index = markdown.indexOf(anchorText, index + anchorText.length);
   }
 
-  const start = prefix.length;
-  const end = replacementText.length - suffix.length;
-
-  if (end <= start) {
-    return undefined;
-  }
-
-  return {
-    text: replacementText.slice(start, end),
-    start,
-    length: end - start
-  };
+  return index === offset ? occurrence : undefined;
 }
 
-function isAffectedThread(thread: ReviewThread, plan: ReviewAwareEditPlan): boolean {
+function findReplacementAnchorCandidate(
+  beforeMarkdown: string,
+  editedRangeText: string,
+  plan: ReviewAwareEditPlan,
+  anchor: ReviewAnchor
+): ReplacementAnchorCandidate | undefined {
+  const sourceMatch = findSourceAnchorMatch(beforeMarkdown, anchor);
+
+  if (!sourceMatch) {
+    return undefined;
+  }
+
+  const start = sourceMatch.start - plan.start;
+  const end = start + sourceMatch.length;
+  const replacementText = plan.replacement;
+
+  if (start < 0 || end > editedRangeText.length) {
+    return undefined;
+  }
+
+  let prefixLength = 0;
+  while (prefixLength < Math.min(editedRangeText.length, replacementText.length)
+    && editedRangeText[prefixLength] === replacementText[prefixLength]) {
+    prefixLength += 1;
+  }
+
+  let suffixLength = 0;
+  while (suffixLength < Math.min(editedRangeText.length, replacementText.length)
+    && editedRangeText[editedRangeText.length - suffixLength - 1]
+      === replacementText[replacementText.length - suffixLength - 1]) {
+    suffixLength += 1;
+  }
+
+  if (editedRangeText === replacementText) {
+    return { text: replacementText.slice(start, end), start, length: end - start };
+  }
+
+  // Repeated adjacent text can make two different deletions/insertions equally valid.
+  // Only retain the prefix/suffix that is common to both interpretations.
+  const stablePrefix = Math.min(prefixLength, editedRangeText.length - suffixLength, replacementText.length - suffixLength);
+  const stableSuffix = Math.min(suffixLength, editedRangeText.length - prefixLength, replacementText.length - prefixLength);
+  const lengthDelta = replacementText.length - editedRangeText.length;
+  let replacementStart: number;
+  let replacementEnd: number;
+
+  if (end <= stablePrefix) {
+    replacementStart = start;
+    replacementEnd = end;
+  } else if (start >= editedRangeText.length - stableSuffix) {
+    replacementStart = start + lengthDelta;
+    replacementEnd = end + lengthDelta;
+  } else if (start <= stablePrefix && end >= editedRangeText.length - stableSuffix) {
+    replacementStart = start;
+    replacementEnd = end + lengthDelta;
+  } else {
+    return undefined;
+  }
+
+  return replacementEnd > replacementStart ? {
+    text: replacementText.slice(replacementStart, replacementEnd),
+    start: replacementStart,
+    length: replacementEnd - replacementStart
+  } : undefined;
+}
+
+function findSourceAnchorMatch(markdown: string, anchor: ReviewAnchor): ReplacementAnchorCandidate | undefined {
+  if (!anchor.text) {
+    return undefined;
+  }
+
+  const matches: ReplacementAnchorCandidate[] = [];
+  let start = markdown.indexOf(anchor.text);
+  while (start >= 0) {
+    matches.push({ text: anchor.text, start, length: anchor.text.length });
+    start = markdown.indexOf(anchor.text, start + anchor.text.length);
+  }
+
+  const lineStart = anchor.lastLocatedLine ?? anchor.lineStart;
+  const lineEnd = Math.max(lineStart ?? 1, anchor.lineEnd ?? lineStart ?? 1);
+  const inLineRange = (candidate: ReplacementAnchorCandidate) => !lineStart
+    || (lineNumberAtOffset(markdown, candidate.start) >= lineStart
+      && lineNumberAtOffset(markdown, candidate.start) <= lineEnd);
+  const candidates = matches.filter(inLineRange);
+  const occurrenceMatch = Number.isSafeInteger(anchor.occurrence) && (anchor.occurrence ?? -1) >= 0
+    ? matches[anchor.occurrence!]
+    : undefined;
+  const withContext = candidates.filter(candidate => {
+    const context = createOffsetContext(markdown, candidate.start, candidate.length);
+    return Boolean(anchor.contextBefore || anchor.contextAfter)
+      && (!anchor.contextBefore || context.contextBefore?.endsWith(anchor.contextBefore))
+      && (!anchor.contextAfter || context.contextAfter?.startsWith(anchor.contextAfter));
+  });
+
+  if (withContext.length === 1) {
+    return withContext[0];
+  }
+
+  if (occurrenceMatch && inLineRange(occurrenceMatch)) {
+    return occurrenceMatch;
+  }
+
+  return candidates.length === 1 ? candidates[0] : undefined;
+}
+
+function isAffectedThread(thread: ReviewThread, plan: ReviewAwareEditPlan, beforeMarkdown: string): boolean {
   if (thread.status !== 'open' && thread.id !== plan.targetThreadId) {
     return false;
   }
@@ -406,6 +491,11 @@ function isAffectedThread(thread: ReviewThread, plan: ReviewAwareEditPlan): bool
   }
 
   if (plan.affectsExistingThreads === false) {
+    return false;
+  }
+
+  const sourceMatch = findSourceAnchorMatch(beforeMarkdown, thread.anchor);
+  if (sourceMatch && (sourceMatch.start >= plan.end || sourceMatch.start + sourceMatch.length <= plan.start)) {
     return false;
   }
 
@@ -432,7 +522,15 @@ function tableLineIndexForThread(
   return Math.max(0, locatedLine - plan.lineStart);
 }
 
-function createOutcomeReplyText(thread: ReviewThread, plan: ReviewAwareEditPlan): string {
+function createOutcomeReplyText(thread: ReviewThread, plan: ReviewAwareEditPlan, anchorMissing: boolean): string {
+  if (anchorMissing && plan.intent !== 'delete_block') {
+    const action = plan.intent === 'manual_table_edit' ? 'edited the table'
+      : plan.intent === 'manual_mermaid_edit' ? 'edited the Mermaid source'
+        : plan.intent === 'apply_suggestion' ? 'applied the suggested edit'
+          : 'edited the reviewed text';
+    return `Review update: ${action}; this comment now needs re-anchor or closure.`;
+  }
+
   if (thread.id === plan.targetThreadId && plan.intent === 'apply_suggestion') {
     return 'Review update: applied the suggested edit and kept this thread attached.';
   }
