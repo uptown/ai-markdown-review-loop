@@ -2,7 +2,7 @@
   "name": "ai-markdown-review-loop",
   "displayName": "AI Markdown Review Loop",
   "description": "Review Markdown with comments and share a compact JSON task file with your AI agent.",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "publisher": "uptown",
   "license": "MIT",
   "repository": {

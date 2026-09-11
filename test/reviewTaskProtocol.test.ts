@@ -62,7 +62,9 @@ describe('compact review task protocol', () => {
     const pair = parsePortableReviewSidecar(uri, payload);
     assert.deepEqual(pair.reviewDocument.threads.map(thread => thread.id), ['rv_done', 'rv_first', 'rv_blocked']);
     assert.equal(pair.resolvedReviewDocument.threads.length, 0);
-    assert.deepEqual(createPortableReviewSidecarPayload(uri, pair.reviewDocument, pair.resolvedReviewDocument, now), payload);
+    const canonical = structuredClone(payload);
+    for (const item of canonical.items) delete item.status;
+    assert.deepEqual(createPortableReviewSidecarPayload(uri, pair.reviewDocument, pair.resolvedReviewDocument, now), canonical);
     assert.deepEqual(parsePortableReviewSidecar(uri, payload), pair, 'Repeated reads must not fabricate new dates');
   });
 
@@ -77,7 +79,9 @@ describe('compact review task protocol', () => {
       assert.equal(thread.taskStatus, status);
       assert.equal(getReviewTaskStatus(thread), 'pending');
       assert.equal(hasStaleReviewTaskResult(thread), true);
-      assert.deepEqual(createPortableReviewSidecarPayload(uri, pair.reviewDocument, pair.resolvedReviewDocument, now), payload);
+      const canonical = structuredClone(payload);
+      delete canonical.items[0].status;
+      assert.deepEqual(createPortableReviewSidecarPayload(uri, pair.reviewDocument, pair.resolvedReviewDocument, now), canonical);
     }
   });
 
@@ -99,7 +103,9 @@ describe('compact review task protocol', () => {
       const payload = sidecar();
       payload.items[0].target.quote = quote;
       const pair = parsePortableReviewSidecar(uri, payload);
-      assert.deepEqual(createPortableReviewSidecarPayload(uri, pair.reviewDocument, pair.resolvedReviewDocument, now), payload);
+      const canonical = structuredClone(payload);
+      delete canonical.items[0].status;
+      assert.deepEqual(createPortableReviewSidecarPayload(uri, pair.reviewDocument, pair.resolvedReviewDocument, now), canonical);
     }
   });
 
@@ -113,7 +119,7 @@ describe('compact review task protocol', () => {
     const payload = createPortableReviewSidecarPayload(uri, empty, createEmptyReviewDocument(uri), now);
     assert.deepEqual(payload.items[0].target, { quote: 'unique source' });
     assert.equal(payload.document, 'spec.md');
-    assert.equal(payload.items[0].status, 'pending');
+    assert.equal('status' in payload.items[0], false);
     for (const removed of ['documentUri', 'updatedAt', 'openThreads', 'closedThreads', 'thread', 'severity']) {
       assert.equal(JSON.stringify(payload).includes('"' + removed + '":'), false);
     }

@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.3.1 - 2026-09-12
+
+- Removes `pending`, `done`, and `blocked` from new JSON task files; the agent
+  can leave only an optional revision-bound result note.
+- Keeps older v3 status fields readable for one-way migration and omits them on
+  the next write.
+- Removes the retired `reattach` wording from the agent contract and published
+  workflow examples.
+
 ## 0.3.0 - 2026-09-12
 
 - Removes the reattach workflow, closed-comment history panel, and in-preview

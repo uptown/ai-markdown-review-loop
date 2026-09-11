@@ -226,7 +226,6 @@ export function createReviewTaskItem(thread: ReviewThread): ReviewTaskItem {
     rev: thread.taskRevision ?? 1,
     target,
     comment: thread.taskRevision === undefined ? buildLegacyReviewTaskComment(thread) : thread.comment,
-    status: thread.taskStatus ?? 'pending',
     ...(thread.taskResult !== undefined ? { result: thread.taskResult } : {}),
     ...(thread.taskResultFor !== undefined ? { resultFor: thread.taskResultFor } : {})
   };
@@ -249,7 +248,9 @@ function taskSidecarToDocuments(documentUri: string, sidecar: ReviewTaskSidecar)
       },
       type: 'note', source: 'human', severity: 'medium', comment: item.comment,
       status: 'open', thread: [], createdAt: updatedAt, updatedAt,
-      taskRevision: item.rev, taskStatus: item.status, taskOrder: index,
+      // The editor keeps a private pending marker for revision bookkeeping;
+      // it is deliberately not part of the canonical JSON contract.
+      taskRevision: item.rev, taskStatus: item.status ?? 'pending', taskOrder: index,
       ...(item.result !== undefined ? { taskResult: item.result } : {}),
       ...(item.resultFor !== undefined ? { taskResultFor: item.resultFor } : {})
     };
