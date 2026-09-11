@@ -27,6 +27,20 @@ describe('v3 review task lifecycle and recovery', () => {
     assert.equal('thread' in payload.items[0], false); assert.equal('documentUri' in payload, false);
   });
 
+  it('exports without a handoff lock and keeps the last valid requests after the agent deletes JSON', async () => {
+    const h = await seed();
+    const exported = await h.store.exportReviewJson(h.uri, async () => true);
+    assert.equal(exported.sidecar.path, h.sidecar.path);
+    assert.match(exported.contents, /\"guidance\"/);
+    h.files.delete(h.sidecar.path);
+    const recovered = await h.store.load(h.uri);
+    assert.deepEqual(recovered.threads.map(thread => thread.id), ['rv_one', 'rv_two']);
+    assert.equal(h.store.getReviewFileState(h.uri), 'removed');
+    await h.store.addThread(h.uri, storageThread('rv_next'));
+    assert.equal(h.store.getReviewFileState(h.uri), 'active');
+    assert.deepEqual(h.read().items.map((item: any) => item.id), ['rv_one', 'rv_two', 'rv_next']);
+  });
+
   it('freezes ingress synchronously while draining queued writes and saves before delivery', async () => {
     const h = await seed(); let release!: () => void; let entered!: () => void;
     const ready = new Promise<void>(resolve => { entered = resolve; });
@@ -79,7 +93,12 @@ describe('v3 review task lifecycle and recovery', () => {
       if (damage === 'missing-file') h.files.delete(h.sidecar.path);
       else if (damage === 'malformed') h.files.set(h.sidecar.path, encoder.encode('{broken'));
       else { const next = h.read(); if (damage === 'missing-item') next.items.pop(); else next.items[0].target.quote = 'Wrong target'; h.write(next); }
-      await assert.rejects(h.store.resumeReview(h.uri)); assert.equal(h.store.isHandoffActive(h.uri), true);
+      if (damage === 'missing-file') {
+        await h.store.resumeReview(h.uri);
+        assert.equal(h.store.getReviewFileState(h.uri), 'removed');
+      } else {
+        await assert.rejects(h.store.resumeReview(h.uri)); assert.equal(h.store.isHandoffActive(h.uri), true);
+      }
       await h.store.restoreReviewBackup(h.uri); assert.deepEqual(h.read(), original); assert.equal(h.store.isHandoffActive(h.uri), false);
     });
   }
@@ -87,7 +106,10 @@ describe('v3 review task lifecycle and recovery', () => {
   it('does not resurrect legacy data after a known canonical file disappears', async () => {
     const h = await seed(); const legacy = (await h.store.getReviewStateFileUris(h.uri)).find(uri => uri.path.includes('/documents/'))!;
     h.files.set(legacy.path, encoder.encode(JSON.stringify({ documentUri: h.uri.toString(), updatedAt: '', threads: [storageThread('rv_legacy')] })));
-    h.files.delete(h.sidecar.path); await assert.rejects(h.restartStore().load(h.uri), /ファイル|review file is missing/);
+    h.files.delete(h.sidecar.path);
+    const restored = await h.restartStore().load(h.uri);
+    assert.deepEqual(restored.threads.map(thread => thread.id), ['rv_one', 'rv_two']);
+    assert.equal(h.restartStore().getReviewFileState(h.uri), 'removed');
   });
 
   it('rejects destructive direct-file edits even without a protected handoff', async () => {

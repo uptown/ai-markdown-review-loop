@@ -56,7 +56,7 @@ export function createPortableReviewSidecarPayload(
   });
 }
 
-/** Explicit writer for legacy documents until the user starts their first handoff. */
+/** Explicit writer for legacy documents until the user exports the JSON flow. */
 export function createLegacyReviewSidecarPayload(
   documentUri: string,
   reviewDocument: ReviewDocument,

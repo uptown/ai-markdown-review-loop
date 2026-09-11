@@ -123,18 +123,11 @@ export function renderWebviewDraftScript(): string {
           persist();
         }
         showRecovery();
-        updateHandoff();
       }
 
       function submit(message) {
         if (!supported.has(message.type)) return false;
         const key = keyFor(message);
-        if (isHandoffActive()) {
-          collect(key);
-          status(formFor(key), 'Handed off to the agent · writes paused. This draft is kept in the current preview.');
-          updateHandoff();
-          return true;
-        }
         if (drafts[key]?.requestId || drafts[key]?.recovery) return true;
         collect(key);
         if (!drafts[key]) return true;
@@ -288,19 +281,7 @@ export function renderWebviewDraftScript(): string {
       for (const [button, key] of [[commentCancel, 'comment'], [blockEditorCancel, 'block'], [mermaidEditorCancel, 'mermaid'], [tableEditorCancel, 'table']]) {
         button.addEventListener('click', () => { clear(key, false); showRecovery(); });
       }
-      function updateHandoff() {
-        for (const key of ['comment', 'block', 'mermaid', 'table']) {
-          const form = formFor(key);
-          const pending = Boolean(drafts[key]?.requestId);
-          form.querySelectorAll('button[type="submit"]').forEach(button => { button.disabled = isHandoffActive() || pending; });
-          if (isHandoffActive() && visible(form)) status(form, 'Handed off to the agent · writes paused. This draft is kept in the current preview.');
-          else if (!pending && !drafts[key]?.error) {
-            const message = form.querySelector('[data-save-status]');
-            if (message?.textContent.includes('writes paused')) message.textContent = 'Review the draft before saving.';
-          }
-        }
-      }
-      return { submit, collect, updateHandoff, canOpen(key) {
+      return { submit, collect, canOpen(key) {
         if (!drafts[key]?.requestId && !drafts[key]?.recovery) return true;
         if (drafts[key]?.recovery) {
           recovery.scrollIntoView({block:'center'});
@@ -318,7 +299,6 @@ export function renderErrorDraftScript(documentUri: string): string {
   return String.raw`
     const vscode = acquireVsCodeApi();
     document.getElementById('retry-preview').addEventListener('click', () => vscode.postMessage({type:'refreshPreview'}));
-    document.querySelectorAll('[data-error-action]').forEach(button => button.addEventListener('click', () => vscode.postMessage({type:button.getAttribute('data-error-action')})));
     const stored = vscode.getState?.();
     if (stored?.schema === 1 && stored.documentUri === ${uri} && stored.drafts) {
       const container = document.getElementById('error-drafts');

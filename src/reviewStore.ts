@@ -80,6 +80,8 @@ interface StoredReviewState {
   pendingWrite?: { hash: string; path: string };
   historyPaths?: string[];
   legacyPaths?: string[];
+  /** The external agent removed the canonical JSON after processing it. */
+  sidecarMissing?: boolean;
 }
 
 export class ReviewHandoffError extends Error {
@@ -99,6 +101,9 @@ export class ReviewStore {
 
   getHandoffPhase(uri: vscode.Uri): StoredReviewState['phase'] { return this.state(uri).phase; }
   isHandoffActive(uri: vscode.Uri): boolean { return Boolean(this.getHandoffPhase(uri)); }
+  getReviewFileState(uri: vscode.Uri): 'active' | 'removed' {
+    return this.state(uri).sidecarMissing ? 'removed' : 'active';
+  }
   getDocumentEpoch(uri: vscode.Uri): number { return this.epochs.get(uri.toString()) ?? 0; }
 
   assertWritable(uri: vscode.Uri): void {
@@ -160,6 +165,35 @@ export class ReviewStore {
       await this.readReviewDocuments(uri);
       await this.persistState(uri, { phase: undefined, checkpoint: undefined, checkpointPath: undefined });
       this.advanceEpoch(uri);
+    });
+  }
+
+  /**
+   * Prepare the canonical JSON for an external agent without creating a
+   * handoff phase or pausing extension writes. The returned text can be pasted
+   * into an agent that cannot read the workspace; file based agents can use the
+   * returned sidecar path directly.
+   */
+  async exportReviewJson(uri: vscode.Uri, saveDocument: () => Promise<boolean>): Promise<{ sidecar: vscode.Uri; contents: string }> {
+    this.assertWritable(uri);
+    return this.withDocumentTransaction(uri, async () => {
+      if (!await saveDocument()) throw new Error('The document save was cancelled, so the review JSON was not exported.');
+      const sidecar = await this.getReviewFileUri(uri);
+      this.assertSidecarEditorClean(sidecar);
+      let pair = await this.readReviewDocuments(uri);
+      if (pair.reviewDocument.taskSchemaVersion === 2 || pair.resolvedReviewDocument.taskSchemaVersion === 2) {
+        await this.backupLegacy(uri);
+        pair = migrateLegacyReviewDocuments(pair);
+      }
+      pair.reviewDocument.taskSchemaVersion = 3;
+      pair.resolvedReviewDocument.taskSchemaVersion = 3;
+      if (pair.reviewDocument.threads.length === 0) {
+        throw new Error('There are no comments to export. Select text and add a comment first.');
+      }
+      await this.writePortableReviewDocuments(sidecar, uri, pair.reviewDocument, pair.resolvedReviewDocument);
+      const bytes = await readFileIfExists(sidecar);
+      if (!bytes) throw new Error('The review JSON could not be read after export.');
+      return { sidecar, contents: decoder.decode(bytes) };
     });
   }
 
@@ -717,8 +751,20 @@ export class ReviewStore {
       }
     }
 
-    if (this.state(documentUri).knownCanonical || this.getHandoffPhase(documentUri) === 'handedOff') {
-      throw new Error('The review file is missing. File deletion is not treated as completion. Check whether it moved or restore the backup.');
+    const state = this.state(documentUri);
+    if (state.knownCanonical || this.getHandoffPhase(documentUri) === 'handedOff') {
+      const previous = state.lastValidPath ? await readFileIfExists(vscode.Uri.file(state.lastValidPath)) : undefined;
+      if (previous) {
+        try {
+          const value = JSON.parse(decoder.decode(previous));
+          const pair = parsePortableReviewSidecar(documentUri.toString(), value);
+          await this.persistState(documentUri, { sidecarMissing: true });
+          return pair;
+        } catch (error) {
+          throw new Error(`The last valid review JSON could not be restored after deletion: ${formatError(error)}`);
+        }
+      }
+      throw new Error('The review JSON is missing and no valid local copy is available. Add a new comment to recreate it.');
     }
 
     return {
@@ -832,7 +878,7 @@ export class ReviewStore {
   }
 
   private async finishCommittedWrite(uri: vscode.Uri, committed: { hash: string; path: string }): Promise<void> {
-    const update = { lastHash: committed.hash, lastValidPath: committed.path, knownCanonical: true, pendingWrite: undefined };
+    const update = { lastHash: committed.hash, lastValidPath: committed.path, knownCanonical: true, pendingWrite: undefined, sidecarMissing: false };
     try { await this.persistState(uri, update); } catch {
       // Canonical bytes committed successfully. Do not trigger a source rollback: the durable
       // pending record lets a restarted store finish this bookkeeping from the actual bytes.
@@ -913,7 +959,10 @@ export class ReviewStore {
   private async rememberValid(uri: vscode.Uri, bytes: Uint8Array, externalRead: boolean): Promise<void> {
     const state = this.state(uri);
     const hash = hashText(decoder.decode(bytes));
-    if (state.lastHash === hash) return;
+    if (state.lastHash === hash) {
+      if (state.sidecarMissing) await this.persistState(uri, { sidecarMissing: false });
+      return;
+    }
     if (externalRead && state.lastHash) this.advanceEpoch(uri);
     const lastValidPath = await this.backup(uri, 'valid', bytes);
     await this.persistState(uri, { lastValidPath, lastHash: hash, knownCanonical: true });

@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/uptown/ai-markdown-review-loop/blob/main/docs/review-task.schema.json",
   "title": "AI Markdown Review Loop task file v3",
-  "description": "Canonical colocated agent task file. The runtime additionally checks unique item IDs, lineEnd >= line, and handoff request fingerprints. Agents update only status, result and resultFor after saving Markdown.",
+  "description": "Canonical colocated agent task file. The runtime additionally checks unique item IDs and lineEnd >= line. Agents update only status, result and resultFor after saving Markdown, then may delete the file when the round is complete.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -28,7 +28,7 @@
       "items": {
         "$ref": "#/$defs/item"
       },
-      "description": "Each item ID must be unique. Keep all items unless the extension archives them at the next handoff."
+      "description": "Each item ID must be unique. Preserve items while the agent is processing the round."
     }
   },
   "$defs": {

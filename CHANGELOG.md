@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.2.0 - 2026-09-11
+
+- Removes the Send to Agent / Review Changes handoff state, write pause, and
+  recovery menu from the public command and preview surfaces.
+- Keeps one compact Copy Review JSON action for agents that need pasted input;
+  comments continue to write the colocated v3 task file automatically.
+- Treats external deletion of the JSON as a completed agent round while keeping
+  the last valid snapshot visible for Markdown review and the next comment.
+- Updates the guidance, schema, README, workflow docs, and regression tests for
+  the JSON-only loop.
+
 ## 0.1.1 - 2026-09-11
 
 - Keeps the public README, workflow documentation, and user-facing labels and
