@@ -19,6 +19,9 @@ provider and it does not host an agent conversation.
 6. Return to the preview and inspect the revised Markdown. Add another comment
    for the next round.
 
+Use **Hide comments** or **Show comments** in the preview toolbar to give the
+Markdown more room while reading.
+
 The preview watches the sidecar. When the external agent removes it, the last
 valid task snapshot remains visible so the result can be reviewed. The next
 saved comment recreates the JSON file.
@@ -34,29 +37,30 @@ docs/.spec.md.ai-review.json
 ```
 
 Each item has a stable `rv_*` ID, a revision, a quoted target with line hints,
-the user comment, and an agent outcome. The status and result are agent report
-metadata; the user remains the only owner of comments.
+and the user comment. The agent may add one short result for the current
+revision; it never owns or changes the comment.
 
 ```json
 {
   "schemaVersion": 3,
   "document": "spec.md",
-  "guidance": "Resolve the Markdown relative to this JSON. Review every user comment against the current document. Do not edit, delete, close, archive, reply to, or reattach comments. Verify quote and context, edit Markdown first, record one short result, then delete this JSON.",
+  "guidance": "Resolve the Markdown relative to this JSON. Review every user comment against the current document on every pass. Comments are user-owned: do not add replies, edit, delete, archive, or close them. Verify each quote and its surrounding context before editing. Save Markdown changes first, then optionally record one short result and its resultFor revision. Delete this JSON after recording the outcome for the round.",
   "items": [
     {
       "id": "rv_123",
       "rev": 1,
       "target": { "line": 12, "quote": "The retry policy is documented here." },
-      "comment": "Add the failure reason and the user retry steps.",
-      "status": "pending"
+      "comment": "Add the failure reason and the user retry steps."
     }
   ]
 }
 ```
 
-The agent result is a report, not proof that the Markdown is correct. Always
+If the agent records an outcome, it adds `result` and `resultFor` to that item.
+Those fields are a report, not proof that the Markdown is correct. Always
 inspect the actual Markdown. The user edits or deletes comments and starts the
-next round with a new JSON file.
+next round with a new JSON file. Older task files that contain `status` remain
+readable for migration, but new exports omit it.
 
 ## Commands and shortcuts
 

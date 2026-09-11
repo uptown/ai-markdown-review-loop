@@ -12,7 +12,7 @@ describe('review JSON commands', () => {
 
     const payload = JSON.parse(h.clipboard[0]);
     assert.equal(payload.schemaVersion, 3);
-    assert.equal(payload.items[0].status, 'pending');
+    assert.equal('status' in payload.items[0], false);
     assert.match(payload.guidance, /user comment/i);
     assert.match(payload.guidance, /do not add replies/i);
     assert.equal(h.store.isHandoffActive(document.uri), false);

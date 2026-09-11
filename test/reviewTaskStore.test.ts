@@ -23,7 +23,7 @@ describe('v3 review task lifecycle and recovery', () => {
     const h = await seed(); const payload = h.read();
     assert.equal(payload.schemaVersion, 3); assert.equal(payload.document, 'spec.md');
     assert.match(payload.guidance, /resultFor/); assert.equal(payload.items.length, 2);
-    assert.equal(payload.items[0].status, 'pending'); assert.equal(payload.items[0].rev, 1);
+    assert.equal('status' in payload.items[0], false); assert.equal(payload.items[0].rev, 1);
     assert.equal('thread' in payload.items[0], false); assert.equal('documentUri' in payload, false);
   });
 
@@ -83,7 +83,7 @@ describe('v3 review task lifecycle and recovery', () => {
   it('increments edited request revisions, resets handling reports, and rejects stale editor edits', async () => {
     const h = await seed(); const payload = h.read(); finish(payload.items[0], 'blocked'); h.write(payload);
     await h.store.load(h.uri); await h.store.updateComment(h.uri, 'rv_one', 'Limit is 20.', 1);
-    const edited = h.read().items[0]; assert.equal(edited.rev, 2); assert.equal(edited.status, 'pending'); assert.equal(edited.resultFor, undefined);
+    const edited = h.read().items[0]; assert.equal(edited.rev, 2); assert.equal('status' in edited, false); assert.equal(edited.resultFor, undefined);
     await assert.rejects(h.store.updateComment(h.uri, 'rv_one', 'Stale request', 1), /changed/);
   });
 
@@ -158,7 +158,7 @@ describe('v3 review task lifecycle and recovery', () => {
     const payload = JSON.parse(new TextDecoder().decode(h.files.get(sidecar.path)));
     assert.equal(payload.schemaVersion, 3); assert.equal(payload.items.length, 1);
     assert.match(payload.items[0].comment, /Keep exact wording: 雪 <tag>\./);
-    assert.equal(payload.items[0].status, 'pending');
+    assert.equal('status' in payload.items[0], false);
     assert.ok(h.store.getLegacyBackupPaths(h.uri).some(file => assert.deepEqual(h.files.get(file), before) === undefined));
   });
 
@@ -239,7 +239,7 @@ describe('v3 review task lifecycle and recovery', () => {
     await h.store.updateThread(h.uri, 'rv_one', { anchor: { text: 'New source target', lineStart: 2 }, taskRevision: 2 });
     const changed = h.read().items[0];
     assert.equal(changed.rev, 2);
-    assert.equal(changed.status, 'pending');
+    assert.equal('status' in changed, false);
     assert.equal(changed.result, undefined);
     assert.equal(changed.resultFor, undefined);
   });
@@ -255,7 +255,7 @@ describe('v3 review task lifecycle and recovery', () => {
     });
     const changed = h.read().items[0];
     assert.equal(changed.rev, 2);
-    assert.equal(changed.status, 'pending');
+    assert.equal('status' in changed, false);
     assert.equal(changed.resultFor, undefined);
   });
 
@@ -315,7 +315,7 @@ describe('v3 review task lifecycle and recovery', () => {
     const closed = await h.store.loadResolved(h.uri);
     const latest = h.read(); finish(latest.items[0]); h.write(latest);
     await h.store.saveBoth(h.uri, open, closed);
-    assert.equal(h.read().items[0].status, 'done');
+    assert.equal('status' in h.read().items[0], false);
     assert.equal(h.read().items[0].result, latest.items[0].result);
     assert.deepEqual(closed.threads.map(thread => thread.id), []);
   });

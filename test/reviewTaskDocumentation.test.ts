@@ -13,12 +13,13 @@ describe('published v3 task contract', () => {
     assert.equal(examples.length, 2);
     const before = parseReviewTaskSidecar(examples[0]);
     assert.match(before.guidance, /Review every user comment against the current document/i);
-    assert.match(REVIEW_TASK_GUIDANCE, /Delete this JSON after recording outcomes/i);
+    assert.match(REVIEW_TASK_GUIDANCE, /Delete this JSON after recording the outcome/i);
+    assert.doesNotMatch(REVIEW_TASK_GUIDANCE, /reattach|pending|done|blocked/i);
     const after = parseReviewTaskSidecar({ ...before, items: [examples[1]] });
     assert.equal(after.items[0].resultFor, before.items[0].rev);
-    assert.equal(after.items[0].status, 'done');
+    assert.equal(after.items[0].status, undefined);
     assert.deepEqual(
-      { ...after.items[0], status: 'pending', result: undefined, resultFor: undefined },
+      { ...after.items[0], result: undefined, resultFor: undefined },
       { ...before.items[0], result: undefined, resultFor: undefined }
     );
   });
@@ -30,7 +31,7 @@ describe('published v3 task contract', () => {
     assert.equal(schema.additionalProperties, false);
     assert.equal(schema.$defs.item.additionalProperties, false);
     assert.equal(schema.$defs.target.additionalProperties, false);
-    assert.deepEqual(schema.$defs.item.properties.status.enum, ['pending', 'done', 'blocked']);
+    assert.equal('status' in schema.$defs.item.properties, false);
     assert.deepEqual(schema.$defs.item.dependentRequired, { result: ['resultFor'], resultFor: ['result'] });
     assert.deepEqual(schema.$defs.target.properties.state.enum, ['missing', 'ambiguous']);
     assert.throws(() => parseReviewTaskSidecar({ schemaVersion: 2, openThreads: [], closedThreads: [] }));
