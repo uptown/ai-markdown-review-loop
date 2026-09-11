@@ -44,7 +44,7 @@ export function renderReanchorScript(): string {
       }
 
       function begin(thread, button) {
-        if (pendingRequest || isHandoffActive()) return;
+        if (pendingRequest) return;
         const dirty = dirtyDraft();
         panel.hidden = false;
         returnFocus = button;
@@ -78,7 +78,6 @@ export function renderReanchorScript(): string {
         button.type = 'button';
         button.className = 'secondary';
         button.textContent = 'Reattach';
-        button.disabled = isHandoffActive();
         button.title = 'Choose new target text for this existing thread without changing the Markdown.';
         button.setAttribute('data-reanchor-thread', thread.id);
         button.addEventListener('click', event => {
@@ -89,7 +88,7 @@ export function renderReanchorScript(): string {
       }
 
       function captureSelection(event) {
-        if (!targetThread || pendingRequest || isHandoffActive()) return;
+        if (!targetThread || pendingRequest) return;
         event.stopImmediatePropagation();
         window.clearTimeout(selectionTimer);
         hideSelectionPopover();
@@ -133,7 +132,7 @@ export function renderReanchorScript(): string {
       }, true);
       cancel.addEventListener('click', finish);
       confirm.addEventListener('click', () => {
-        if (!targetThread || !selectedTarget || pendingRequest || isHandoffActive()) return;
+        if (!targetThread || !selectedTarget || pendingRequest) return;
         const dirty = dirtyDraft();
         if (dirty) {
           status.textContent = 'Finish or cancel your current draft before saving this reattachment. Your draft has been kept.';
@@ -149,11 +148,6 @@ export function renderReanchorScript(): string {
       });
       window.addEventListener('message', event => {
         const message = event.data;
-        if (message?.type === 'handoffPhase') {
-          confirm.disabled = isHandoffActive() || !selectedTarget || Boolean(pendingRequest);
-          if (isHandoffActive() && !panel.hidden) status.textContent = 'Handed off to the agent · reattachment is paused.';
-          return;
-        }
         if (message?.type !== 'reviewMutationResult' || message.requestId !== pendingRequest || !pendingRequest) return;
         pendingRequest = '';
         cancel.disabled = false;
@@ -161,7 +155,7 @@ export function renderReanchorScript(): string {
           finish();
         } else {
           status.textContent = message.error || 'The thread could not be reattached. Your selection has been kept; retry or select different text.';
-          confirm.disabled = isHandoffActive() || !selectedTarget;
+          confirm.disabled = !selectedTarget;
         }
       });
     })();

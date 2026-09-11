@@ -208,23 +208,11 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
     let pendingRestoreState: PreviewRestoreState | undefined;
     let renderSequence = 0;
     let hasRenderedPreview = false;
-    let lastHandoffPhase: 'preparing' | 'handedOff' | undefined;
     const mutationResults: NonNullable<PreviewRestoreState['mutationResults']> = {};
     const pendingRequests = new Set<string>();
     const trackedMutationTypes = new Set(['addComment', 'editComment', 'removeComment', 'restoreThread', 'editMarkdownBlock', 'insertMarkdownBlock', 'editMermaidSource', 'editMarkdownTable', 'reanchorThread']);
-    const sidecarMutationTypes = new Set([...trackedMutationTypes, 'deleteMarkdownBlock', 'cleanupStaleAnchors', 'cleanupLegacyMetadata']);
-    const handoffCommands = new Set(['handoff', 'resumeReview', 'cancelHandoff', 'copyReviewFile', 'openReviewFile', 'openReviewHistory', 'restoreReviewBackup']);
+    const reviewCommands = new Set(['copyReviewJson']);
     const render = async (restoreState?: PreviewRestoreState) => {
-      const phase = this.store.getHandoffPhase(document.uri);
-      if (phase !== lastHandoffPhase) {
-        lastHandoffPhase = phase;
-        // A restored handoff can be the first render. VS Code may wait for the
-        // webview to initialize before delivering messages; the initial HTML
-        // already carries this phase and must be assigned before that wait.
-        if (hasRenderedPreview) {
-          await webviewPanel.webview.postMessage({ type: 'handoffPhase', phase });
-        }
-      }
       if (restoreState) pendingRestoreState = restoreState;
       if (activeMutations > 0) {
         refreshPending = true;
@@ -314,19 +302,9 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
           await render();
           return;
         }
-        if (handoffCommands.has(message?.type)) {
-          try {
-            await vscode.commands.executeCommand('aiMarkdownReviewLoop.' + message.type, document.uri);
-          } finally {
-            // Clear the optimistic preparing UI even when preparation rolled back
-            // before a Store phase change and the following read also fails.
-            await webviewPanel.webview.postMessage({ type: 'handoffPhase', phase: this.store.getHandoffPhase(document.uri) });
-            await render();
-          }
+        if (reviewCommands.has(message?.type)) {
+          await vscode.commands.executeCommand('aiMarkdownReviewLoop.' + message.type, document.uri);
           return;
-        }
-        if (sidecarMutationTypes.has(message?.type) && this.store.isHandoffActive(document.uri)) {
-          throw new Error('Review writes are paused while the agent edits the files. Drafts are kept. Choose Review Changes or Cancel Handoff before saving.');
         }
         if (sourceRevisionMessageTypes.has(message?.type)) {
           this.ensureDocumentRevision(document, sourceVersion);
@@ -384,18 +362,6 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
 
           vscode.window.showInformationMessage('Restored review thread to open feedback.');
           await completeRender({ focusThreadId: threadId });
-        }
-
-        if (message?.type === 'openReviewSidecar') {
-          await this.openReviewSidecar(document.uri, typeof message.sidecarPath === 'string'
-            ? message.sidecarPath
-            : undefined);
-          return;
-        }
-
-        if (message?.type === 'findReviewSidecars') {
-          await this.findReviewSidecars(document.uri);
-          return;
         }
 
         if (message?.type === 'convertMarkdownBlockHtml') {
@@ -750,92 +716,6 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
     return true;
   }
 
-  private async openReviewSidecar(
-    documentUri: vscode.Uri,
-    sidecarPath?: string
-  ): Promise<void> {
-    const sidecarUri = await this.resolveReviewSidecarUri(documentUri, sidecarPath);
-
-    try {
-      await vscode.workspace.fs.stat(sidecarUri);
-    } catch {
-      vscode.window.showWarningMessage(
-        `Review sidecar was not found: ${vscode.workspace.asRelativePath(sidecarUri, false)}`
-      );
-      return;
-    }
-
-    const sidecarDocument = await vscode.workspace.openTextDocument(sidecarUri);
-    await vscode.window.showTextDocument(sidecarDocument, { preview: true });
-  }
-
-  private async findReviewSidecars(documentUri: vscode.Uri): Promise<void> {
-    const workspaceFolder = vscode.workspace.getWorkspaceFolder(documentUri);
-
-    if (!workspaceFolder) {
-      vscode.window.showWarningMessage('Open a workspace Markdown file before searching for review sidecars.');
-      return;
-    }
-
-    const candidates = await vscode.workspace.findFiles(
-      new vscode.RelativePattern(workspaceFolder, '{**/.*.ai-review.json,.ai-markdown-review/**/*.json}'),
-      new vscode.RelativePattern(workspaceFolder, '{**/node_modules/**,**/.git/**}'),
-      50
-    );
-
-    if (candidates.length === 0) {
-      vscode.window.showWarningMessage('No review sidecar JSON files were found in this workspace.');
-      return;
-    }
-
-    const picked = await vscode.window.showQuickPick(
-      candidates
-        .sort((left, right) => left.fsPath.localeCompare(right.fsPath))
-        .map(uri => ({
-          label: vscode.workspace.asRelativePath(uri, false),
-          uri
-        })),
-      {
-        title: 'Open a review sidecar',
-        placeHolder: 'Choose a colocated or legacy review sidecar to inspect'
-      }
-    );
-
-    if (!picked) {
-      return;
-    }
-
-    const sidecarDocument = await vscode.workspace.openTextDocument(picked.uri);
-    await vscode.window.showTextDocument(sidecarDocument, { preview: true });
-  }
-
-  private async resolveReviewSidecarUri(
-    documentUri: vscode.Uri,
-    sidecarPath?: string
-  ): Promise<vscode.Uri> {
-    const trimmedPath = sidecarPath?.trim();
-
-    if (!trimmedPath || trimmedPath === '.<filename>.ai-review.json') {
-      return this.store.getReviewFileUri(documentUri);
-    }
-
-    if (path.isAbsolute(trimmedPath)) {
-      return vscode.Uri.file(trimmedPath);
-    }
-
-    const workspaceFolder = vscode.workspace.getWorkspaceFolder(documentUri);
-
-    if (workspaceFolder) {
-      return vscode.Uri.joinPath(workspaceFolder.uri, ...trimmedPath.split(/[\\/]+/).filter(Boolean));
-    }
-
-    if (documentUri.scheme === 'file') {
-      return vscode.Uri.file(path.resolve(path.dirname(documentUri.fsPath), trimmedPath));
-    }
-
-    return this.store.getReviewFileUri(documentUri);
-  }
-
   private async applyReviewAwareEdit(
     document: vscode.TextDocument,
     plan: ReviewAwareEditPlan,
@@ -1054,8 +934,7 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
       webview
     });
     const tables = collectMarkdownTables(previewMarkdown);
-    const handoffPhase = this.store.getHandoffPhase(document.uri);
-    const handoffNotice = this.renderHandoffActions(reviewDocument, resolvedReviewDocument, handoffPhase);
+    const reviewActions = this.renderReviewActions(document, reviewDocument, resolvedReviewDocument);
     const storageWarning = this.renderStorageWarning(documentText, reviewDocument);
     const markerLineHints = this.getMarkerLineHints(reviewDocument);
     const historyAnchorLocations = getReviewHistoryAnchorLocations(
@@ -1085,7 +964,7 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
       mermaidThreadMatchesByFigure,
       tables,
       canEditMarkdown,
-      handoffPhase,
+      reviewFileState: this.store.getReviewFileState(document.uri),
       sourceLines: documentText.split(/\r\n|\r|\n/),
       sourceLineEnding,
       documentVersion: document.version,
@@ -1229,7 +1108,7 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
       margin-top: 10px;
       flex-wrap: wrap;
     }
-    .context-bootstrap-bar {
+    .review-actions {
       max-width: 900px;
       margin: 0 0 16px;
       display: flex;
@@ -1238,7 +1117,7 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
       gap: 12px;
     }
     .review-navigation-actions,
-    .context-bootstrap-actions {
+    .review-file-actions {
       display: flex;
       gap: 8px;
       flex-wrap: wrap;
@@ -1263,8 +1142,11 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
       outline: 2px solid var(--vscode-focusBorder);
       outline-offset: 2px;
     }
-    .context-bootstrap-actions {
+    .review-file-actions {
       justify-content: flex-end;
+      align-items: center;
+      color: var(--muted);
+      font-size: 12px;
     }
     button {
       border: 0;
@@ -1964,13 +1846,12 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
     .mermaid-review-badge {
       margin-left: 0;
     }
-    .draft-recovery, .handoff-status {
+    .draft-recovery, .review-file-status {
       border: 1px solid var(--vscode-inputValidation-warningBorder, var(--border));
       padding: 12px;
       margin-bottom: 16px;
     }
-    .handoff-status[hidden], .draft-recovery[hidden], [data-handoff-action][hidden] { display: none; }
-    .handoff-menu { display:flex; flex-wrap:wrap; gap:6px; padding:8px 0; }
+    .draft-recovery[hidden] { display: none; }
     .task-result { border-left:3px solid var(--border); padding-left:8px; }
     .draft-recovery textarea { display: block; width: 100%; min-height: 90px; margin: 8px 0; }
     .draft-recovery button { margin-right: 8px; }
@@ -1979,7 +1860,7 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
       .layout {
         grid-template-columns: 1fr;
       }
-      .context-bootstrap-bar {
+      .review-actions {
         align-items: flex-start;
         flex-direction: column;
       }
@@ -1997,7 +1878,7 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
 <body>
   <div class="layout">
     <main>
-      ${handoffNotice}
+      ${reviewActions}
       ${storageWarning}
       <article id="markdown-body">${renderedMarkdown}</article>
     </main>
@@ -2086,17 +1967,9 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
     const documentVersion = Number(state.documentVersion);
     const findNormalizedTextSpan = ${findNormalizedTextSpan.toString()};
     let draftSession;
-    let handoffPhase = state.handoffPhase;
     let activeCommentEdit;
-    const writeMessageTypes = new Set(['addComment', 'editComment', 'removeComment', 'restoreThread', 'reanchorThread', 'editMarkdownBlock', 'insertMarkdownBlock', 'deleteMarkdownBlock', 'editMarkdownTable', 'editMermaidSource', 'cleanupLegacyMetadata']);
-    function isHandoffActive() { return Boolean(handoffPhase); }
     function postReviewMessage(message) {
       if (draftSession?.submit(message)) return;
-      if (isHandoffActive() && writeMessageTypes.has(message.type)) {
-        draftSession?.collect();
-        updateHandoffUi();
-        return;
-      }
       vscode.postMessage({ ...message, documentVersion });
     }
     const restoreState = state.restoreState || {};
@@ -2456,14 +2329,12 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
         return;
       }
 
-      const handoffAction = target.closest('[data-handoff-action]');
-      if (handoffAction) {
+      const copyJsonButton = target.closest('[data-copy-review-json]');
+      if (copyJsonButton) {
         event.preventDefault();
         event.stopPropagation();
         draftSession?.collect();
-        const action = handoffAction.getAttribute('data-handoff-action');
-        if (action === 'handoff' || action === 'copyReviewFile') { handoffPhase = 'preparing'; updateHandoffUi(); }
-        postReviewMessage({ type: action });
+        postReviewMessage({ type: 'copyReviewJson' });
         return;
       }
       const jumpButton = target.closest('[data-jump-thread]');
@@ -2612,27 +2483,6 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
         return;
       }
 
-      const openReviewSidecarButton = target.closest('[data-open-review-sidecar]');
-
-      if (openReviewSidecarButton) {
-        event.preventDefault();
-        event.stopPropagation();
-        postReviewMessage({
-          type: 'openReviewSidecar',
-          sidecarPath: openReviewSidecarButton.getAttribute('data-sidecar-path')
-        });
-        return;
-      }
-
-      const findReviewSidecarsButton = target.closest('[data-find-review-sidecars]');
-
-      if (findReviewSidecarsButton) {
-        event.preventDefault();
-        event.stopPropagation();
-        postReviewMessage({ type: 'findReviewSidecars' });
-        return;
-      }
-
       const restoreButton = target.closest('[data-restore-thread]');
 
       if (restoreButton) {
@@ -2758,7 +2608,6 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
     }
     restorePreviewState();
     ${renderWebviewDraftScript()}
-    updateHandoffUi();
     renderMermaidDiagrams();
 
     function renderClosedHistory(threads) {
@@ -3065,7 +2914,6 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
     }
 
     function prepareBlockEditor() {
-      if (isHandoffActive()) return false;
       if (draftSession && !draftSession.canOpen('block')) return false;
       if (commentComposer.style.display === 'block' && commentBody.value.trim()) {
         commentBody.focus();
@@ -3207,7 +3055,6 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
     }
 
     function openTableEditor(tableElement) {
-      if (isHandoffActive()) return;
       if (draftSession && !draftSession.canOpen('table')) return;
       const lineRange = getEditableLineRange(tableElement);
 
@@ -3397,7 +3244,6 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
     }
 
     function openMermaidEditor(figure, source) {
-      if (isHandoffActive()) return;
       if (draftSession && !draftSession.canOpen('mermaid')) return;
       if (figure.parentElement?.closest('li, blockquote')) {
         return;
@@ -4973,36 +4819,8 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
       }
     }
 
-    function updateHandoffUi() {
-      const preparing = handoffPhase === 'preparing';
-      const paused = isHandoffActive();
-      const primary = document.querySelector('[data-handoff-primary]');
-      if (primary) {
-        primary.textContent = preparing ? 'Preparing Handoff…' : paused ? 'Review Changes' : 'Send to Agent';
-        primary.setAttribute('data-handoff-action', paused ? 'resumeReview' : 'handoff');
-        primary.disabled = preparing || (!paused && !state.threads.some(thread => thread.status === 'open'));
-      }
-      const notice = document.querySelector('[data-handoff-status]');
-      if (notice) {
-        notice.hidden = !paused;
-        notice.textContent = preparing ? 'Preparing handoff · writes paused. Drafts are kept.' : 'Handed off to the agent · writes paused — kept as the next review draft.';
-      }
-      const copy = document.querySelector('[data-handoff-action="copyReviewFile"]');
-      if (copy) copy.disabled = preparing;
-      const cancel = document.querySelector('[data-handoff-action="cancelHandoff"]');
-      if (cancel) { cancel.hidden = !paused; cancel.disabled = preparing; }
-      document.querySelectorAll('[data-write-action], [data-cleanup-legacy-metadata], [data-mermaid-edit], [data-edit-markdown-block], [data-add-markdown-block], [data-delete-markdown-block], [data-edit-markdown-table], [data-reanchor-thread]').forEach(button => { button.disabled = paused; });
-      draftSession?.updateHandoff();
-    }
-
-    window.addEventListener('message', event => {
-      if (event.data?.type !== 'handoffPhase') return;
-      handoffPhase = event.data.phase;
-      updateHandoffUi();
-    });
-
     function openCommentEditor(thread) {
-      if (isHandoffActive() || protectCommentDraft()) return;
+      if (protectCommentDraft()) return;
       activeCommentEdit = { threadId: thread.id, revision: thread.taskRevision, originalComment: thread.comment };
       activeSelectionText = thread.anchor.text;
       activeSelectionOccurrence = thread.anchor.occurrence || 0;
@@ -5084,7 +4902,7 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
       }
 
       commentQualityWarning.hidden = false;
-      commentQualityWarning.textContent = 'Agent handoff warning: ' + warning;
+      commentQualityWarning.textContent = 'Review request hint: ' + warning;
     }
 
     function commentQualityWarningText(comment) {
@@ -5095,7 +4913,7 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
       }
 
       if (normalized.length < 8) {
-        return 'Comment is too short for reliable AI handoff; add the expected action or reason.';
+        return 'Comment is short; add the expected action or reason so the agent can apply it safely.';
       }
 
       if (!/[\\p{L}\\p{N}]/u.test(normalized)) {
@@ -5103,7 +4921,7 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
       }
 
       if (/:$/.test(normalized) || /\\bbecause$/i.test(normalized)) {
-        return 'Comment looks unfinished; finish the reason, decision, or requested action before handing it to an AI agent.';
+        return 'Comment looks unfinished; finish the reason, decision, or requested action.';
       }
 
       return '';
@@ -5181,7 +4999,6 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
       ].join('');
     }
     ${renderReanchorScript()}
-    updateHandoffUi();
   </script>
 </body>
 </html>`;
@@ -5194,43 +5011,38 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
 
     return `<section class="storage-warning" role="status">
     <strong>Legacy inline review metadata found.</strong>
-    <p>Review state now lives in the hidden colocated <code>.&lt;filename&gt;.ai-review.json</code> sidecar beside this Markdown file. These old <code>ai-review-*</code> comments are no longer required for the feedback loop and can be removed without deleting sidecar review threads.</p>
+    <p>Review state now lives in the hidden colocated <code>.&lt;filename&gt;.ai-review.json</code> file. These old inline markers can be removed without deleting review requests.</p>
     <div class="storage-warning-actions">
-      <button type="button" class="secondary compact" data-open-review-sidecar>Open review sidecar</button>
-      <button type="button" class="secondary compact" data-find-review-sidecars>Find review sidecars</button>
       <button type="button" class="secondary compact" data-cleanup-legacy-metadata>Clean legacy metadata</button>
     </div>
   </section>`;
   }
 
-  private renderHandoffActions(
+  private renderReviewActions(
+    document: vscode.TextDocument,
     reviewDocument: ReviewDocument,
-    resolvedReviewDocument: ReviewDocument,
-    phase: 'preparing' | 'handedOff' | undefined
+    resolvedReviewDocument: ReviewDocument
   ): string {
     const open = reviewDocument.threads.filter(thread => thread.status === 'open');
     const blocked = open.filter(thread => getReviewTaskStatus(thread) === 'blocked').length;
     const done = resolvedReviewDocument.threads.filter(thread => thread.taskStatus !== undefined && getReviewTaskStatus(thread) === 'done').length;
     const disabled = open.length ? '' : ' disabled';
-    return `<section class="context-bootstrap-bar" aria-label="Send change requests to an external agent">
+    const reviewFile = `.${path.posix.basename(document.uri.path)}.ai-review.json`;
+    const removed = typeof this.store.getReviewFileState === 'function'
+      && this.store.getReviewFileState(document.uri) === 'removed';
+    return `<section class="review-actions" aria-label="Review requests">
     <div class="review-navigation-actions" role="group" aria-label="Review comment navigation">
       <button type="button" class="secondary compact" aria-label="Previous comment" title="Previous comment (Left Arrow)" data-review-nav="previous"${disabled}>← Previous</button>
       <span class="review-position" data-review-position role="status" aria-live="polite" aria-atomic="true">${open.length ? `${open.length} open` : 'No open comments'}</span>
       <button type="button" class="secondary compact" aria-label="Next comment" title="Next comment (Right Arrow)" data-review-nav="next"${disabled}>Next →</button>
     </div>
-    <div class="context-bootstrap-actions">
-      <button type="button" class="compact" data-handoff-primary data-handoff-action="${phase ? 'resumeReview' : 'handoff'}"${phase === 'preparing' || (!phase && !open.length) ? ' disabled' : ''}>${phase === 'preparing' ? 'Preparing Handoff…' : phase ? 'Review Changes' : 'Send to Agent'}</button>
-      <button type="button" class="secondary compact" data-handoff-action="cancelHandoff"${phase ? '' : ' hidden'}>Cancel Handoff / Resume Review</button>
-      <details><summary>More</summary><div class="handoff-menu">
-        <button type="button" class="secondary compact" data-handoff-action="openReviewFile">Inspect Review File</button>
-        <button type="button" class="secondary compact" data-handoff-action="copyReviewFile">Copy Review File</button>
-        <button type="button" class="secondary compact" data-handoff-action="openReviewHistory">Review History</button>
-        <button type="button" class="secondary compact" data-handoff-action="restoreReviewBackup">Restore Backup</button>
-      </div></details>
+    <div class="review-file-actions">
+      <button type="button" class="compact" data-copy-review-json${open.length ? '' : ' disabled'}>Copy Review JSON</button>
+      <code title="Canonical review file">${escapeHtml(reviewFile)}</code>
     </div>
   </section>
   <p class="review-position" data-review-summary>${done} done · ${open.length - blocked} pending · ${blocked} blocked</p>
-  <p class="handoff-status" data-handoff-status role="status"${phase ? '' : ' hidden'}>Handed off to the agent · writes paused — kept as the next review draft.</p>`;
+  <p class="review-file-status" role="status"${removed ? '' : ' hidden'}>The review JSON was removed by the external agent. Review the Markdown changes, then add a new comment for another pass.</p>`;
   }
 
   private getMarkerLineHints(reviewDocument: ReviewDocument): Record<string, number> {
@@ -5286,8 +5098,6 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
     <p>The sidecar for <code>${escapeHtml(document.fileName)}</code> could not be loaded, so this preview is paused to avoid overwriting existing review feedback.</p>
     <p>${escapeHtml(message)}</p>
     <button type="button" id="retry-preview">Retry refresh</button>
-    <button type="button" data-error-action="openReviewFile">Inspect Review File</button>
-    <button type="button" data-error-action="restoreReviewBackup">Restore Backup</button>
     <div id="error-drafts"></div>
   </section>
   <script nonce="${nonce}">${renderErrorDraftScript(document.uri.toString())}</script>

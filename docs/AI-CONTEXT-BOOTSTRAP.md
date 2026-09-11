@@ -1,15 +1,9 @@
-# Migrating From The Old Bootstrap Prompts
+# Using the Review JSON
 
-Version 0.1 uses one v3 task file and **Send to Agent**. The former bootstrap,
-feedback-loop, and per-thread continuation prompts are retired.
+The review JSON is the only handoff context. It contains the Markdown filename,
+short [agent guidance](./AI-REVIEW-POLICY.md), and the requests for this pass.
 
-Start from the [current review workflow](./AI-COLLABORATION-LOOP.md). The review
-JSON already contains brief [agent guidance](./AI-REVIEW-POLICY.md), the target
-filename, and the requests for this pass. Give the agent repository context only
-when it is needed for those requests.
-
-If an agent conversation still contains the old instructions, tell it to follow
-the current v3 task-file guidance. It should edit the source and record done or
-blocked results, preserving request IDs and revisions. It should not append
-assistant replies, propose close decisions, or wait for the retired patch
-approval flow.
+Give a file-capable agent the sidecar path, or use **Copy Review JSON** when the
+agent needs pasted input. The agent should read the current Markdown, verify
+targets, edit the source, record `done` or `blocked` results, and delete the JSON
+after the round. No bootstrap prompt or in-extension conversation is required.

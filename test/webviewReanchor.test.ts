@@ -154,27 +154,19 @@ describe('manual review reattachment', () => {
     assert.equal(dom.document.getElementById('review-reanchor-confirm').disabled, true);
     assert.equal(draft.value, 'Keep this selection and feedback.');
   });
-  it('pauses reattachment during handoff and retains the selected target until review resumes', async () => {
+  it('keeps reattachment available while an external agent works on the JSON', async () => {
     const { h, render } = await setup();
     const dom = runWebview(render());
     dom.dispatch(dom.document.querySelector('[data-reanchor-thread]'), 'click');
     selectTarget(dom);
     const confirm = dom.document.getElementById('review-reanchor-confirm');
     assert.equal(confirm.disabled, false);
-    dom.receive({type:'handoffPhase',phase:'handedOff'});
-    assert.equal(confirm.disabled, true);
-    dom.dispatch(confirm,'click');
-    assert.equal(dom.messages.some(message=>message.type==='reanchorThread'),false);
-    assert.match(dom.document.getElementById('review-reanchor-selection').textContent,/New target/);
-    dom.receive({type:'handoffPhase'});
-    assert.equal(confirm.disabled,false);
     dom.dispatch(confirm,'click');
     const message = dom.messages.find(message=>message.type==='reanchorThread');
     assert.equal(message.anchorText,'New target');
     await h.open();
-    h.setHandoffPhase('handedOff');
     await h.message(message);
-    assert.equal(h.postedMessages.find(result=>result.type==='reviewMutationResult').ok,false);
+    assert.equal(h.postedMessages.find(result=>result.type==='reviewMutationResult').ok,true);
   });
 
 });

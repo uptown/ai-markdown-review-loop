@@ -1,8 +1,8 @@
 {
   "name": "ai-markdown-review-loop",
   "displayName": "AI Markdown Review Loop",
-  "description": "Review Markdown with comments, hand compact task files to your AI agent, then review the changes.",
-  "version": "0.1.1",
+  "description": "Review Markdown with comments and share a compact JSON task file with your AI agent.",
+  "version": "0.2.0",
   "publisher": "uptown",
   "license": "MIT",
   "repository": {
@@ -37,7 +37,6 @@
     "comments",
     "ai",
     "agent",
-    "handoff",
     "image",
     "preview",
     "mermaid",
@@ -47,13 +46,7 @@
     "onCustomEditor:aiMarkdownReviewLoop.reviewEditor",
     "onCommand:aiMarkdownReviewLoop.openReviewBeside",
     "onCommand:aiMarkdownReviewLoop.openReviewPreview",
-    "onCommand:aiMarkdownReviewLoop.handoff",
-    "onCommand:aiMarkdownReviewLoop.resumeReview",
-    "onCommand:aiMarkdownReviewLoop.copyReviewFile",
-    "onCommand:aiMarkdownReviewLoop.openReviewFile",
-    "onCommand:aiMarkdownReviewLoop.openReviewHistory",
-    "onCommand:aiMarkdownReviewLoop.cancelHandoff",
-    "onCommand:aiMarkdownReviewLoop.restoreReviewBackup"
+    "onCommand:aiMarkdownReviewLoop.copyReviewJson"
   ],
   "main": "./out/extension.js",
   "contributes": {
@@ -75,32 +68,8 @@
         }
       },
       {
-        "command": "aiMarkdownReviewLoop.handoff",
-        "title": "AI Markdown Review: Send to Agent"
-      },
-      {
-        "command": "aiMarkdownReviewLoop.resumeReview",
-        "title": "AI Markdown Review: Review Changes"
-      },
-      {
-        "command": "aiMarkdownReviewLoop.copyReviewFile",
+        "command": "aiMarkdownReviewLoop.copyReviewJson",
         "title": "AI Markdown Review: Copy Review JSON"
-      },
-      {
-        "command": "aiMarkdownReviewLoop.openReviewFile",
-        "title": "AI Markdown Review: Inspect Review JSON"
-      },
-      {
-        "command": "aiMarkdownReviewLoop.openReviewHistory",
-        "title": "AI Markdown Review: Previous Completed Requests"
-      },
-      {
-        "command": "aiMarkdownReviewLoop.cancelHandoff",
-        "title": "AI Markdown Review: Cancel Handoff"
-      },
-      {
-        "command": "aiMarkdownReviewLoop.restoreReviewBackup",
-        "title": "AI Markdown Review: Restore Review Backup"
       }
     ],
     "menus": {
@@ -126,14 +95,9 @@
           "group": "navigation@0"
         },
         {
-          "command": "aiMarkdownReviewLoop.handoff",
+          "command": "aiMarkdownReviewLoop.copyReviewJson",
           "when": "resourceExtname == .md || resourceLangId == markdown || activeEditor == aiMarkdownReviewLoop.reviewEditor",
           "group": "navigation@2"
-        },
-        {
-          "command": "aiMarkdownReviewLoop.resumeReview",
-          "when": "resourceExtname == .md || resourceLangId == markdown || activeEditor == aiMarkdownReviewLoop.reviewEditor",
-          "group": "navigation@3"
         }
       ],
       "editor/context": [
@@ -148,14 +112,9 @@
           "group": "navigation@1"
         },
         {
-          "command": "aiMarkdownReviewLoop.handoff",
+          "command": "aiMarkdownReviewLoop.copyReviewJson",
           "when": "resourceExtname == .md || resourceLangId == markdown || activeEditor == aiMarkdownReviewLoop.reviewEditor",
           "group": "navigation@2"
-        },
-        {
-          "command": "aiMarkdownReviewLoop.resumeReview",
-          "when": "resourceExtname == .md || resourceLangId == markdown || activeEditor == aiMarkdownReviewLoop.reviewEditor",
-          "group": "navigation@3"
         }
       ],
       "explorer/context": [
@@ -170,14 +129,9 @@
           "group": "navigation@1"
         },
         {
-          "command": "aiMarkdownReviewLoop.handoff",
+          "command": "aiMarkdownReviewLoop.copyReviewJson",
           "when": "resourceExtname == .md || resourceLangId == markdown || activeEditor == aiMarkdownReviewLoop.reviewEditor",
           "group": "navigation@2"
-        },
-        {
-          "command": "aiMarkdownReviewLoop.resumeReview",
-          "when": "resourceExtname == .md || resourceLangId == markdown || activeEditor == aiMarkdownReviewLoop.reviewEditor",
-          "group": "navigation@3"
         }
       ]
     },
@@ -216,7 +170,7 @@
             "colocated"
           ],
           "default": "colocated",
-          "description": "Review requests live beside each Markdown file in a hidden .<filename>.ai-review.json task file. Legacy reviews convert with a local backup on the first agent handoff."
+          "description": "Review requests live beside each Markdown file in a hidden .<filename>.ai-review.json task file. An external agent updates the Markdown and may remove the JSON when finished."
         }
       }
     }
