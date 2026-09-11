@@ -17,16 +17,16 @@ file-capable agent can open the sidecar directly. The extension does not create
 a second prompt, lock the editor, or coordinate an agent conversation.
 
 The agent must read the current Markdown, verify each quote and context, edit
-the source first, and record a one-line result. It must preserve every user
-comment and target; it must not add replies, close, archive, or reattach
-comments. Delete the JSON after recording outcomes.
+the source first, and optionally record a one-line result with its revision. It
+must preserve every user comment and target; it must not add replies, close, or
+archive comments. Delete the JSON after recording the outcome.
 
 ## Review the result
 
 The sidecar watcher refreshes the preview after external changes. If the agent
 deletes the JSON, the extension shows the last valid snapshot and a notice that
-the round is ready for review. Inspect the Markdown itself; `done` is only an
-agent report. Add a new comment to start another round and recreate the JSON.
+the round is ready for review. Inspect the Markdown itself; an agent result is
+only a report. Add a new comment to start another round and recreate the JSON.
 
 Missing or ambiguous targets are reported in the agent result instead of being
 silently moved. The user edits or deletes the comment and creates the next JSON
