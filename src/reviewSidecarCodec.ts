@@ -2,7 +2,6 @@ import type { ReviewDocument, ReviewReply, ReviewThread } from './types';
 import path from 'path';
 import { isDeepStrictEqual } from 'util';
 import {
-  getReviewTaskStatus,
   parseReviewTaskSidecar,
   REVIEW_TASK_GUIDANCE,
   REVIEW_TASK_SCHEMA_VERSION,
@@ -40,18 +39,18 @@ export function createEmptyReviewDocument(documentUri: string): ReviewDocument {
 export function createPortableReviewSidecarPayload(
   documentUri: string,
   reviewDocument: ReviewDocument,
-  resolvedReviewDocument: ReviewDocument,
+  _resolvedReviewDocument: ReviewDocument,
   _updatedAt: string
 ): PortableReviewSidecar {
-  const threads = [...reviewDocument.threads, ...resolvedReviewDocument.threads];
-  if (resolvedReviewDocument.threads.some(thread => thread.taskStatus === undefined)) {
-    throw new Error('Archive legacy closed history before converting this review file to schemaVersion 3.');
-  }
+  // Schema v3 is a current comment list. Completed agent outcomes stay on the
+  // item until the user edits or deletes the comment; they are never moved to a
+  // second history collection.
+  const threads = [...reviewDocument.threads];
   threads.sort((left, right) => (left.taskOrder ?? Number.MAX_SAFE_INTEGER) - (right.taskOrder ?? Number.MAX_SAFE_INTEGER));
   return parseReviewTaskSidecar({
     schemaVersion: REVIEW_SIDECAR_SCHEMA_VERSION,
     document: reviewTaskDocumentName(documentUri),
-    guidance: reviewDocument.guidance ?? resolvedReviewDocument.guidance ?? REVIEW_TASK_GUIDANCE,
+    guidance: reviewDocument.guidance ?? REVIEW_TASK_GUIDANCE,
     items: threads.map(createReviewTaskItem)
   });
 }
@@ -254,13 +253,12 @@ function taskSidecarToDocuments(documentUri: string, sidecar: ReviewTaskSidecar)
       ...(item.result !== undefined ? { taskResult: item.result } : {}),
       ...(item.resultFor !== undefined ? { taskResultFor: item.resultFor } : {})
     };
-    if (getReviewTaskStatus(thread) === 'done') thread.status = 'resolved';
     return thread;
   });
   const metadata = { documentUri, updatedAt, taskSchemaVersion: 3 as const, guidance: sidecar.guidance };
   return {
-    reviewDocument: { ...metadata, threads: threads.filter(thread => thread.status === 'open') },
-    resolvedReviewDocument: { ...metadata, threads: threads.filter(thread => thread.status !== 'open') }
+    reviewDocument: { ...metadata, threads },
+    resolvedReviewDocument: { ...metadata, threads: [] }
   };
 }
 

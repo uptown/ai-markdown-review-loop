@@ -17,7 +17,7 @@ async function setup(open: ReviewThread[] = [task()], closed: ReviewThread[] = [
   const review = (threads: ReviewThread[]) => ({ documentUri: h.document.uri.toString(), threads, updatedAt: '', taskSchemaVersion: 3 as const });
   h.store.load = async () => review(open);
   h.store.loadResolved = async () => review(closed);
-  const render = () => h.provider.renderHtml(h.webview, h.document, review(open), review(closed));
+  const render = () => h.provider.renderHtml(h.webview, h.document, review(open));
   return { h, render, open, closed };
 }
 
@@ -73,7 +73,9 @@ describe('review JSON only webview', () => {
     const dom = runWebview(render());
     assert.match(dom.document.querySelector('.review-file-status').textContent, /removed by the external agent/);
     assert.equal(dom.document.querySelector('[data-copy-review-json]').disabled, true);
-    assert.match(dom.document.getElementById('threads').textContent, /Review the revised document again/);
+    assert.equal(dom.document.getElementById('threads').textContent, 'Select text in the document to add a comment.');
+    assert.equal(dom.document.querySelector('.history-heading'), undefined);
+    assert.equal(dom.document.querySelector('[data-reanchor-thread]'), undefined);
   });
 
   it('does not render retired conversation, patch, or prompt controls', async () => {

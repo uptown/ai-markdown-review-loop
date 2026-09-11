@@ -1,6 +1,5 @@
 import * as vscode from 'vscode';
 import path from 'path';
-import { registerPromptDocumentProvider } from './promptDocuments';
 import { ReviewEditorProvider, reviewEditorViewType } from './reviewEditorProvider';
 import { ReviewStore } from './reviewStore';
 
@@ -10,7 +9,6 @@ export function activate(context: vscode.ExtensionContext): void {
 
   context.subscriptions.push(
     provider,
-    registerPromptDocumentProvider(),
     vscode.window.registerCustomEditorProvider(reviewEditorViewType, provider, {
       webviewOptions: {
         retainContextWhenHidden: true

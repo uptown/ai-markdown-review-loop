@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" width="960" height="540" viewBox="0 0 960 540" role="img" aria-labelledby="title desc">
   <title id="title">Review the revised document</title>
-  <desc id="desc">Illustrated workflow, step 4 of 4: Inspect the changes. Reopen work or add comments for the next round.</desc>
+  <desc id="desc">Illustrated workflow, step 4 of 4: Inspect the changes, then edit or add comments for the next round.</desc>
   <rect width="960" height="540" fill="#0b1120"/>
   <g font-family="Inter, Arial, sans-serif">
     <text x="40" y="44" fill="#c4b5fd" font-size="14" font-weight="700" letter-spacing="1.5">AI MARKDOWN REVIEW LOOP</text>
@@ -21,10 +21,9 @@
     <text x="526" y="241" fill="#e2e8f0" font-size="18">Specify the retry limit and the</text>
     <text x="526" y="269" fill="#e2e8f0" font-size="18">message after the final failure.</text>
     <text x="526" y="315" fill="#94a3b8" font-size="15">rv_retry · revision 1</text>
-    <rect x="526" y="340" width="69" height="29" rx="14" fill="#3f6212"/>
-    <text x="542" y="360" fill="#ecfccb" font-size="15" font-weight="700">Done</text>
+    <text x="526" y="360" fill="#cbd5e1" font-size="15" font-weight="700">Agent result recorded</text>
     <text x="526" y="404" fill="#cbd5e1" font-size="16">Defined three retries and a failure action.</text>
-    <text x="40" y="480" fill="#e2e8f0" font-size="20">Inspect the changes. Reopen work or add comments for the next round.</text>
+    <text x="40" y="480" fill="#e2e8f0" font-size="20">Inspect the changes, then edit or add comments for the next round.</text>
     <text x="40" y="515" fill="#8292a8" font-size="13">Illustrated workflow · use an external agent with workspace file access</text>
   </g>
 </svg>

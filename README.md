@@ -13,8 +13,9 @@ provider and it does not host an agent conversation.
 3. The extension writes `.<filename>.ai-review.json` beside the Markdown file.
 4. Use **AI Markdown Review: Copy Review JSON** when the agent needs pasted
    JSON. A file based agent can read the sidecar directly.
-5. The agent reads the guidance, edits the Markdown, records `done` or
-   `blocked` for each item, then deletes the JSON when the round is complete.
+5. The agent reads the guidance, reviews every current comment, edits the
+   Markdown, records a short result, then deletes the JSON when the round is
+   complete.
 6. Return to the preview and inspect the revised Markdown. Add another comment
    for the next round.
 
@@ -33,14 +34,14 @@ docs/.spec.md.ai-review.json
 ```
 
 Each item has a stable `rv_*` ID, a revision, a quoted target with line hints,
-the comment, and a status. The agent may write a one-line `result` and matching
-`resultFor` revision.
+the user comment, and an agent outcome. The status and result are agent report
+metadata; the user remains the only owner of comments.
 
 ```json
 {
   "schemaVersion": 3,
   "document": "spec.md",
-  "guidance": "Resolve the Markdown relative to this JSON. Handle pending items, verify quote and context, edit the document first, then set done or blocked with one short result. Preserve IDs and revisions. Delete this JSON after recording outcomes.",
+  "guidance": "Resolve the Markdown relative to this JSON. Review every user comment against the current document. Do not edit, delete, close, archive, reply to, or reattach comments. Verify quote and context, edit Markdown first, record one short result, then delete this JSON.",
   "items": [
     {
       "id": "rv_123",
@@ -53,10 +54,9 @@ the comment, and a status. The agent may write a one-line `result` and matching
 }
 ```
 
-`done` means the agent reported that revision as handled. Always inspect the
-actual Markdown. Use `blocked` when the target is missing or ambiguous. Editing
-a comment or reattaching its target creates a new revision and clears the old
-result.
+The agent result is a report, not proof that the Markdown is correct. Always
+inspect the actual Markdown. The user edits or deletes comments and starts the
+next round with a new JSON file.
 
 ## Commands and shortcuts
 
