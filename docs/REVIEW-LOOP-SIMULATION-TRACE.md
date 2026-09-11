@@ -1,3 +1,7 @@
+> **Legacy v0.0.21 record.** This document describes the retired discussion and
+> patch-approval workflow. It is not current agent guidance or evidence of a v3
+> Extension Host or external-agent test. See [the current workflow](./AI-COLLABORATION-LOOP.md).
+
 # Review Loop Simulation Trace
 
 This trace records the dogfood session behind `runReviewLoopSimulations()`. It is

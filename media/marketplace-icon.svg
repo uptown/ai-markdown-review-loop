@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" role="img" aria-labelledby="title desc">
   <title id="title">AI Markdown Review Loop icon</title>
-  <desc id="desc">A Markdown document with anchored AI review comments.</desc>
+  <desc id="desc">A Markdown document with a review comment.</desc>
   <defs>
     <linearGradient id="bg" x1="64" y1="48" x2="448" y2="464" gradientUnits="userSpaceOnUse">
       <stop offset="0" stop-color="#111827"/>

@@ -5,8 +5,7 @@ import {
   isColocatedReviewSidecarFileName
 } from '../src/reviewSidecarPaths';
 import {
-  REVIEW_SIDECAR_SCHEMA_VERSION,
-  createPortableReviewSidecarPayload,
+  createLegacyReviewSidecarPayload,
   parseLegacyReviewDocument,
   parsePortableReviewSidecar
 } from '../src/reviewSidecarCodec';
@@ -24,8 +23,8 @@ describe('review sidecar storage', () => {
     assert.equal(isColocatedReviewSidecarFileName('spec.md.ai-review.json'), false);
   });
 
-  it('serializes open and closed threads into one portable sidecar file', () => {
-    const payload = createPortableReviewSidecarPayload(
+  it('keeps explicit legacy writes in their original open/closed format before handoff', () => {
+    const payload = createLegacyReviewSidecarPayload(
       documentUri,
       {
         documentUri,
@@ -40,7 +39,7 @@ describe('review sidecar storage', () => {
       now
     );
 
-    assert.equal(payload.schemaVersion, REVIEW_SIDECAR_SCHEMA_VERSION);
+    assert.equal(payload.schemaVersion, 2);
     assert.deepEqual(payload.openThreads.map(item => item.id), ['rv_open']);
     assert.deepEqual(payload.closedThreads.map(item => item.id), ['rv_closed']);
 
@@ -68,7 +67,7 @@ describe('review sidecar storage', () => {
   });
 
   it('keeps rich closed-thread anchor metadata instead of requiring proposed-thread shape', () => {
-    const payload = createPortableReviewSidecarPayload(
+    const payload = createLegacyReviewSidecarPayload(
       documentUri,
       {
         documentUri,

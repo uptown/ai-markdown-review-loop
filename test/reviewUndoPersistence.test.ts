@@ -6,7 +6,7 @@ import type { ReviewReply } from '../src/types';
 const editReply: ReviewReply = { role: 'assistant', text: 'Applied the Markdown edit.', createdAt: '2026-09-09T00:01:00Z' };
 
 async function editedDocument(close = false) {
-  const harness = createReviewStorageHarness();
+  const harness = createReviewStorageHarness('/workspace', true);
   const { store, undo, uri } = harness;
   await store.addThread(uri, storageThread('rv_original'));
   await store.addThread(uri, storageThread('rv_followup'));
@@ -110,4 +110,26 @@ describe('review undo persistence', () => {
     assert.equal(restored.anchor.text, 'Requirement old');
     assert.deepEqual(restored.thread, []);
   });
+  it('keeps v3 revisions increasing through repeated Undo and Redo while retaining later request edits', async () => {
+    const h = createReviewStorageHarness();
+    await h.store.addThread(h.uri, storageThread('rv_original'));
+    const before = await h.undo.capture(h.uri);
+    await h.store.updateThread(h.uri, 'rv_original', { anchor: { text: 'Requirement new', lineStart: 1 } });
+    const after = await h.undo.capture(h.uri);
+    h.undo.register(h.uri, 'Requirement old', 'Requirement new', before, after);
+    await h.store.updateComment(h.uri, 'rv_original', 'Later user clarification.', 2);
+    let revision = 3;
+    for (let cycle = 0; cycle < 3; cycle++) {
+      for (const [text, reason] of [['Requirement old', 'undo'], ['Requirement new', 'redo']] as const) {
+        assert.equal(await h.undo.handleTextDocumentChange(h.change(text, reason)), true);
+        const thread = (await h.store.load(h.uri)).threads[0];
+        assert.equal(thread.anchor.text, text);
+        assert.equal(thread.comment, 'Later user clarification.');
+        assert.equal(thread.taskRevision, ++revision);
+        assert.equal(thread.taskStatus, 'pending');
+        assert.equal(thread.taskResultFor, undefined);
+      }
+    }
+  });
+
 });

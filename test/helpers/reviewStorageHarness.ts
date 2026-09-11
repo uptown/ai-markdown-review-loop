@@ -20,14 +20,17 @@ class TestFileSystemError extends Error {
   constructor() { super('FileNotFound'); }
 }
 
-export function createReviewStorageHarness(root = '/workspace') {
+export function createReviewStorageHarness(root = '/workspace', legacy = false) {
   const files = new Map<string, Uint8Array>();
   let failWrites = 0;
+  let failStateWrites = 0;
+  const memento = new Map<string, unknown>();
   const vscode = {
     Uri: TestUri,
     FileSystemError: TestFileSystemError,
     TextDocumentChangeReason: { Undo: 1, Redo: 2 },
     workspace: {
+      textDocuments: [] as Array<{uri: TestUri; isDirty: boolean}>,
       getWorkspaceFolder: () => ({ uri: TestUri.file(root) }),
       asRelativePath: (uri: TestUri) => path.relative(root, uri.path),
       fs: {
@@ -40,6 +43,11 @@ export function createReviewStorageHarness(root = '/workspace') {
         writeFile: async (uri: TestUri, bytes: Uint8Array): Promise<void> => {
           if (failWrites > 0) { failWrites--; throw new Error('Injected write failure'); }
           files.set(uri.path, Uint8Array.from(bytes));
+        },
+        rename: async (from: TestUri, to: TestUri): Promise<void> => {
+          const bytes = files.get(from.path);
+          if (!bytes) throw new TestFileSystemError();
+          files.set(to.path, bytes); files.delete(from.path);
         },
         delete: async (uri: TestUri): Promise<void> => {
           if (!files.delete(uri.path)) { throw new TestFileSystemError(); }
@@ -63,13 +71,22 @@ export function createReviewStorageHarness(root = '/workspace') {
   } finally {
     loader._load = originalLoad;
   }
-  const store = new storeModule.ReviewStore({ globalStorageUri: TestUri.file('/global') } as unknown as Vscode.ExtensionContext);
+  const context = { globalStorageUri: TestUri.file(path.join(root, '.test-private')), workspaceState: {
+    get: (key: string) => memento.get(key), update: async (key: string, value: unknown) => {
+      if (failStateWrites > 0) { failStateWrites--; throw new Error('Injected state write failure'); }
+      memento.set(key, structuredClone(value));
+    }
+  }} as unknown as Vscode.ExtensionContext;
+  const store = new storeModule.ReviewStore(context);
+  if (legacy) files.set(path.join(root, '.spec.md.ai-review.json'), new TextEncoder().encode(JSON.stringify({schemaVersion: 2, documentUri: 'file://' + path.join(root, 'spec.md'), openThreads: [], closedThreads: [], updatedAt: '2026-09-09T00:00:00Z'})));
   const undo = new undoModule.ReviewUndoController(store);
   const uri = TestUri.file(path.join(root, 'spec.md')) as unknown as Vscode.Uri;
   return {
-    files, vscode, store, undo, uri,
+    files, vscode, store, undo, uri, context, memento,
+    restartStore: () => new storeModule.ReviewStore(context),
     uriFor: (value: string) => TestUri.file(value) as unknown as Vscode.Uri,
     failNextWrites: (count = 1) => { failWrites = count; },
+    failNextStateWrites: (count = 1) => { failStateWrites = count; },
     ReviewStorageConflictError: storeModule.ReviewStorageConflictError,
     change: (text: string, reason: 'undo' | 'redo') => ({
       document: { uri, getText: () => text },

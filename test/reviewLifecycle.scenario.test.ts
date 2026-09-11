@@ -1,6 +1,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { renderFeedbackExport } from '../src/exportFeedback';
+import { REVIEW_TASK_GUIDANCE } from '../src/reviewTaskProtocol';
 import {
   applyReviewAwareEditToMarkdown,
   buildReviewAwareThreadUpdates,
@@ -9,7 +10,7 @@ import {
 import { selectSuggestedPatchReplacement } from '../src/suggestedPatches';
 import type { ReviewThread } from '../src/types';
 
-describe('review lifecycle scenario', () => {
+describe('legacy source-edit regression and v3 handoff', () => {
   it('applies a reliable suggested edit without adding inline review metadata', () => {
     const markdown = [
       'Requirement old',
@@ -30,7 +31,7 @@ describe('review lifecycle scenario', () => {
     const followupThread = thread('rv_followup', {
       anchorText: 'Follow up text',
       lineStart: 3,
-      comment: 'Keep discussing this point.'
+      comment: 'Clarify the follow-up action.'
     });
 
     const patchSelection = selectSuggestedPatchReplacement(
@@ -70,13 +71,21 @@ describe('review lifecycle scenario', () => {
     assert.match(threadUpdates[0].update.thread?.[0].text ?? '', /applied the suggested edit/);
 
     const exportText = renderFeedbackExport({
-      documentUri: 'file:///workspace/spec.md',
-      updatedAt: '2026-05-22T00:00:00.000Z',
-      threads: [followupThread]
+      schemaVersion: 3,
+      document: 'spec.md',
+      guidance: REVIEW_TASK_GUIDANCE,
+      items: [{
+        id: followupThread.id, rev: 1,
+        target: { quote: followupThread.anchor.text, line: followupThread.anchor.lineStart },
+        comment: followupThread.comment, status: 'pending'
+      }]
     });
 
-    assert.match(exportText, /Open feedback: 1/);
-    assert.match(exportText, /## rv_followup/);
+    const handoff = JSON.parse(exportText);
+    assert.equal(handoff.schemaVersion, 3);
+    assert.equal(handoff.items.length, 1);
+    assert.equal(handoff.items[0].id, 'rv_followup');
+    assert.equal(handoff.items[0].status, 'pending');
     assert.doesNotMatch(exportText, /rv_patch/);
     assert.doesNotMatch(exportText, /rv_stale/);
   });

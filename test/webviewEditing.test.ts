@@ -59,7 +59,7 @@ describe('rendered edit event paths', () => {
     // Badges are UI and are not part of the original selected text.
     Array.from(marker.querySelectorAll('button')).forEach((element: any) => element.remove());
     assert.equal(marker.textContent, 'Result');
-    assert.equal(dom.messages.find((value: any) => value.type === 'anchorLocated').documentVersion, 1);
+    assert.equal(dom.messages.some((value: any) => value.type === 'anchorLocated'), false);
   });
 
   it('edits a quoted table through its owning raw block without dropping the quote (R09)', async () => {

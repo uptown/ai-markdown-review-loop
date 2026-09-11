@@ -1,8 +1,8 @@
 {
   "name": "ai-markdown-review-loop",
   "displayName": "AI Markdown Review Loop",
-  "description": "Turn Markdown specs into review threads: comment on rendered text, images, tables, and diagrams while preserving AI/human feedback.",
-  "version": "0.0.21",
+  "description": "Review Markdown with comments, hand compact task files to your AI agent, then review the changes.",
+  "version": "0.1.0",
   "publisher": "uptown",
   "license": "MIT",
   "repository": {
@@ -45,12 +45,15 @@
   ],
   "activationEvents": [
     "onCustomEditor:aiMarkdownReviewLoop.reviewEditor",
-    "onCommand:aiMarkdownReviewLoop.openReviewPreview",
     "onCommand:aiMarkdownReviewLoop.openReviewBeside",
-    "onCommand:aiMarkdownReviewLoop.reviewDocument",
-    "onCommand:aiMarkdownReviewLoop.exportFeedback",
-    "onCommand:aiMarkdownReviewLoop.openContextBootstrapPrompt",
-    "onCommand:aiMarkdownReviewLoop.openFeedbackLoopPrompt"
+    "onCommand:aiMarkdownReviewLoop.openReviewPreview",
+    "onCommand:aiMarkdownReviewLoop.handoff",
+    "onCommand:aiMarkdownReviewLoop.resumeReview",
+    "onCommand:aiMarkdownReviewLoop.copyReviewFile",
+    "onCommand:aiMarkdownReviewLoop.openReviewFile",
+    "onCommand:aiMarkdownReviewLoop.openReviewHistory",
+    "onCommand:aiMarkdownReviewLoop.cancelHandoff",
+    "onCommand:aiMarkdownReviewLoop.restoreReviewBackup"
   ],
   "main": "./out/extension.js",
   "contributes": {
@@ -72,20 +75,32 @@
         }
       },
       {
-        "command": "aiMarkdownReviewLoop.reviewDocument",
-        "title": "AI Markdown Review: Run Local Checks"
+        "command": "aiMarkdownReviewLoop.handoff",
+        "title": "AI Markdown Review: Send to Agent"
       },
       {
-        "command": "aiMarkdownReviewLoop.exportFeedback",
-        "title": "AI Markdown Review: Export Feedback for Agent"
+        "command": "aiMarkdownReviewLoop.resumeReview",
+        "title": "AI Markdown Review: Review Changes"
       },
       {
-        "command": "aiMarkdownReviewLoop.openContextBootstrapPrompt",
-        "title": "AI Markdown Review: Open AI Context Bootstrap Prompt"
+        "command": "aiMarkdownReviewLoop.copyReviewFile",
+        "title": "AI Markdown Review: Copy Review JSON"
       },
       {
-        "command": "aiMarkdownReviewLoop.openFeedbackLoopPrompt",
-        "title": "AI Markdown Review: Open AI Feedback Loop Prompt"
+        "command": "aiMarkdownReviewLoop.openReviewFile",
+        "title": "AI Markdown Review: Inspect Review JSON"
+      },
+      {
+        "command": "aiMarkdownReviewLoop.openReviewHistory",
+        "title": "AI Markdown Review: Previous Completed Requests"
+      },
+      {
+        "command": "aiMarkdownReviewLoop.cancelHandoff",
+        "title": "AI Markdown Review: Cancel Handoff"
+      },
+      {
+        "command": "aiMarkdownReviewLoop.restoreReviewBackup",
+        "title": "AI Markdown Review: Restore Review Backup"
       }
     ],
     "menus": {
@@ -111,24 +126,14 @@
           "group": "navigation@0"
         },
         {
-          "command": "aiMarkdownReviewLoop.reviewDocument",
-          "when": "resourceExtname == .md || resourceLangId == markdown || activeEditor == aiMarkdownReviewLoop.reviewEditor",
-          "group": "navigation@1"
-        },
-        {
-          "command": "aiMarkdownReviewLoop.exportFeedback",
+          "command": "aiMarkdownReviewLoop.handoff",
           "when": "resourceExtname == .md || resourceLangId == markdown || activeEditor == aiMarkdownReviewLoop.reviewEditor",
           "group": "navigation@2"
         },
         {
-          "command": "aiMarkdownReviewLoop.openContextBootstrapPrompt",
+          "command": "aiMarkdownReviewLoop.resumeReview",
           "when": "resourceExtname == .md || resourceLangId == markdown || activeEditor == aiMarkdownReviewLoop.reviewEditor",
           "group": "navigation@3"
-        },
-        {
-          "command": "aiMarkdownReviewLoop.openFeedbackLoopPrompt",
-          "when": "resourceExtname == .md || resourceLangId == markdown || activeEditor == aiMarkdownReviewLoop.reviewEditor",
-          "group": "navigation@4"
         }
       ],
       "editor/context": [
@@ -143,24 +148,14 @@
           "group": "navigation@1"
         },
         {
-          "command": "aiMarkdownReviewLoop.reviewDocument",
-          "when": "resourceExtname == .md || resourceLangId == markdown",
+          "command": "aiMarkdownReviewLoop.handoff",
+          "when": "resourceExtname == .md || resourceLangId == markdown || activeEditor == aiMarkdownReviewLoop.reviewEditor",
           "group": "navigation@2"
         },
         {
-          "command": "aiMarkdownReviewLoop.exportFeedback",
-          "when": "resourceExtname == .md || resourceLangId == markdown",
+          "command": "aiMarkdownReviewLoop.resumeReview",
+          "when": "resourceExtname == .md || resourceLangId == markdown || activeEditor == aiMarkdownReviewLoop.reviewEditor",
           "group": "navigation@3"
-        },
-        {
-          "command": "aiMarkdownReviewLoop.openContextBootstrapPrompt",
-          "when": "resourceExtname == .md || resourceLangId == markdown",
-          "group": "navigation@4"
-        },
-        {
-          "command": "aiMarkdownReviewLoop.openFeedbackLoopPrompt",
-          "when": "resourceExtname == .md || resourceLangId == markdown",
-          "group": "navigation@5"
         }
       ],
       "explorer/context": [
@@ -175,24 +170,14 @@
           "group": "navigation@1"
         },
         {
-          "command": "aiMarkdownReviewLoop.reviewDocument",
-          "when": "resourceExtname == .md",
+          "command": "aiMarkdownReviewLoop.handoff",
+          "when": "resourceExtname == .md || resourceLangId == markdown || activeEditor == aiMarkdownReviewLoop.reviewEditor",
           "group": "navigation@2"
         },
         {
-          "command": "aiMarkdownReviewLoop.exportFeedback",
-          "when": "resourceExtname == .md",
+          "command": "aiMarkdownReviewLoop.resumeReview",
+          "when": "resourceExtname == .md || resourceLangId == markdown || activeEditor == aiMarkdownReviewLoop.reviewEditor",
           "group": "navigation@3"
-        },
-        {
-          "command": "aiMarkdownReviewLoop.openContextBootstrapPrompt",
-          "when": "resourceExtname == .md",
-          "group": "navigation@4"
-        },
-        {
-          "command": "aiMarkdownReviewLoop.openFeedbackLoopPrompt",
-          "when": "resourceExtname == .md",
-          "group": "navigation@5"
         }
       ]
     },
@@ -231,7 +216,7 @@
             "colocated"
           ],
           "default": "colocated",
-          "description": "Where review thread data is stored. Review state is stored beside each Markdown file in a hidden .<filename>.ai-review.json sidecar. Legacy workspace .ai-markdown-review sidecars are still read for migration."
+          "description": "Review requests live beside each Markdown file in a hidden .<filename>.ai-review.json task file. Legacy reviews convert with a local backup on the first agent handoff."
         }
       }
     }

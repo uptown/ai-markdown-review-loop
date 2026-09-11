@@ -55,11 +55,13 @@ export function applyReviewThreadUpdatesToDocuments(
 
   return {
     reviewDocument: {
+      ...reviewDocument,
       documentUri: reviewDocument.documentUri,
       threads: activeThreads,
       updatedAt: now
     },
     resolvedReviewDocument: {
+      ...resolvedReviewDocument,
       documentUri: resolvedReviewDocument.documentUri,
       threads: resolvedThreads,
       updatedAt: closedThreads.length > 0 ? now : resolvedReviewDocument.updatedAt

@@ -6,6 +6,14 @@ import type { ReviewDocument, ReviewThread } from '../src/types';
 const now = '2026-05-23T00:00:00.000Z';
 
 describe('review document updates', () => {
+  it('preserves schema and custom guidance through manual review-aware edits', () => {
+    const open = { ...documentWithThreads([thread('rv_current', 'open')]), taskSchemaVersion: 3 as const, guidance: 'Keep customer terminology.' };
+    const closed = { ...documentWithThreads([]), taskSchemaVersion: 3 as const, guidance: open.guidance };
+    const result = applyReviewThreadUpdatesToDocuments(open, closed, [{threadId: 'rv_current', update: {anchor: {text: 'Updated target'}}}], now);
+    assert.equal(result.reviewDocument.taskSchemaVersion, 3); assert.equal(result.reviewDocument.guidance, open.guidance);
+    assert.equal(result.resolvedReviewDocument.taskSchemaVersion, 3); assert.equal(result.resolvedReviewDocument.guidance, open.guidance);
+  });
+
   it('moves closed thread updates to resolved review data for undoable review transactions', () => {
     const reviewDocument = documentWithThreads([
       thread('rv_patch', 'open'),

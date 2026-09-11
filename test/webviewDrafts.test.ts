@@ -93,7 +93,7 @@ describe('draft persistence and save confirmation', () => {
     assert.deepEqual(JSON.parse(JSON.stringify(message.tableSourceMapping.rowSources)), [1]);
   });
 
-  it('restores a selected comment draft and preserves unrelated reply drafts when saving it', async () => {
+  it('restores a selected comment draft and preserves legacy reply drafts for copy recovery', async () => {
     const h = await createProviderHarness('First.');
     const dom = runWebview(h.render());
     dom.evaluate(`activeSelectionText = 'First.'; activeSelectionRect = {left:0,right:100,top:0,bottom:40}; activeSourceLine = 1; openComposer();`);
@@ -107,7 +107,7 @@ describe('draft persistence and save confirmation', () => {
     next.receive({type:'reviewMutationResult', requestId:message.requestId, ok:true});
     assert.equal(next.savedState.drafts.comment, undefined);
     assert.equal(next.savedState.drafts['reply:rv_later'].text, 'Keep this independent reply.');
-    assert.match(next.document.querySelector('.draft-recovery').textContent, /no longer open/);
+    assert.match(next.document.querySelector('.draft-recovery').textContent, /이전 답글 초안/);
   });
 
   it('uses render-carried confirmations when an earlier webview missed the save response', async () => {
@@ -162,27 +162,17 @@ describe('draft persistence and save confirmation', () => {
     assert.equal(next.document.getElementById('block-editor').style.display, '');
   });
 
-  it('shares pending and failed reply state with an overlay opened after submission', async () => {
+  it('keeps legacy reply drafts available for copy without recreating a conversation UI', async () => {
     const h = await createProviderHarness('Shared target.');
-    const thread = {id:'rv_shared', documentUri:h.document.uri.toString(), anchor:{text:'Shared target.',lineStart:1,lineEnd:1}, type:'note',source:'human',status:'open',severity:'medium',comment:'Clarify the target.',thread:[],createdAt:'',updatedAt:''};
-    const review = {documentUri:h.document.uri.toString(),threads:[thread],updatedAt:''};
-    const dom = runWebview(h.provider.renderHtml(h.webview,h.document,review,{...review,threads:[]}));
-    const form = dom.document.querySelector('.thread [data-reply-form]');
-    form.querySelector('textarea').value = 'A useful response.';
-    dom.dispatch(form.querySelector('textarea'), 'input');
-    dom.dispatch(form, 'submit');
-    dom.dispatch(dom.document.querySelector('.review-badge'), 'click');
-    const overlayForm = dom.document.querySelector('#comment-overlay [data-reply-form]');
-    assert.ok(overlayForm);
-    assert.equal(overlayForm.querySelector('textarea').disabled, true);
-    assert.equal(overlayForm.querySelector('button').disabled, true);
-    const message = dom.messages.find(value => value.type === 'addReply');
-    dom.receive({type:'reviewMutationResult',requestId:message.requestId,ok:false,error:'Cannot save yet.'});
-    for (const candidate of [form, overlayForm]) {
-      assert.equal(candidate.querySelector('textarea').disabled, false);
-      assert.equal(candidate.querySelector('button').disabled, false);
-      assert.equal(candidate.querySelector('textarea').value, 'A useful response.');
-    }
+    const initial = runWebview(h.render());
+    const saved = initial.savedState;
+    saved.drafts['reply:rv_previous'] = {kind:'reply',threadId:'rv_previous',text:'Keep the earlier decision.'};
+    const dom = runWebview(h.render(), saved);
+    assert.equal(dom.document.querySelector('[data-reply-form]'), undefined);
+    assert.match(dom.document.querySelector('.draft-recovery').textContent, /이전 답글 초안/);
+    dom.dispatch(dom.document.querySelector('.draft-recovery button'), 'click');
+    assert.equal(dom.messages.find(value => value.type === 'copyDraft').text, 'Keep the earlier decision.');
+    assert.equal(dom.savedState.drafts['reply:rv_previous'].text, 'Keep the earlier decision.');
   });
 
   it('does not replace a pending table edit with another table target', async () => {

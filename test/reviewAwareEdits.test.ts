@@ -14,6 +14,15 @@ import type { ReviewThread } from '../src/types';
 const now = '2026-05-22T10:00:00.000Z';
 
 describe('review-aware edits', () => {
+  it('invalidates an AI handling report when a manual edit changes a v3 target', () => {
+    const request = thread('rv_v3', { anchorText: 'Pending', lineStart: 1 });
+    Object.assign(request, { taskRevision: 2, taskStatus: 'blocked', taskResult: 'Needs clarification.', taskResultFor: 2 });
+    const plan = createLineRangeEditPlan('Pending', { lineStart: 1, lineEnd: 1, replacement: 'Clarified', actor: 'user', intent: 'manual_block_edit' });
+    const update = buildReviewAwareThreadUpdates('Pending', [request], plan, now)[0].update;
+    assert.equal(update.taskRevision, 3); assert.equal(update.taskStatus, 'pending');
+    assert.equal(update.taskResult, undefined); assert.equal(update.taskResultFor, undefined); assert.deepEqual(update.thread, []);
+  });
+
   function repeatedAnchorUpdate(before: string, replacement: string, reviewThread: ReviewThread) {
     const plan = createLineRangeEditPlan(before, {
       lineStart: 1,

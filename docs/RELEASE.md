@@ -1,77 +1,84 @@
 # Release Checklist
 
-This file is for maintainers preparing a Visual Studio Marketplace release.
+Use this checklist for the v3 task-file workflow introduced in version 0.1.
+Record the exact source revision and distinguish automated checks, actual
+Extension Host tests, external-agent runs, and public publication evidence.
 
 ## Preconditions
 
-- Confirm the `uptown` publisher exists in the Visual Studio Marketplace.
-- Confirm `vsce login uptown` succeeds with a Marketplace-ready token.
-- Keep `.agent/`, `.ai-markdown-review/`, `docs/PRD.md`, and
-  `docs/AI-CONTEXT-BRIEF.md` local-only.
-- Use Node 20 for packaging.
+- Review the final diff and confirm version, changelog, README, UI labels, schema,
+  and Marketplace artwork describe the same current workflow.
+- Use the Node version in `.nvmrc` (Node 20). Install existing dependencies with
+  `npm ci`; asset generation also needs ImageMagick and FFmpeg.
+- Keep `.agent/`, `.ai-markdown-review/`, all local `*.ai-review.json` files,
+  `docs/PRD.md`, and context briefs out of Git and the VSIX.
+- Confirm the `uptown` publisher and the authorized publication channel without
+  printing authentication material.
 
-## Version And Changelog
+## Version And Assets
 
-Before every versioned change, attach a release manager review agent or run an
-equivalent release-manager pass. That pass owns version metadata, changelog
-accuracy, Marketplace-facing README/package copy, notice coverage, package
-hygiene, and whether visual assets need regeneration.
+1. Update package version and lockfile together. Move user-facing changelog
+   entries into the dated release section.
+2. Back up current media before regeneration: `npm run assets:marketplace`.
+3. Inspect the icon, hero, all walkthrough frames, GIF, and MP4. Artwork is an
+   illustrated workflow, so do not call it a live screenshot or agent test.
+4. Ensure the old reply, AI attribution, local-check, and patch-approval flows
+   are absent from current product copy and artwork.
 
-1. Move user-facing entries from `Unreleased` into a dated version section.
-2. Run `npm version <version> --no-git-tag-version`.
-3. Do not let `vsce publish` create a version commit/tag automatically unless
-   that is the intended release process.
+Required public assets are `media/marketplace-icon.png`,
+`media/marketplace-hero.png`, `media/review-loop-demo.gif`, and
+`media/review-loop-demo.mp4`. They are generated from repository-owned SVG code.
 
-## Assets
-
-Regenerate Marketplace visual assets before release:
-
-```bash
-npm run assets:marketplace
-```
-
-Required public assets:
-
-- `media/marketplace-icon.png`
-- `media/marketplace-hero.png`
-- `media/review-loop-demo.gif`
-- `media/review-loop-demo.mp4`
-
-The assets are generated from repo-owned SVG source and do not introduce
-external image licensing obligations.
-
-## Verification
-
-Run the full release gate:
+## Automated Gates
 
 ```bash
 npm run release:check
+git diff --check
 ```
 
-This runs Marketplace asset generation, typecheck/tests, third-party notice
-coverage, VSIX packaging, and VSIX hygiene checks.
+The release script regenerates media, typechecks, runs tests, checks third-party
+notices, packages the VSIX, and checks its contents. Review the test names as well
+as the totals: retained legacy fixtures do not prove the v3 round trip.
 
-For manual smoke testing:
+Confirm the packaged version and required files, then record the VSIX size and
+SHA-256. No local plans, sidecars, source/test trees, dependencies, credentials,
+or source maps should ship. Do not upload an older ignored VSIX by mistake.
+
+## Actual Extension Host And Agent Smoke
+
+Install the generated artifact in a test environment, for example:
 
 ```bash
 code --install-extension ai-markdown-review-loop-<version>.vsix --force
 ```
 
-Then verify:
+1. Open a Markdown file beside its preview and add comments on text, a table,
+   image, code, and Mermaid content. Navigate and reattach a missing target.
+2. AI에 전달; verify saved v3 JSON, a short copied request, write pause, and
+   local draft preservation. Reload VS Code and confirm the pause survives.
+3. Use a file-capable external agent to edit Markdown, mark one item done, and
+   block another. Confirm it stops writing before 수정본 검수 resumes review.
+4. Inspect the revised source, clarify or reopen work, and send a second round.
+   Confirm completed work remains in local history and unfinished work remains
+   in active JSON. Reopen an archived request.
+5. Exercise failed saves/clipboard writes, interrupted JSON writes, deleted or
+   malformed review files, stale result revisions, missing/changed IDs, dirty
+   source and JSON editors, and an interrupted preparing state.
+6. Check v2 conversion backup, legacy-history inspection, source rename/move,
+   undo around the handoff boundary, keyboard navigation, and draft recovery.
+7. Exercise a direct-path handoff separately and document its lack of extension
+   pause/checkpoint protection. Never claim multiple-writer safety from this test.
 
-1. Open a Markdown file with `AI Markdown Review: Open Review Beside`.
-2. Drag-select rendered text and save feedback.
-3. Reply to the thread and confirm the overlay stays focused.
-4. Apply a safe suggested patch from a thread.
-5. Edit a rendered Markdown block, table, and Mermaid diagram.
-6. Export feedback and open the bootstrap/feedback-loop prompts.
-7. Undo and redo a review-aware edit and confirm sidecar state follows.
+Use [the workflow scenarios](./AI-COLLABORATION-LOOP.md) for expected outcomes.
+Passing pure tests or a mocked DOM does not replace these host/agent checks.
+If a check was not run, record it as untested rather than counting it as passed.
 
-## Publish
+## Publication Evidence
 
-```bash
-npx vsce publish
-```
+Commit/tag/push and publication are separate authorized actions. Run CI on the
+exact release commit. Keep its tag, CI result, artifact digest, and GitHub release
+aligned before publishing the VSIX through the authorized channel.
 
-If publishing manually, upload the VSIX generated by `npm run package` in the
-Visual Studio Marketplace publisher management page.
+Verify the public Marketplace listing independently. An upload acknowledgement,
+CLI timeout, or management-page “Verifying” state does not establish public
+availability. Report GitHub publication and Marketplace visibility separately.

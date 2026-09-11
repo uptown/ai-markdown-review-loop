@@ -14,6 +14,7 @@ export interface ReviewSidecarSnapshot {
 }
 
 interface ReviewUndoEntry {
+  epoch: number;
   protection: ReviewUndoProtection;
   beforeText: string;
   afterText: string;
@@ -28,6 +29,11 @@ export class ReviewUndoController {
   private readonly undone = new Map<string, ReviewUndoEntry[]>();
 
   constructor(private readonly store: ReviewStore) {}
+
+  reset(documentUri: vscode.Uri): void {
+    this.done.delete(documentUri.toString());
+    this.undone.delete(documentUri.toString());
+  }
 
   async capture(documentUri: vscode.Uri): Promise<ReviewSidecarSnapshot> {
     return this.store.withDocumentTransaction(documentUri, async () => {
@@ -62,6 +68,7 @@ export class ReviewUndoController {
     const key = documentUri.toString();
     const doneEntries = this.done.get(key) ?? [];
     doneEntries.push({
+      epoch: this.store.getDocumentEpoch(documentUri),
       protection: { fields: new Map(), decisions: new Set() },
       beforeText,
       afterText,
@@ -101,11 +108,15 @@ export class ReviewUndoController {
       reviewDocument: await this.store.load(documentUri),
       resolvedReviewDocument: await this.store.loadResolved(documentUri)
     };
+    if (this.store.isHandoffActive(documentUri) || entry.epoch !== this.store.getDocumentEpoch(documentUri)) {
+      this.reset(documentUri);
+      return false;
+    }
     const from = snapshotDocuments(undo ? entry.afterSnapshot : entry.beforeSnapshot, documentUri);
     const to = snapshotDocuments(undo ? entry.beforeSnapshot : entry.afterSnapshot, documentUri);
     const protection = structuredClone(entry.protection);
     const merged = mergeReviewUndoDelta(current, from, to, protection);
-    await this.store.saveBoth(documentUri, merged.reviewDocument, merged.resolvedReviewDocument);
+    await this.store.saveBothForUndo(documentUri, merged.reviewDocument, merged.resolvedReviewDocument);
     entry.protection = protection;
 
     // Preserve the entry if persistence fails so the operation remains retryable.

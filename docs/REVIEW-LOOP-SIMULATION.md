@@ -1,3 +1,7 @@
+> **Legacy v0.0.21 record.** This document describes the retired discussion and
+> patch-approval workflow. It is not current agent guidance or evidence of a v3
+> Extension Host or external-agent test. See [the current workflow](./AI-COLLABORATION-LOOP.md).
+
 # Review Loop Simulation
 
 Generated from `runReviewLoopSimulations()` in `src/reviewLoopSimulation.ts`.
@@ -7,7 +11,7 @@ The simulation models two working personas:
 - an AI reviewer that opens focused review threads, proposes patches, replies, exports handoff context, and tries to preserve sidecar review state;
 - a human author/reviewer that disagrees, replies, edits Markdown, applies patches, and resolves only when a decision is genuinely handled.
 
-The current dogfood target is `test/fixtures/rich-review-loop-sample.md`, a dense Markdown fixture with tables, ordered lists, task lists, Mermaid diagrams, code fences, repeated phrases, and long wrapping prose.
+The legacy dogfood target is `test/fixtures/rich-review-loop-sample.md`, a dense Markdown fixture with tables, ordered lists, task lists, Mermaid diagrams, code fences, repeated phrases, and long wrapping prose.
 
 The actual session record is stored in `test/fixtures/review-loop-session-record.json`, and the human-readable transcript is in `docs/REVIEW-LOOP-SIMULATION-TRACE.md`. Those files capture AI comments, human replies, AI follow-ups, sidecar snapshots, applied improvements, and the final empty `remainingFeedback` list.
 

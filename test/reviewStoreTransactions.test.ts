@@ -9,7 +9,7 @@ const now = '2026-09-09T00:00:00Z';
 
 describe('review store transactions', () => {
   it('preserves both concurrent replies and automatic anchor updates', async () => {
-    const { store, uri } = createReviewStorageHarness();
+    const { store, uri } = createReviewStorageHarness('/workspace', true);
     await store.addThread(uri, storageThread('rv_original'));
     await Promise.all([
       store.addReply(uri, 'rv_original', 'first reply'),
@@ -22,7 +22,7 @@ describe('review store transactions', () => {
   });
 
   it('holds the queue across a provider read/modify/write and permits nested store operations', async () => {
-    const { store, uri } = createReviewStorageHarness();
+    const { store, uri } = createReviewStorageHarness('/workspace', true);
     await store.addThread(uri, storageThread('rv_original'));
     let unblock!: () => void;
     let signalRead!: () => void;
@@ -45,7 +45,7 @@ describe('review store transactions', () => {
   });
 
   it('rejects externally changed sidecars without restoring stale bytes over them', async () => {
-    const { store, uri, files, ReviewStorageConflictError } = createReviewStorageHarness();
+    const { store, uri, files, ReviewStorageConflictError } = createReviewStorageHarness('/workspace', true);
     await store.addThread(uri, storageThread('rv_original'));
     const sidecar = await store.getReviewFileUri(uri);
     let externalBytes: Uint8Array | undefined;
@@ -64,7 +64,7 @@ describe('review store transactions', () => {
   });
 
   it('releases a failed transaction so following writes can proceed', async () => {
-    const { store, uri, failNextWrites } = createReviewStorageHarness();
+    const { store, uri, failNextWrites } = createReviewStorageHarness('/workspace', true);
     await store.addThread(uri, storageThread('rv_original'));
     failNextWrites();
     await assert.rejects(store.addReply(uri, 'rv_original', 'failed'), /Injected write failure/);
@@ -81,6 +81,7 @@ describe('review sidecar rename identity', () => {
     vscode.workspace.fs.createDirectory = async value => { await fs.promises.mkdir(value.path, { recursive: true }); };
     vscode.workspace.fs.readFile = async value => fs.promises.readFile(value.path);
     vscode.workspace.fs.writeFile = async (value, bytes) => { await fs.promises.writeFile(value.path, bytes); };
+    vscode.workspace.fs.rename = async (from, to) => { await fs.promises.rename(from.path, to.path); };
     vscode.workspace.fs.delete = async value => { await fs.promises.unlink(value.path); };
     const target = uriFor(path.join(directory, 'Spec.md'));
     const sourceSidecar = path.join(directory, '.spec.md.ai-review.json');
@@ -95,13 +96,19 @@ describe('review sidecar rename identity', () => {
       assert.equal(fs.existsSync(targetSidecar), true);
       assert.deepEqual((await store.load(target)).threads.map(thread => thread.id), ['rv_original']);
     } finally {
-      for (const entry of fs.readdirSync(directory)) { fs.unlinkSync(path.join(directory, entry)); }
-      fs.rmdirSync(directory);
+      function cleanup(dir: string) {
+        for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+          const file = path.join(dir, entry.name);
+          if (entry.isDirectory()) cleanup(file); else fs.unlinkSync(file);
+        }
+        fs.rmdirSync(dir);
+      }
+      cleanup(directory);
     }
   });
 
   it('removes a genuinely distinct old sidecar after migration', async () => {
-    const { store, uri, uriFor, files } = createReviewStorageHarness();
+    const { store, uri, uriFor, files } = createReviewStorageHarness('/workspace', true);
     const target = uriFor('/workspace/renamed.md');
     await store.addThread(uri, storageThread('rv_original'));
     await store.migrateDocument(uri, target);

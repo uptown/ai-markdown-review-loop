@@ -214,7 +214,13 @@ export function buildReviewAwareThreadUpdates(
       ]
     };
 
-    if (thread.id === plan.targetThreadId && plan.closeTargetAs) {
+    if (thread.taskRevision !== undefined) {
+      // A source/target edit changes the request revision; AI results describe the old target.
+      Object.assign(update, { thread: [], taskRevision: thread.taskRevision + 1,
+        taskStatus: 'pending', taskResult: undefined, taskResultFor: undefined });
+    }
+
+    if (thread.taskRevision === undefined && thread.id === plan.targetThreadId && plan.closeTargetAs) {
       update.status = plan.closeTargetAs;
       update.closedBy = plan.actor;
       update.closedAt = now;

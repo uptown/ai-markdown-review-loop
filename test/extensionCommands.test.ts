@@ -2,77 +2,92 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { createExtensionCommandHarness } from './helpers/extensionCommandHarness';
 
-describe('review command context and local checks', () => {
-  it('keeps the existing local command ID and reports already-closed findings without recreating them', async () => {
+describe('review task command handoff', () => {
+  it('saves, copies the sidecar path, pauses writes, and resumes the preview target', async () => {
     const h = await createExtensionCommandHarness();
-    const document = h.addDocument('/workspace/spec.md');
-    h.setActivePreview(document);
-    await h.run('reviewDocument');
-    const thread = (await h.store.load(document.uri)).threads[0];
-    await h.store.updateThread(document.uri, thread.id, { status: 'rejected' });
-    await h.run('reviewDocument');
-    assert.match(h.information[0], /1 new/);
-    assert.match(h.information[1], /0 new, 0 already open, 1 previously closed/);
-    assert.match(h.information[1], /rule-based checks/);
-    assert.equal((await h.store.load(document.uri)).threads.length, 0);
-    assert.equal((await h.store.loadResolved(document.uri)).threads[0].id, thread.id);
-    h.dispose();
+    const document = h.addDocument('/workspace/docs/spec.md'); h.setActivePreview(document);
+    await h.store.addThread(document.uri, task(document.uri.toString()));
+    await h.run('handoff'); assert.match(h.clipboard[0], /docs\/\.spec.md.ai-review.json/);
+    assert.equal(h.store.isHandoffActive(document.uri), true);
+    await h.run('resumeReview'); assert.equal(h.store.isHandoffActive(document.uri), false);
+    assert.deepEqual(h.errors, []); h.dispose();
   });
-
-  it('explains the local-check scope when there are no matching rules', async () => {
-    const h = await createExtensionCommandHarness();
-    h.setActiveSource(h.addDocument('/workspace/spec.md', '# Spec\n\n## 완료 기준\n\n- Checks pass.'));
-    await h.run('reviewDocument');
-    assert.match(h.information[0], /no matching issues/);
-    assert.match(h.information[0], /rule-based checks/);
-    assert.equal(h.files.size, 0);
-    h.dispose();
+  it('copies self-contained JSON and freezes writes', async () => {
+    const h = await createExtensionCommandHarness(); const document = h.addDocument('/workspace/spec.md');
+    h.setActiveSource(document); await h.store.addThread(document.uri, task(document.uri.toString()));
+    await h.run('copyReviewFile'); const payload = JSON.parse(h.clipboard[0]);
+    assert.equal(payload.schemaVersion, 3); assert.match(payload.guidance, /resultFor/);
+    assert.equal(h.store.isHandoffActive(document.uri), true); h.dispose();
   });
-
-  it('opens a generic bootstrap prompt from the command palette while only the review preview is active', async () => {
+  it('includes an unambiguous quoted path base for multi-root and standalone documents', async () => {
+    for (const [filename, base, relative] of [
+      ['/projects/client two/docs/spec.md', '/projects/client two', 'docs/.spec.md.ai-review.json'],
+      ['/outside/customer "signed"/spec.md', '/outside/customer "signed"', '.spec.md.ai-review.json']
+    ]) {
+      const h = await createExtensionCommandHarness();
+      h.setWorkspaceFolders(['/projects/client one', '/projects/client two']);
+      const other = h.addDocument('/projects/client one/docs/spec.md');
+      h.setActiveSource(other);
+      const document = h.addDocument(filename);
+      await h.store.addThread(document.uri, task(document.uri.toString()));
+      await h.run('handoff', document.uri);
+      assert.ok(h.clipboard[0].startsWith(`Base directory: ${JSON.stringify(base)}.\nRead ${JSON.stringify(relative)}.`));
+      assert.equal(h.store.isHandoffActive(document.uri), true);
+      assert.equal(h.store.isHandoffActive(other.uri), false);
+      assert.deepEqual(h.errors, []);
+      h.dispose();
+    }
+  });
+  it('inspects even malformed JSON as a read-only snapshot without handing off or modifying it', async () => {
     const h = await createExtensionCommandHarness();
-    h.setActivePreview(h.addDocument('/workspace/spec.md'));
-    await h.run('openContextBootstrapPrompt');
+    const document = h.addDocument('/workspace/spec.md'); h.setActivePreview(document);
+    const sidecar = await h.store.getReviewFileUri(document.uri);
+    const invalid = new TextEncoder().encode('{broken'); h.files.set(sidecar.toString(), invalid);
+    await h.run('openReviewFile');
     assert.equal(h.shownDocuments.length, 1);
-    assert.match(h.shownDocuments[0].getText(), /AI Markdown Review Loop Agent Prompt/);
-    assert.doesNotMatch(h.shownDocuments[0].getText(), /Current Markdown target:|spec\.md/);
-    assert.deepEqual(h.warnings, []);
-    h.dispose();
+    assert.equal(h.shownDocuments[0].uri.scheme, 'ai-markdown-review-loop-prompt');
+    assert.match(h.shownDocuments[0].getText(), /\{broken/);
+    assert.deepEqual(h.files.get(sidecar.toString()), invalid);
+    assert.equal(h.store.isHandoffActive(document.uri), false);
+    assert.deepEqual(h.errors, []); h.dispose();
   });
-
-  it('includes the selected review target in feedback-loop prompts from both preview and source editor', async () => {
+  it('does not deliver or stay paused when saving the source is cancelled', async () => {
     const h = await createExtensionCommandHarness();
-    h.setActivePreview(h.addDocument('/workspace/docs/spec.md'));
-    await h.run('openFeedbackLoopPrompt');
-    assert.match(h.shownDocuments[0].getText(), /Current Markdown target: `docs\/spec\.md`/);
-    h.setActiveSource(h.addDocument('/workspace/other.md'));
-    await h.run('openFeedbackLoopPrompt');
-    assert.match(h.shownDocuments[1].getText(), /Current Markdown target: `other\.md`/);
-    h.dispose();
+    const document = h.addDocument('/workspace/spec.md'); h.setActivePreview(document);
+    await h.store.addThread(document.uri, task(document.uri.toString()));
+    const sidecar = await h.store.getReviewFileUri(document.uri);
+    const before = h.files.get(sidecar.toString());
+    document.save = async () => false;
+    await h.run('handoff');
+    assert.equal(h.clipboard.length, 0);
+    assert.match(h.errors[0].message, /문서 저장이 취소/);
+    assert.deepEqual(h.files.get(sidecar.toString()), before);
+    assert.equal(h.store.isHandoffActive(document.uri), false); h.dispose();
   });
-
-  it('exports the review preview target for agent handoff', async () => {
+  it('does not register the removed conversation, local-check, and prompt commands', async () => {
     const h = await createExtensionCommandHarness();
-    const document = h.addDocument('/workspace/docs/spec.md');
-    h.setActivePreview(document);
-    await h.run('reviewDocument');
-    await h.run('exportFeedback');
-    const prompt = h.shownDocuments[0].getText();
-    assert.match(prompt, /Document: file:\/\/\/workspace\/docs\/spec\.md/);
-    assert.match(prompt, /Open feedback: 1/);
-    h.dispose();
+    for (const id of ['reviewDocument','exportFeedback','openContextBootstrapPrompt','openFeedbackLoopPrompt']) {
+      assert.equal(h.commands.has('aiMarkdownReviewLoop.' + id), false);
+    } h.dispose();
   });
-
-  it('does not fall back to another Markdown file when an explicit non-Markdown target is selected', async () => {
-    const h = await createExtensionCommandHarness();
-    h.setActiveSource(h.addDocument('/workspace/spec.md'));
-    const other = h.addDocument('/workspace/notes.txt', 'TODO: unrelated text.', 'plaintext');
-    await h.run('reviewDocument', other.uri);
-    assert.equal(h.files.size, 0);
-    assert.match(h.warnings[0], /Open a Markdown document/);
-    h.dispose();
+  it('does not fall back to another file for an explicit non-Markdown target', async () => {
+    const h = await createExtensionCommandHarness(); h.setActiveSource(h.addDocument('/workspace/spec.md'));
+    const other = h.addDocument('/workspace/notes.txt', 'Unrelated', 'plaintext');
+    await h.run('handoff', other.uri); assert.equal(h.files.size, 0); assert.match(h.warnings[0], /Open a Markdown/); h.dispose();
+  });
+  it('reports clipboard failures without leaving a permanent pause', async () => {
+    const h = await createExtensionCommandHarness(); const document = h.addDocument('/workspace/spec.md');
+    h.setActivePreview(document); await h.store.addThread(document.uri, task(document.uri.toString())); h.failClipboard();
+    await h.run('handoff'); assert.match(h.errors[0].message, /Clipboard unavailable/);
+    assert.equal(h.store.isHandoffActive(document.uri), false); h.dispose();
   });
 });
+
+function task(documentUri: string) {
+  return { id: 'rv_request', documentUri, anchor: { text: 'Spec', lineStart: 1, confidence: 'exact' },
+    type: 'note', source: 'human', status: 'open', severity: 'medium', comment: 'Clarify the scope.', thread: [],
+    createdAt: '2026-09-09', updatedAt: '2026-09-09' };
+}
 
 describe('review command error recovery', () => {
   it('offers explicit retry and keeps the original target when editor focus changes', async () => {
@@ -97,27 +112,21 @@ describe('review command error recovery', () => {
     const sidecar = await h.store.getReviewFileUri(document.uri);
     const invalid = new TextEncoder().encode('{broken');
     h.files.set(sidecar.toString(), invalid);
-    await h.run('reviewDocument');
+    await h.run('handoff');
     assert.equal(h.errors.length, 1);
-    assert.match(h.errors[0].message, /Run Local Checks failed for spec\.md: Review sidecar is invalid/);
+    assert.match(h.errors[0].message, /AI에 전달 failed for spec\.md: Review sidecar is invalid/);
     assert.deepEqual(h.files.get(sidecar.toString()), invalid);
     assert.equal(h.information.length, 0);
     h.dispose();
   });
 
-  it('can retry after review data is repaired without duplicating an existing finding', async () => {
-    const h = await createExtensionCommandHarness();
-    const document = h.addDocument('/workspace/spec.md');
-    h.setActivePreview(document);
-    await h.run('reviewDocument');
-    const sidecar = await h.store.getReviewFileUri(document.uri);
-    const valid = h.files.get(sidecar.toString())!;
+  it('retries repaired JSON against the original document and hands off once', async () => {
+    const h = await createExtensionCommandHarness(); const document = h.addDocument('/workspace/spec.md');
+    h.setActivePreview(document); await h.store.addThread(document.uri, task(document.uri.toString()));
+    const sidecar = await h.store.getReviewFileUri(document.uri); const valid = h.files.get(sidecar.toString())!;
     h.files.set(sidecar.toString(), new TextEncoder().encode('{broken'));
     h.chooseOnError('Retry', () => h.files.set(sidecar.toString(), valid));
-    await h.run('reviewDocument');
-    assert.equal(h.errors.length, 1);
-    assert.match(h.information[1], /0 new, 1 already open, 0 previously closed/);
-    assert.equal((await h.store.load(document.uri)).threads.length, 1);
-    h.dispose();
+    await h.run('handoff'); assert.equal(h.errors.length, 1); assert.equal(h.clipboard.length, 1);
+    assert.equal((await h.store.load(document.uri)).threads.length, 1); h.dispose();
   });
 });

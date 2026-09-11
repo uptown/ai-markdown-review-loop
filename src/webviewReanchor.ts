@@ -26,9 +26,6 @@ export function renderReanchorScript(): string {
 
       function dirtyDraft() {
         if (commentBody.value.trim()) return commentBody;
-        const reply = Array.from(document.querySelectorAll('[data-reply-form] textarea'))
-          .find(element => String(element.value || '').trim());
-        if (reply) return reply;
         if (activeBlockEdit && isBlockEditorDirty()) return isBlockEditorRawMode() ? blockEditorRaw : blockEditorSurface;
         if (activeMermaidEdit && mermaidEditorSource.value !== activeMermaidEdit.originalSource) return mermaidEditorSource;
         if (activeTableEdit && tableEditorSignature() !== activeTableEdit.originalSignature) return tableEditorGrid.querySelector('input');
@@ -47,7 +44,7 @@ export function renderReanchorScript(): string {
       }
 
       function begin(thread, button) {
-        if (pendingRequest) return;
+        if (pendingRequest || isHandoffActive()) return;
         const dirty = dirtyDraft();
         panel.hidden = false;
         returnFocus = button;
@@ -69,7 +66,7 @@ export function renderReanchorScript(): string {
         hideMermaidEditorIfClean();
         hideTableEditorIfClean();
         hideCommentOverlayIfClean();
-        status.textContent = 'Select the new target text in the Markdown preview, then confirm below. The Markdown and discussion history will be kept.';
+        status.textContent = 'Select the new target text in the Markdown preview, then confirm below. The Markdown will be kept and the request revision will advance.';
         cancel.focus();
       }
 
@@ -81,7 +78,8 @@ export function renderReanchorScript(): string {
         button.type = 'button';
         button.className = 'secondary';
         button.textContent = 'Reattach';
-        button.title = 'Choose new target text for this existing thread without changing its discussion history.';
+        button.disabled = isHandoffActive();
+        button.title = 'Choose new target text for this existing thread without changing the Markdown.';
         button.setAttribute('data-reanchor-thread', thread.id);
         button.addEventListener('click', event => {
           event.stopPropagation();
@@ -91,7 +89,7 @@ export function renderReanchorScript(): string {
       }
 
       function captureSelection(event) {
-        if (!targetThread || pendingRequest) return;
+        if (!targetThread || pendingRequest || isHandoffActive()) return;
         event.stopImmediatePropagation();
         window.clearTimeout(selectionTimer);
         hideSelectionPopover();
@@ -116,7 +114,7 @@ export function renderReanchorScript(): string {
         confirm.disabled = !selectedTarget.sourceLine || !selectedTarget.sourceLineEnd;
         status.textContent = confirm.disabled
           ? 'Select text inside a Markdown block with a known source location.'
-          : 'Attach this existing thread to the selected text? Its ID, replies, and open status will be preserved.';
+          : 'Attach this existing thread to the selected text? Its ID will be preserved and the request will stay pending.';
       }
 
       document.addEventListener('selectionchange', captureSelection, true);
@@ -135,7 +133,7 @@ export function renderReanchorScript(): string {
       }, true);
       cancel.addEventListener('click', finish);
       confirm.addEventListener('click', () => {
-        if (!targetThread || !selectedTarget || pendingRequest) return;
+        if (!targetThread || !selectedTarget || pendingRequest || isHandoffActive()) return;
         const dirty = dirtyDraft();
         if (dirty) {
           status.textContent = 'Finish or cancel your current draft before saving this reattachment. Your draft has been kept.';
@@ -151,6 +149,11 @@ export function renderReanchorScript(): string {
       });
       window.addEventListener('message', event => {
         const message = event.data;
+        if (message?.type === 'handoffPhase') {
+          confirm.disabled = isHandoffActive() || !selectedTarget || Boolean(pendingRequest);
+          if (isHandoffActive() && !panel.hidden) status.textContent = '외부 편집에 전달됨 · 재연결 저장 보류.';
+          return;
+        }
         if (message?.type !== 'reviewMutationResult' || message.requestId !== pendingRequest || !pendingRequest) return;
         pendingRequest = '';
         cancel.disabled = false;
@@ -158,7 +161,7 @@ export function renderReanchorScript(): string {
           finish();
         } else {
           status.textContent = message.error || 'The thread could not be reattached. Your selection has been kept; retry or select different text.';
-          confirm.disabled = !selectedTarget;
+          confirm.disabled = isHandoffActive() || !selectedTarget;
         }
       });
     })();

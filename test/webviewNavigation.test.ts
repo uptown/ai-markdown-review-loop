@@ -48,7 +48,7 @@ describe('review navigation and keyboard destinations', () => {
     assert.equal(dom.document.querySelector('.thread').getAttribute('aria-current'), 'true');
   });
 
-  it('supports arrow navigation without consuming arrow keys inside reply fields', async () => {
+  it('supports arrow navigation without consuming arrow keys inside comment fields', async () => {
     const dom = await reviewDom([thread('rv_a', 'Shared target.', 1), thread('rv_c', 'Another target.', 3)]);
     const rightArrow = (target: any) => {
       const event = new dom.window.Event('keydown', { bubbles: true, cancelable: true });
@@ -57,7 +57,7 @@ describe('review navigation and keyboard destinations', () => {
     };
     rightArrow(dom.document.body);
     assert.equal(dom.document.querySelector('.thread.is-active').getAttribute('data-thread-id'), 'rv_a');
-    rightArrow(dom.document.querySelector('.thread textarea'));
+    rightArrow(dom.document.getElementById('comment-body'));
     assert.equal(dom.document.querySelector('.thread.is-active').getAttribute('data-thread-id'), 'rv_a');
     rightArrow(dom.document.body);
     assert.equal(dom.document.querySelector('.thread.is-active').getAttribute('data-thread-id'), 'rv_c');
@@ -82,11 +82,11 @@ describe('review navigation and keyboard destinations', () => {
 
   it('distinguishes first-use empty state from completed feedback', async () => {
     const fresh = await reviewDom([]);
-    assert.equal(fresh.document.getElementById('threads').textContent, 'No feedback yet. Select text to add a comment.');
+    assert.equal(fresh.document.getElementById('threads').textContent, '문서에서 텍스트를 선택해 수정 요청을 남기세요.');
     assert.equal(fresh.document.querySelector('[data-review-position]').textContent, 'No open comments');
     assert.equal(fresh.document.querySelector('[data-review-nav="next"]').disabled, true);
     const completed = await reviewDom([], [thread('rv_closed', 'Shared target.', 1, 'resolved')]);
-    assert.equal(completed.document.getElementById('threads').textContent, 'No open feedback. Closed threads remain below.');
+    assert.equal(completed.document.getElementById('threads').textContent, '미처리 요청이 없습니다. 수정된 문서를 다시 검수하세요.');
     assert.ok(completed.document.querySelector('.is-closed [data-jump-thread]'));
   });
 

@@ -1,11 +1,11 @@
-import { readdirSync } from 'node:fs';
+import { readdirSync, existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 
 // Pass test files explicitly so support modules are not counted as empty tests.
 const directory = new URL('../.test-out/test/', import.meta.url);
 const tests = readdirSync(directory)
-  .filter(name => name.endsWith('.test.js'))
+  .filter(name => name.endsWith('.test.js') && existsSync(new URL('../../test/' + name.replace(/\.js$/, '.ts'), directory)))
   .sort()
   .map(name => fileURLToPath(new URL(name, directory)));
 

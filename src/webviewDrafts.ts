@@ -3,7 +3,7 @@
 export function renderWebviewDraftScript(): string {
   return String.raw`
     draftSession = (() => {
-      const supported = new Set(['addComment', 'addReply', 'editMarkdownBlock', 'insertMarkdownBlock', 'editMermaidSource', 'editMarkdownTable']);
+      const supported = new Set(['addComment', 'editComment', 'editMarkdownBlock', 'insertMarkdownBlock', 'editMermaidSource', 'editMarkdownTable']);
       const stored = vscode.getState?.();
       const drafts = stored?.schema === 1 && stored.documentUri === state.documentUri
         && stored.drafts && typeof stored.drafts === 'object' ? stored.drafts : {};
@@ -15,8 +15,7 @@ export function renderWebviewDraftScript(): string {
       let restoring = true;
 
       function keyFor(message) {
-        if (message.type === 'addReply') return 'reply:' + message.threadId;
-        if (message.type === 'addComment') return 'comment';
+        if (message.type === 'addComment' || message.type === 'editComment') return 'comment';
         if (message.type === 'editMermaidSource') return 'mermaid';
         if (message.type === 'editMarkdownTable') return 'table';
         return 'block';
@@ -27,15 +26,10 @@ export function renderWebviewDraftScript(): string {
         if (key === 'block') return blockEditor;
         if (key === 'mermaid') return mermaidEditor;
         if (key === 'table') return tableEditor;
-        return Array.from(document.querySelectorAll('[data-reply-form]'))
-          .find(form => form.getAttribute('data-thread-id') === key.slice(6));
+        return undefined;
       }
 
-      function formsFor(key) {
-        return key.startsWith('reply:')
-          ? Array.from(document.querySelectorAll('[data-reply-form]')).filter(form => form.getAttribute('data-thread-id') === key.slice(6))
-          : [formFor(key)].filter(Boolean);
-      }
+      function formsFor(key) { return [formFor(key)].filter(Boolean); }
 
       function visible(form) { return form?.style.display === 'block'; }
       function persist() {
@@ -52,7 +46,7 @@ export function renderWebviewDraftScript(): string {
       function collect(forceKey) {
         if (restoring) return;
         if (visible(commentComposer)) remember('comment', commentBody.value ? {
-          kind: 'comment', text: commentBody.value, anchorText: activeSelectionText,
+          kind: 'comment', text: commentBody.value, edit: activeCommentEdit, anchorText: activeSelectionText,
           anchorOccurrence: activeSelectionOccurrence, sourceLine: activeSourceLine, sourceLineEnd: activeSourceLineEnd
         } : undefined);
         if (visible(blockEditor) && activeBlockEdit) remember('block', isBlockEditorDirty() || forceKey === 'block' ? {
@@ -65,11 +59,6 @@ export function renderWebviewDraftScript(): string {
         if (visible(tableEditor) && activeTableEdit) remember('table', tableEditorSignature() !== activeTableEdit.originalSignature || forceKey === 'table' ? {
           kind: 'table', edit: activeTableEdit, table: readTableEditorData()
         } : undefined);
-        document.querySelectorAll('[data-reply-form]').forEach(form => {
-          const key = 'reply:' + form.getAttribute('data-thread-id');
-          const text = form.querySelector('textarea')?.value || '';
-          if (text) remember(key, { kind: 'reply', threadId: key.slice(6), text });
-        });
         persist();
       }
 
@@ -114,13 +103,7 @@ export function renderWebviewDraftScript(): string {
           else if (key === 'block') hideBlockEditor();
           else if (key === 'mermaid') hideMermaidEditor();
           else if (key === 'table') hideTableEditor();
-          else document.querySelectorAll('[data-reply-form]').forEach(form => {
-            if (form.getAttribute('data-thread-id') === key.slice(6)) {
-              form.querySelector('textarea').value = '';
-              freeze(form, false);
-              status(form, 'Reply saved.');
-            }
-          });
+
         }
         persist();
       }
@@ -140,11 +123,18 @@ export function renderWebviewDraftScript(): string {
           persist();
         }
         showRecovery();
+        updateHandoff();
       }
 
       function submit(message) {
         if (!supported.has(message.type)) return false;
         const key = keyFor(message);
+        if (isHandoffActive()) {
+          collect(key);
+          status(formFor(key), '외부 편집에 전달됨 · 저장 보류. 초안은 이 창에 보관됩니다.');
+          updateHandoff();
+          return true;
+        }
         if (drafts[key]?.requestId || drafts[key]?.recovery) return true;
         collect(key);
         if (!drafts[key]) return true;
@@ -176,19 +166,6 @@ export function renderWebviewDraftScript(): string {
         return container.innerHTML;
       }
 
-      function restoreReply(key, draft) {
-        const forms = Array.from(document.querySelectorAll('[data-reply-form]'))
-          .filter(form => form.getAttribute('data-thread-id') === draft.threadId);
-        if (!forms.length) return false;
-        forms.forEach(form => {
-          form.querySelector('textarea').value = draft.text || '';
-          freeze(form, Boolean(draft.requestId));
-          if (draft.requestId) status(form, 'Saving…');
-          else if (draft.error) status(form, draft.error);
-        });
-        return true;
-      }
-
       function restoreDraft(key, draft) {
         if (!draft || typeof draft !== 'object') { delete drafts[key]; return; }
         const outcome = restoreState.mutationResults?.[draft.requestId];
@@ -196,13 +173,22 @@ export function renderWebviewDraftScript(): string {
         if (outcome) { delete draft.requestId; draft.error = outcome.error; }
         if (draft.requestId) {
           draft.recovery = 'Save confirmation is unavailable. Check the current document or thread before copying this draft to avoid duplicate changes.';
-        } else if (draft.kind !== 'reply' && draft.fingerprint !== state.sourceFingerprint) {
+        } else if (draft.kind !== 'reply' && !draft.edit?.threadId && draft.fingerprint !== state.sourceFingerprint) {
           draft.recovery = 'The document changed. Copy your draft, reopen the current target, and review it before saving.';
         }
         if (draft.recovery) return;
         if (draft.kind === 'reply') {
-          if (!restoreReply(key, draft)) draft.recovery = 'This thread is no longer open. Copy your reply before restoring or continuing the thread.';
+          draft.recovery = '이전 답글 초안입니다. 내용을 복사해 수정 요청이나 외부 agent 대화에서 사용하세요.';
         } else if (draft.kind === 'comment') {
+          if (draft.edit) {
+            const current = findThread(draft.edit.threadId);
+            if (!current || current.taskRevision !== draft.edit.revision || current.comment !== draft.edit.originalComment) {
+              draft.recovery = '수정 요청이 변경되었습니다. 초안을 복사해 현재 요청을 확인한 뒤 다시 편집하세요.';
+              return;
+            }
+          }
+          activeCommentEdit = draft.edit;
+          commentComposer.querySelector('.comment-composer-label').textContent = draft.edit ? '수정 요청 편집' : '선택한 내용에 수정 요청';
           activeSelectionText = draft.anchorText;
           activeSelectionOccurrence = draft.anchorOccurrence;
           activeSourceLine = draft.sourceLine;
@@ -227,7 +213,7 @@ export function renderWebviewDraftScript(): string {
           tableEditor.style.display = 'block';
         } else { delete drafts[key]; return; }
         const form = formFor(key);
-        if (form && !key.startsWith('reply:')) {
+        if (form) {
           form.style.left = '16px';
           form.style.top = '48px';
           form.style.maxWidth = 'calc(100vw - 32px)';
@@ -275,18 +261,7 @@ export function renderWebviewDraftScript(): string {
       restoring = false;
       persist();
       showRecovery();
-      document.addEventListener('input', event => {
-        const form = event.target.closest?.('[data-reply-form]');
-        if (form) {
-          const id = form.getAttribute('data-thread-id');
-          const text = form.querySelector('textarea')?.value || '';
-          document.querySelectorAll('[data-reply-form]').forEach(other => {
-            if (other !== form && other.getAttribute('data-thread-id') === id) other.querySelector('textarea').value = text;
-          });
-          remember('reply:' + id, text ? { kind: 'reply', threadId: id, text } : undefined);
-        }
-        collect();
-      });
+      document.addEventListener('input', collect);
       document.addEventListener('change', collect);
       document.addEventListener('click', collect);
       window.addEventListener('pagehide', collect);
@@ -313,18 +288,25 @@ export function renderWebviewDraftScript(): string {
       for (const [button, key] of [[commentCancel, 'comment'], [blockEditorCancel, 'block'], [mermaidEditorCancel, 'mermaid'], [tableEditorCancel, 'table']]) {
         button.addEventListener('click', () => { clear(key, false); showRecovery(); });
       }
-      return { submit, collect, canOpen(key) {
+      function updateHandoff() {
+        for (const key of ['comment', 'block', 'mermaid', 'table']) {
+          const form = formFor(key);
+          const pending = Boolean(drafts[key]?.requestId);
+          form.querySelectorAll('button[type="submit"]').forEach(button => { button.disabled = isHandoffActive() || pending; });
+          if (isHandoffActive() && visible(form)) status(form, '외부 편집에 전달됨 · 저장 보류. 초안은 이 창에 보관됩니다.');
+          else if (!pending && !drafts[key]?.error) {
+            const message = form.querySelector('[data-save-status]');
+            if (message?.textContent.includes('저장 보류')) message.textContent = '초안을 확인한 뒤 저장하세요.';
+          }
+        }
+      }
+      return { submit, collect, updateHandoff, canOpen(key) {
         if (!drafts[key]?.requestId && !drafts[key]?.recovery) return true;
         if (drafts[key]?.recovery) {
           recovery.scrollIntoView({block:'center'});
           recovery.querySelector('textarea')?.focus();
         } else status(formFor(key), 'Saving… Wait for confirmation before opening another target.');
         return false;
-      }, restoreReplies() {
-        for (const key of Object.keys(drafts)) {
-          const draft = drafts[key];
-          if (draft.kind === 'reply' && !draft.recovery) restoreReply(key, draft);
-        }
       } };
     })();
   `;
@@ -336,6 +318,7 @@ export function renderErrorDraftScript(documentUri: string): string {
   return String.raw`
     const vscode = acquireVsCodeApi();
     document.getElementById('retry-preview').addEventListener('click', () => vscode.postMessage({type:'refreshPreview'}));
+    document.querySelectorAll('[data-error-action]').forEach(button => button.addEventListener('click', () => vscode.postMessage({type:button.getAttribute('data-error-action')})));
     const stored = vscode.getState?.();
     if (stored?.schema === 1 && stored.documentUri === ${uri} && stored.drafts) {
       const container = document.getElementById('error-drafts');

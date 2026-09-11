@@ -84,6 +84,8 @@ export function renderReviewLoopSimulationReport(summary: SimulationSummary): st
   return [
     '# Review Loop Simulation Report',
     '',
+    '> Legacy v0.0.21 discussion/patch workflow. This is not current v3 agent guidance or evidence of an Extension Host or external-agent test. See docs/AI-COLLABORATION-LOOP.md.',
+    '',
     `Fixture: ${summary.fixturePath}`,
     `Session record: ${summary.sessionRecordPath}`,
     `Trace: ${summary.tracePath}`,

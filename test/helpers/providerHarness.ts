@@ -9,7 +9,7 @@ let bundledProvider: Promise<string>;
 // This is an integration seam test, not an Extension Host or browser test.
 export async function createProviderHarness(initialText = 'First.\n\nSecond.\n') {
   bundledProvider ??= build({
-    absWorkingDir: process.cwd(), stdin: { contents: "export { ReviewEditorProvider } from './src/reviewEditorProvider'; export { ReviewStorageConflictError } from './src/reviewStore';", resolveDir: process.cwd(), loader: 'ts' },
+    absWorkingDir: process.cwd(), stdin: { contents: "export { ReviewEditorProvider } from './src/reviewEditorProvider'; export { ReviewStore, ReviewStorageConflictError } from './src/reviewStore'; export { ReviewUndoController } from './src/reviewUndo';", resolveDir: process.cwd(), loader: 'ts' },
     bundle: true, write: false, platform: 'node', format: 'cjs', external: ['vscode'], logLevel: 'silent'
   }).then(result => result.outputFiles[0].text);
   let text = initialText;
@@ -20,12 +20,15 @@ export async function createProviderHarness(initialText = 'First.\n\nSecond.\n')
   const registrations: any[] = [];
   const postedMessages: any[] = [];
   const copiedTexts: string[] = [];
+  const executedCommands: any[] = [];
+  let handoffPhase: 'preparing' | 'handedOff' | undefined;
   const files = new Map<string, Uint8Array>();
   class Uri {
     scheme = 'file';
     path: string;
     constructor(readonly fsPath: string) { this.path = fsPath; }
     toString() { return 'file://' + this.fsPath; }
+    with(value: { path?: string }) { return new Uri(value.path ?? this.path); }
     static file(value: string) { return new Uri(value); }
     static joinPath(base: Uri, ...parts: string[]) { return new Uri(path.join(base.fsPath, ...parts)); }
   }
@@ -50,11 +53,14 @@ export async function createProviderHarness(initialText = 'First.\n\nSecond.\n')
   };
   const vscode: any = {
     Uri, FileSystemError,
+    TextDocumentChangeReason: { Undo: 1, Redo: 2 },
+    commands: { executeCommand: async (...args: any[]) => { executedCommands.push(args); } },
     env: { clipboard: { writeText: async (value: string) => { copiedTexts.push(value); } } },
     Disposable: class { constructor(readonly dispose: () => void) {} },
     WorkspaceEdit: class { change: any; replace(uri: any, range: any, replacement: string) { this.change = { uri, range, replacement }; } },
     Range: class { constructor(readonly start: any, readonly end: any) {} },
     workspace: {
+      textDocuments: [],
       getWorkspaceFolder: () => ({ uri: Uri.file('/project') }),
       onDidChangeTextDocument: () => disposable,
       onDidSaveTextDocument: () => disposable,
@@ -68,8 +74,13 @@ export async function createProviderHarness(initialText = 'First.\n\nSecond.\n')
         return true;
       },
       fs: {
+        createDirectory: async () => {},
         readFile: async (uri: Uri) => { const bytes = files.get(uri.toString()); if (!bytes) throw new FileSystemError(); return bytes; },
         writeFile: async (uri: Uri, bytes: Uint8Array) => { files.set(uri.toString(), bytes); },
+        rename: async (from: Uri, to: Uri) => {
+          const bytes = files.get(from.toString()); if (!bytes) throw new FileSystemError();
+          files.set(to.toString(), bytes); files.delete(from.toString());
+        },
         delete: async (uri: Uri) => { files.delete(uri.toString()); }
       }
     },
@@ -91,6 +102,9 @@ export async function createProviderHarness(initialText = 'First.\n\nSecond.\n')
   const empty = () => ({ documentUri: uri.toString(), threads: [], updatedAt: '' });
   let saveCount = 0;
   const store: any = {
+    getHandoffPhase: () => handoffPhase,
+    isHandoffActive: () => Boolean(handoffPhase),
+    assertWritable: () => { if (handoffPhase) throw new Error('저장 보류'); },
     withDocumentTransaction: async (_uri: Uri, operation: () => Promise<unknown>) => operation(),
     load: async () => empty(), loadResolved: async () => empty(),
     saveBoth: async () => { saveCount++; },
@@ -101,6 +115,7 @@ export async function createProviderHarness(initialText = 'First.\n\nSecond.\n')
   const provider: any = new loaded.exports.ReviewEditorProvider({ extensionUri: Uri.file('/extension') }, store);
   const snapshot = { reviewUri: Uri.file('/project/.spec.md.ai-review.json'), resolvedUri: Uri.file('/project/.spec.md.ai-review.json'), reviewBytes: undefined, resolvedBytes: undefined };
   provider.reviewUndo = {
+    reset: () => {},
     capture: async () => snapshot,
     register: (...args: any[]) => registrations.push(args),
     handleTextDocumentChange: async () => false
@@ -113,7 +128,21 @@ export async function createProviderHarness(initialText = 'First.\n\nSecond.\n')
   };
   return {
     provider, document, store, vscode, webview, files, edits, warnings, registrations, postedMessages, copiedTexts,
+    executedCommands, setHandoffPhase(value: typeof handoffPhase) { handoffPhase = value; },
     snapshot, ReviewStorageConflictError: loaded.exports.ReviewStorageConflictError, get saveCount() { return saveCount; },
+    useRealStore() {
+      const state = new Map<string, unknown>();
+      const realStore = new loaded.exports.ReviewStore({
+        globalStorageUri: Uri.file('/private'),
+        workspaceState: { get: (key: string) => state.get(key), update: async (key: string, value: unknown) => { state.set(key, structuredClone(value)); } }
+      });
+      const undo = new loaded.exports.ReviewUndoController(realStore);
+      const register = undo.register.bind(undo);
+      undo.register = (...args: any[]) => { registrations.push(args); register(...args); };
+      provider.store = realStore;
+      provider.reviewUndo = undo;
+      return { store: realStore, undo };
+    },
     changeText(value: string) { text = value; version++; },
     render() { return provider.renderHtml(webview, document, empty(), empty()); },
     async open() {

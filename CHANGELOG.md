@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.1.0 - 2026-09-11
+
+- Simplifies the workflow to comments → Send to Agent → Review Changes. Removes in-extension conversation replies, AI patch approval, local checks, and multiple prompt commands.
+- Stores new requests in compact v3 JSON with portable document names, target context, agent guidance, stable IDs, revisions, and pending/done/blocked results. A done result reports AI handling, not user approval.
+- Pauses extension writes during handoff and retains drafts across reloads. Validates returned requests before resuming, detects missing or damaged JSON, and offers explicit recovery.
+- Preserves earlier reviews with raw local backups, converts open discussions verbatim on handoff, and archives completed requests before the next round. Archived requests can be reopened.
+- Retains rendered Markdown, image/code/table/Mermaid comments, precise navigation, manual editing, and side-by-side review. Passive preview no longer rewrites anchor metadata; Undo cannot cross external-edit boundaries.
+- Updates the workflow documentation, protocol schema, Marketplace artwork, and regression coverage.
+
 ## 0.0.21 - 2026-09-09
 
 - Keeps unsaved comment, reply, block, table, and Mermaid drafts through preview refreshes; waits for save confirmation, supports failed-save retries, and recovers stale drafts through explicit copy/discard.

@@ -1,12 +1,13 @@
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const rootDir = path.resolve(__dirname, '..');
 const mediaDir = path.join(rootDir, 'media');
-const frameDir = path.join(rootDir, '.test-out', 'marketplace-frames');
+const frameDir = mkdtempSync(path.join(tmpdir(), 'markdown-review-marketplace-'));
 
 mkdirSync(mediaDir, { recursive: true });
 mkdirSync(frameDir, { recursive: true });
@@ -23,7 +24,7 @@ function iconSvg() {
   return `<?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" role="img" aria-labelledby="title desc">
   <title id="title">AI Markdown Review Loop icon</title>
-  <desc id="desc">A Markdown document with anchored AI review comments.</desc>
+  <desc id="desc">A Markdown document with a review comment.</desc>
   <defs>
     <linearGradient id="bg" x1="64" y1="48" x2="448" y2="464" gradientUnits="userSpaceOnUse">
       <stop offset="0" stop-color="#111827"/>
@@ -48,118 +49,100 @@ function iconSvg() {
 function heroSvg() {
   return `<?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" width="1280" height="720" viewBox="0 0 1280 720" role="img" aria-labelledby="title desc">
-  <title id="title">AI Markdown Review Loop marketplace hero</title>
-  <desc id="desc">VS Code Markdown review preview with inline comments, thread history, and AI agent handoff.</desc>
-  <defs>
-    <linearGradient id="chrome" x1="0" y1="0" x2="1280" y2="720" gradientUnits="userSpaceOnUse">
-      <stop offset="0" stop-color="#172033"/>
-      <stop offset="1" stop-color="#0f172a"/>
-    </linearGradient>
-    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
-      <feDropShadow dx="0" dy="20" stdDeviation="22" flood-color="#020617" flood-opacity="0.45"/>
-    </filter>
-  </defs>
-  <rect width="1280" height="720" fill="#0b1020"/>
-  <rect x="44" y="42" width="1192" height="636" rx="28" fill="url(#chrome)" filter="url(#shadow)"/>
-  <rect x="44" y="42" width="1192" height="54" rx="28" fill="#111827"/>
-  <circle cx="82" cy="69" r="8" fill="#ef4444"/>
-  <circle cx="110" cy="69" r="8" fill="#f59e0b"/>
-  <circle cx="138" cy="69" r="8" fill="#84cc16"/>
-  <text x="170" y="76" fill="#e5e7eb" font-size="21" font-family="Inter, Arial, sans-serif" font-weight="700">AI Markdown Review Loop</text>
-  <text x="62" y="142" fill="#f8fafc" font-size="43" font-family="Inter, Arial, sans-serif" font-weight="800">Review Markdown where the document lives</text>
-  <text x="64" y="182" fill="#cbd5e1" font-size="22" font-family="Inter, Arial, sans-serif">Inline threads, anchor-safe edits, and AI agent handoff for docs that keep changing.</text>
+  <title id="title">Comment, hand off, and review revised Markdown</title>
+  <desc id="desc">Illustrated workflow: add a targeted comment, give a compact JSON task file to an external coding agent, then inspect its source changes and done or blocked results. This is not a live screenshot.</desc>
+  <rect width="1280" height="720" fill="#0b1120"/>
+  <g font-family="Inter, Arial, sans-serif">
+    <text x="64" y="68" fill="#a3e635" font-size="18" font-weight="700" letter-spacing="2">AI MARKDOWN REVIEW LOOP</text>
+    <text x="64" y="132" fill="#f8fafc" font-size="46" font-weight="800">Comment. Send. Review the changes.</text>
+    <text x="64" y="176" fill="#cbd5e1" font-size="23">A small JSON task file for the coding agent you choose.</text>
 
-  <rect x="66" y="220" width="344" height="390" rx="14" fill="#111827" stroke="#334155"/>
-  <text x="90" y="258" fill="#93c5fd" font-size="18" font-family="SFMono-Regular, Menlo, monospace">docs/launch-plan.md</text>
-  <text x="90" y="302" fill="#d1d5db" font-size="18" font-family="SFMono-Regular, Menlo, monospace">## Agent Handoff</text>
-  <text x="90" y="338" fill="#d1d5db" font-size="18" font-family="SFMono-Regular, Menlo, monospace">- Review threads first</text>
-  <text x="90" y="374" fill="#d1d5db" font-size="18" font-family="SFMono-Regular, Menlo, monospace">- Preserve anchors</text>
-  <rect x="88" y="398" width="286" height="38" rx="8" fill="#14532d"/>
-  <text x="104" y="423" fill="#dcfce7" font-size="17" font-family="SFMono-Regular, Menlo, monospace">- Apply safe patches only</text>
-  <text x="90" y="474" fill="#94a3b8" font-size="16" font-family="SFMono-Regular, Menlo, monospace">.launch-plan.md.ai-review.json</text>
+    <rect x="64" y="220" width="352" height="384" rx="18" fill="#172334" stroke="#34475e"/>
+    <text x="88" y="259" fill="#a3e635" font-size="17" font-weight="700">01  COMMENT</text>
+    <text x="88" y="306" fill="#f8fafc" font-size="28" font-weight="700">Retry policy</text>
+    <rect x="88" y="331" width="302" height="43" rx="6" fill="#365314"/>
+    <text x="102" y="359" fill="#ecfccb" font-size="20">Retry failed requests.</text>
+    <path d="M116 389v17h18" fill="none" stroke="#a3e635" stroke-width="2"/>
+    <rect x="134" y="392" width="256" height="114" rx="10" fill="#0c1422" stroke="#84cc16"/>
+    <text x="152" y="425" fill="#f8fafc" font-size="18">Define the retry limit</text>
+    <text x="152" y="455" fill="#f8fafc" font-size="18">and final failure message.</text>
+    <text x="152" y="485" fill="#94a3b8" font-size="14">Your request · rv_retry</text>
+    <text x="88" y="566" fill="#cbd5e1" font-size="17">One request, one target.</text>
 
-  <rect x="438" y="220" width="438" height="390" rx="14" fill="#18212f" stroke="#475569"/>
-  <text x="466" y="263" fill="#f8fafc" font-size="31" font-family="Inter, Arial, sans-serif" font-weight="800">Agent Handoff</text>
-  <text x="466" y="312" fill="#e5e7eb" font-size="23" font-family="Inter, Arial, sans-serif">Open threads lead the handoff.</text>
-  <rect x="466" y="344" width="320" height="46" rx="9" fill="#3f6212"/>
-  <text x="484" y="375" fill="#ecfccb" font-size="22" font-family="Inter, Arial, sans-serif">This criterion is not testable</text>
-  <circle cx="806" cy="367" r="22" fill="#84cc16"/>
-  <text x="797" y="376" fill="#111827" font-size="25" font-family="Inter, Arial, sans-serif" font-weight="900">1</text>
-  <rect x="490" y="424" width="354" height="134" rx="13" fill="#111827" stroke="#64748b"/>
-  <rect x="514" y="448" width="54" height="28" rx="14" fill="#581c87" stroke="#c084fc"/>
-  <text x="531" y="468" fill="#f3e8ff" font-size="15" font-family="Inter, Arial, sans-serif" font-weight="700">AI</text>
-  <rect x="584" y="448" width="116" height="28" rx="14" fill="#0f3d68" stroke="#38bdf8"/>
-  <text x="602" y="468" fill="#bae6fd" font-size="15" font-family="Inter, Arial, sans-serif">suggestion</text>
-  <text x="514" y="511" fill="#e5e7eb" font-size="20" font-family="Inter, Arial, sans-serif">Needs a measurable done condition.</text>
-  <rect x="514" y="528" width="132" height="34" rx="7" fill="#15803d"/>
-  <text x="535" y="551" fill="#f0fdf4" font-size="16" font-family="Inter, Arial, sans-serif" font-weight="700">Apply Patch</text>
+    <rect x="448" y="220" width="352" height="384" rx="18" fill="#172334" stroke="#34475e"/>
+    <text x="472" y="259" fill="#7dd3fc" font-size="17" font-weight="700">02  HAND OFF</text>
+    <text x="472" y="303" fill="#f8fafc" font-size="24" font-weight="700">Compact task JSON</text>
+    <text x="472" y="332" fill="#94a3b8" font-size="15">.spec.md.ai-review.json · abbreviated</text>
+    <g font-family="Courier-New" font-style="normal" font-size="17" fill="#bae6fd">
+      <text x="472" y="371">{</text>
+      <text x="488" y="397">&#x200B;&quot;schemaVersion&quot;: 3,</text>
+      <text x="488" y="423">&#x200B;&quot;document&quot;: &quot;spec.md&quot;,</text>
+      <text x="488" y="449">&#x200B;&quot;items&quot;: [{</text>
+      <text x="505" y="475">&#x200B;&quot;id&quot;: &quot;rv_retry&quot;,</text>
+      <text x="505" y="501">&#x200B;&quot;status&quot;: &quot;pending&quot;&#x200B;</text>
+      <text x="488" y="527">}] }</text>
+    </g>
+    <text x="472" y="566" fill="#cbd5e1" font-size="17">Agent edits spec.md directly.</text>
 
-  <rect x="904" y="220" width="288" height="390" rx="14" fill="#111827" stroke="#334155"/>
-  <text x="932" y="260" fill="#f8fafc" font-size="25" font-family="Inter, Arial, sans-serif" font-weight="800">Review Threads</text>
-  <rect x="932" y="292" width="232" height="78" rx="10" fill="#172554" stroke="#38bdf8"/>
-  <text x="950" y="323" fill="#dbeafe" font-size="17" font-family="Inter, Arial, sans-serif" font-weight="700">Located · AI</text>
-  <text x="950" y="350" fill="#bfdbfe" font-size="16" font-family="Inter, Arial, sans-serif">Patch ready</text>
-  <rect x="932" y="392" width="232" height="78" rx="10" fill="#1f2937" stroke="#475569"/>
-  <text x="950" y="423" fill="#e5e7eb" font-size="17" font-family="Inter, Arial, sans-serif" font-weight="700">You replied</text>
-  <text x="950" y="450" fill="#cbd5e1" font-size="16" font-family="Inter, Arial, sans-serif">Continue with AI</text>
-  <rect x="932" y="492" width="232" height="78" rx="10" fill="#202c1a" stroke="#84cc16"/>
-  <text x="950" y="523" fill="#ecfccb" font-size="17" font-family="Inter, Arial, sans-serif" font-weight="700">Patch applied</text>
-  <text x="950" y="550" fill="#d9f99d" font-size="16" font-family="Inter, Arial, sans-serif">History linked</text>
+    <rect x="832" y="220" width="384" height="384" rx="18" fill="#172334" stroke="#34475e"/>
+    <text x="856" y="259" fill="#c4b5fd" font-size="17" font-weight="700">03  REVIEW THE CHANGES</text>
+    <text x="856" y="306" fill="#f8fafc" font-size="28" font-weight="700">Revised Markdown</text>
+    <rect x="856" y="331" width="336" height="109" rx="8" fill="#16332a"/>
+    <text x="872" y="360" fill="#dcfce7" font-size="18">Retry up to three times.</text>
+    <text x="872" y="390" fill="#dcfce7" font-size="18">Then show the failure reason</text>
+    <text x="872" y="420" fill="#dcfce7" font-size="18">and a retry action.</text>
+    <rect x="856" y="465" width="64" height="28" rx="14" fill="#3f6212"/>
+    <text x="871" y="484" fill="#ecfccb" font-size="14" font-weight="700">Done</text>
+    <text x="932" y="485" fill="#cbd5e1" font-size="15">Agent result for revision 1</text>
+    <text x="856" y="524" fill="#94a3b8" font-size="16">Blocked items explain what is needed.</text>
+    <text x="856" y="566" fill="#cbd5e1" font-size="17">Inspect the source. Reopen if needed.</text>
 
-  <rect x="66" y="632" width="230" height="34" rx="17" fill="#84cc16"/>
-  <text x="88" y="655" fill="#111827" font-size="16" font-family="Inter, Arial, sans-serif" font-weight="800">Drag to comment</text>
-  <rect x="316" y="632" width="235" height="34" rx="17" fill="#2563eb"/>
-  <text x="339" y="655" fill="#eff6ff" font-size="16" font-family="Inter, Arial, sans-serif" font-weight="800">Reply and hand off</text>
-  <rect x="571" y="632" width="248" height="34" rx="17" fill="#9333ea"/>
-  <text x="594" y="655" fill="#f5f3ff" font-size="16" font-family="Inter, Arial, sans-serif" font-weight="800">Preserve review state</text>
+    <text x="64" y="656" fill="#e2e8f0" font-size="21">Comment → Task JSON → Agent edit → Your review</text>
+    <text x="64" y="691" fill="#8292a8" font-size="14">Illustrated workflow · external file-capable agent required · no built-in model calls</text>
+  </g>
 </svg>`;
 }
 
 function demoFrame(step) {
   const steps = [
-    ['Open Review Beside', 'Read source and rendered review together.', '#38bdf8'],
-    ['Drag-select feedback', 'Attach a comment to the exact Markdown span.', '#84cc16'],
-    ['Discuss in place', 'Reply with You/AI attribution and keep the thread open.', '#c084fc'],
-    ['Apply or hand off', 'Apply reliable patches or continue the exact thread with AI.', '#22c55e']
+    ['Comment on the document', 'Select the content and describe the change you want.', '#a3e635'],
+    ['Send the task file to your agent', 'One colocated JSON file carries the requests and brief guidance.', '#7dd3fc'],
+    ['The agent edits your Markdown', 'Save source changes first, then record done or blocked with a short result.', '#a3e635'],
+    ['Review the revised document', 'Inspect the changes. Reopen work or add comments for the next round.', '#c4b5fd']
   ];
-  const [title, subtitle, color] = steps[step - 1];
-  const composer = step >= 2;
-  const overlay = step >= 3;
-  const patch = step >= 4;
-
+  const [title, subtitle, accent] = steps[step - 1];
+  const revised = step >= 3;
+  const result = step >= 3;
+  const taskTitle = step === 1 ? 'Your comment' : 'Task file';
   return `<?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" width="960" height="540" viewBox="0 0 960 540" role="img" aria-labelledby="title desc">
-  <title id="title">AI Markdown Review Loop demo step ${step}</title>
-  <desc id="desc">${title}: ${subtitle}</desc>
-  <rect width="960" height="540" fill="#0f172a"/>
-  <rect x="28" y="28" width="904" height="484" rx="22" fill="#111827" stroke="#334155"/>
-  <rect x="28" y="28" width="904" height="48" rx="22" fill="#1f2937"/>
-  <text x="54" y="60" fill="#e5e7eb" font-size="19" font-family="Inter, Arial, sans-serif" font-weight="800">${title}</text>
-  <text x="690" y="60" fill="${color}" font-size="17" font-family="Inter, Arial, sans-serif" font-weight="800">Step ${step}/4</text>
-  <rect x="54" y="100" width="326" height="360" rx="12" fill="#0b1220" stroke="#334155"/>
-  <text x="78" y="132" fill="#93c5fd" font-size="15" font-family="SFMono-Regular, Menlo, monospace">source.md</text>
-  <text x="78" y="172" fill="#e5e7eb" font-size="17" font-family="SFMono-Regular, Menlo, monospace">## Review Loop</text>
-  <text x="78" y="210" fill="#d1d5db" font-size="16" font-family="SFMono-Regular, Menlo, monospace">1. Feedback stays attached.</text>
-  <text x="78" y="246" fill="#d1d5db" font-size="16" font-family="SFMono-Regular, Menlo, monospace">2. AI can continue threads.</text>
-  <text x="78" y="282" fill="#d1d5db" font-size="16" font-family="SFMono-Regular, Menlo, monospace">3. Safe patches can apply.</text>
-  <text x="78" y="340" fill="#94a3b8" font-size="14" font-family="SFMono-Regular, Menlo, monospace">.&lt;filename&gt;.ai-review.json</text>
-  <rect x="404" y="100" width="328" height="360" rx="12" fill="#18212f" stroke="#475569"/>
-  <text x="430" y="146" fill="#f8fafc" font-size="28" font-family="Inter, Arial, sans-serif" font-weight="800">Review Loop</text>
-  <text x="430" y="196" fill="#e5e7eb" font-size="19" font-family="Inter, Arial, sans-serif">1. Feedback stays attached.</text>
-  <rect x="428" y="218" width="254" height="34" rx="8" fill="${step >= 2 ? '#365314' : '#1f2937'}" stroke="${step >= 2 ? '#84cc16' : '#334155'}"/>
-  <text x="442" y="241" fill="#f8fafc" font-size="19" font-family="Inter, Arial, sans-serif">2. AI can continue threads.</text>
-  <text x="430" y="292" fill="#e5e7eb" font-size="19" font-family="Inter, Arial, sans-serif">3. Safe patches can apply.</text>
-  ${composer ? `<rect x="462" y="272" width="220" height="84" rx="10" fill="#243447" stroke="#84cc16"/><text x="482" y="304" fill="#e5e7eb" font-size="17" font-family="Inter, Arial, sans-serif">Comment on selected text</text><rect x="584" y="318" width="76" height="28" rx="7" fill="#15803d"/><text x="603" y="338" fill="#f0fdf4" font-size="14" font-family="Inter, Arial, sans-serif" font-weight="700">Save</text>` : ''}
-  ${overlay ? `<rect x="486" y="248" width="286" height="174" rx="13" fill="#111827" stroke="#64748b"/><rect x="508" y="270" width="42" height="24" rx="12" fill="#581c87" stroke="#c084fc"/><text x="521" y="288" fill="#f3e8ff" font-size="13" font-family="Inter, Arial, sans-serif" font-weight="800">AI</text><text x="508" y="326" fill="#f8fafc" font-size="17" font-family="Inter, Arial, sans-serif">Needs owner before handoff.</text><rect x="508" y="352" width="116" height="30" rx="7" fill="#374151"/><text x="526" y="372" fill="#e5e7eb" font-size="14" font-family="Inter, Arial, sans-serif">Reply</text>${patch ? `<rect x="636" y="352" width="116" height="30" rx="7" fill="#15803d"/><text x="654" y="372" fill="#f0fdf4" font-size="14" font-family="Inter, Arial, sans-serif">Apply Patch</text>` : ''}` : ''}
-  <rect x="756" y="100" width="148" height="360" rx="12" fill="#0b1220" stroke="#334155"/>
-  <text x="776" y="136" fill="#f8fafc" font-size="18" font-family="Inter, Arial, sans-serif" font-weight="800">Threads</text>
-  <rect x="776" y="160" width="108" height="58" rx="9" fill="${step >= 2 ? '#172554' : '#1f2937'}" stroke="${step >= 2 ? '#38bdf8' : '#334155'}"/>
-  <text x="790" y="185" fill="#dbeafe" font-size="14" font-family="Inter, Arial, sans-serif">${step >= 2 ? 'Located' : 'None yet'}</text>
-  <text x="790" y="205" fill="#bfdbfe" font-size="13" font-family="Inter, Arial, sans-serif">${step >= 2 ? 'AI thread' : 'Drag text'}</text>
-  <rect x="776" y="238" width="108" height="58" rx="9" fill="${patch ? '#14532d' : '#1f2937'}" stroke="${patch ? '#84cc16' : '#334155'}"/>
-  <text x="790" y="263" fill="#dcfce7" font-size="13" font-family="Inter, Arial, sans-serif">${patch ? 'Patch applied' : 'Open'}</text>
-  <text x="790" y="283" fill="#bbf7d0" font-size="13" font-family="Inter, Arial, sans-serif">${patch ? 'History' : 'Reply'}</text>
-  <text x="54" y="492" fill="#cbd5e1" font-size="20" font-family="Inter, Arial, sans-serif">${subtitle}</text>
+  <title id="title">${title}</title>
+  <desc id="desc">Illustrated workflow, step ${step} of 4: ${subtitle}</desc>
+  <rect width="960" height="540" fill="#0b1120"/>
+  <g font-family="Inter, Arial, sans-serif">
+    <text x="40" y="44" fill="${accent}" font-size="14" font-weight="700" letter-spacing="1.5">AI MARKDOWN REVIEW LOOP</text>
+    <text x="850" y="44" fill="#94a3b8" font-size="16">${step} / 4</text>
+    <text x="40" y="94" fill="#f8fafc" font-size="34" font-weight="800">${title}</text>
+    <rect x="40" y="125" width="438" height="315" rx="16" fill="#172334" stroke="#34475e"/>
+    <text x="64" y="160" fill="#93c5fd" font-size="16">spec.md${revised ? ' · revised source' : ''}</text>
+    <text x="64" y="208" fill="#f8fafc" font-size="27" font-weight="700">Retry policy</text>
+    <rect x="64" y="233" width="390" height="${revised ? '112' : '44'}" rx="7" fill="${revised ? '#16332a' : '#365314'}"/>
+    <text x="80" y="262" fill="#ecfccb" font-size="21">${revised ? 'Retry up to three times.' : 'Retry failed requests.'}</text>
+    ${revised ? `<text x="80" y="295" fill="#dcfce7" font-size="20">Then show the failure reason</text><text x="80" y="328" fill="#dcfce7" font-size="20">and a retry action.</text>` : ''}
+    <text x="64" y="397" fill="#94a3b8" font-size="16">${revised ? 'The source is the work to review.' : 'Select a specific target for your request.'}</text>
+
+    <rect x="502" y="125" width="418" height="315" rx="16" fill="#172334" stroke="${accent}"/>
+    <text x="526" y="160" fill="${accent}" font-size="16" font-weight="700">${taskTitle}${step >= 2 ? ' · abbreviated' : ''}</text>
+    <text x="526" y="204" fill="#f8fafc" font-size="22" font-weight="700">Define the retry behavior</text>
+    <text x="526" y="241" fill="#e2e8f0" font-size="18">Specify the retry limit and the</text>
+    <text x="526" y="269" fill="#e2e8f0" font-size="18">message after the final failure.</text>
+    <text x="526" y="315" fill="#94a3b8" font-size="15">rv_retry · revision 1</text>
+    <rect x="526" y="340" width="${result ? '69' : '90'}" height="29" rx="14" fill="${result ? '#3f6212' : '#164e63'}"/>
+    <text x="542" y="360" fill="${result ? '#ecfccb' : '#cffafe'}" font-size="15" font-weight="700">${result ? 'Done' : 'Pending'}</text>
+    <text x="526" y="404" fill="#cbd5e1" font-size="16">${result ? 'Defined three retries and a failure action.' : 'Guidance and target travel with the request.'}</text>
+    <text x="40" y="480" fill="#e2e8f0" font-size="20">${subtitle}</text>
+    <text x="40" y="515" fill="#8292a8" font-size="13">Illustrated workflow · use an external agent with workspace file access</text>
+  </g>
 </svg>`;
 }
 
@@ -181,11 +164,14 @@ run('magick', ['-background', '#0b1020', '-density', '144', path.join(mediaDir, 
 run('magick', ['-background', '#0f172a', '-density', '144', path.join(mediaDir, 'review-loop-demo-poster.svg'), '-resize', '960x540!', path.join(mediaDir, 'review-loop-demo-poster.png')]);
 
 if (framePngs.every((file) => existsSync(file))) {
-  run('magick', ['-delay', '140', '-loop', '0', ...framePngs, path.join(mediaDir, 'review-loop-demo.gif')]);
+  run('magick', ['-delay', '250', '-loop', '0', ...framePngs, path.join(mediaDir, 'review-loop-demo.gif')]);
   run('ffmpeg', [
+    '-hide_banner',
+    '-loglevel',
+    'error',
     '-y',
     '-framerate',
-    '1',
+    '2/5',
     '-pattern_type',
     'glob',
     '-i',

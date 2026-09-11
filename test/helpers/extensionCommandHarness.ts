@@ -22,6 +22,10 @@ export async function createExtensionCommandHarness() {
   const openAttempts: string[] = [];
   const shownDocuments: any[] = [];
   const executed: Array<{ id: string; args: any[] }> = [];
+  const clipboard: string[] = [];
+  const memento = new Map<string, unknown>();
+  let clipboardFailure = false;
+  let workspaceFolders = ['/workspace'];
   const disposable = { dispose() {} };
   let provider: any;
 
@@ -41,18 +45,23 @@ export async function createExtensionCommandHarness() {
   function textDocument(uri: Uri, text: string, languageId = 'markdown') {
     return {
       uri, fileName: uri.path, languageId, version: 1,
-      getText: () => text, lineCount: text.split(/\r?\n/).length,
+      isDirty: false, save: async () => true, getText: () => text, lineCount: text.split(/\r?\n/).length,
       lineAt: (line: number) => ({ text: text.split(/\r?\n/)[line] })
     };
   }
   const vscode: any = {
     Uri, FileSystemError,
+    env: { clipboard: { writeText: async (text: string) => { if (clipboardFailure) throw new Error("Clipboard unavailable"); clipboard.push(text); } } },
     Disposable: class { constructor(readonly dispose: () => void) {} },
     EventEmitter: class { event = () => disposable; fire() {} dispose() {} },
     ViewColumn: { Active: -1, Beside: -2 },
     workspace: {
-      getWorkspaceFolder: (uri: Uri) => uri.scheme === 'file' && uri.path.startsWith('/workspace/')
-        ? { uri: Uri.file('/workspace') } : undefined,
+      textDocuments: [],
+      getWorkspaceFolder: (uri: Uri) => {
+        const folder = workspaceFolders.filter(root => uri.scheme === 'file' && uri.path.startsWith(root + '/'))
+          .sort((left, right) => right.length - left.length)[0];
+        return folder ? { uri: Uri.file(folder) } : undefined;
+      },
       asRelativePath: (uri: Uri) => path.relative('/workspace', uri.path),
       onDidRenameFiles: () => disposable,
       registerTextDocumentContentProvider: (scheme: string, value: any) => { contentProviders.set(scheme, value); return disposable; },
@@ -73,6 +82,7 @@ export async function createExtensionCommandHarness() {
         createDirectory: async () => {},
         readFile: async (uri: Uri) => { const bytes = files.get(uri.toString()); if (!bytes) { throw new FileSystemError(); } return Uint8Array.from(bytes); },
         writeFile: async (uri: Uri, bytes: Uint8Array) => { files.set(uri.toString(), Uint8Array.from(bytes)); },
+        rename: async (from: Uri, to: Uri) => { const bytes = files.get(from.toString()); if (!bytes) throw new FileSystemError(); files.set(to.toString(), bytes); files.delete(from.toString()); },
         delete: async (uri: Uri) => { if (!files.delete(uri.toString())) { throw new FileSystemError(); } }
       }
     },
@@ -98,10 +108,12 @@ export async function createExtensionCommandHarness() {
   const loaded = new Module(path.join(process.cwd(), 'test/extension-command-memory-module'));
   loaded.require = (name: string) => name === 'vscode' ? vscode : require(name);
   (loaded as any)._compile(await bundledExtension, 'extension-command-memory-module');
-  const context = { extensionUri: Uri.file('/extension'), globalStorageUri: Uri.file('/global'), subscriptions: [] as any[] };
+  const context = { extensionUri: Uri.file('/extension'), globalStorageUri: Uri.file('/global'), workspaceState: { get: (key: string) => memento.get(key), update: async (key: string, value: unknown) => { memento.set(key, value); } }, subscriptions: [] as any[] };
   loaded.exports.activate(context);
   return {
-    files, information, warnings, errors, executed, shownDocuments, openAttempts,
+    files, information, warnings, errors, executed, shownDocuments, openAttempts, clipboard, commands,
+    failClipboard: () => { clipboardFailure = true; },
+    setWorkspaceFolders: (folders: string[]) => { workspaceFolders = folders; },
     get store(): any { return provider.store; },
     addDocument(filePath: string, text = '# Spec\n\nTODO: choose a limit.\n\n## Acceptance Criteria\n\n- Checks pass.', languageId = 'markdown') {
       const document = textDocument(Uri.file(filePath), text, languageId);

@@ -4,6 +4,7 @@ export type ReviewActor = 'user' | 'assistant';
 export type ReviewType = 'fix' | 'question' | 'note' | 'risk' | 'suggestion';
 export type ReviewSeverity = 'low' | 'medium' | 'high';
 export type AnchorConfidence = 'exact' | 'recovered' | 'approximate' | 'missing' | 'ambiguous';
+export type ReviewTaskStatus = 'pending' | 'done' | 'blocked';
 
 export interface ReviewAnchor {
   text: string;
@@ -45,10 +46,18 @@ export interface ReviewThread {
   thread: ReviewReply[];
   createdAt: string;
   updatedAt: string;
+  taskRevision?: number;
+  taskStatus?: ReviewTaskStatus;
+  taskResult?: string;
+  taskResultFor?: number;
+  taskOrder?: number;
+  legacyContext?: string;
 }
 
 export interface ReviewDocument {
   documentUri: string;
   threads: ReviewThread[];
   updatedAt: string;
+  taskSchemaVersion?: 2 | 3;
+  guidance?: string;
 }

@@ -9,7 +9,7 @@ const finding = (id: string) => storageThread(id, {
 
 describe('local review decision preservation', () => {
   it('deduplicates already open local findings and reports the reason', async () => {
-    const { store, uri } = createReviewStorageHarness();
+    const { store, uri } = createReviewStorageHarness('/workspace', true);
     await store.addLocalReviewThreads(uri, [finding('rv_first')]);
     const result = await store.addLocalReviewThreads(uri, [finding('rv_second')]);
     assert.equal(result.addedThreads.length, 0);
@@ -20,7 +20,7 @@ describe('local review decision preservation', () => {
 
   it('keeps unchanged declined and resolved local findings closed on repeated checks', async () => {
     for (const status of ['rejected', 'resolved'] as const) {
-      const { store, uri } = createReviewStorageHarness();
+      const { store, uri } = createReviewStorageHarness('/workspace', true);
       await store.addLocalReviewThreads(uri, [finding('rv_first')]);
       await store.addReply(uri, 'rv_first', 'This is intentional.');
       await store.updateThread(uri, 'rv_first', { status, closedBy: 'user', closedAt: '2026-09-09T00:01:00Z' });
@@ -37,7 +37,7 @@ describe('local review decision preservation', () => {
 
   it('allows a new finding when reviewed source or its context actually changed', async () => {
     for (const anchorChange of [{ text: 'TODO: choose a different limit.' }, { contextAfter: 'A changed requirement.' }, { lineStart: 8, lineEnd: 8 }]) {
-      const { store, uri } = createReviewStorageHarness();
+      const { store, uri } = createReviewStorageHarness('/workspace', true);
       await store.addLocalReviewThreads(uri, [finding('rv_first')]);
       await store.updateThread(uri, 'rv_first', { status: 'rejected' });
       const incoming = finding('rv_changed');
@@ -49,7 +49,7 @@ describe('local review decision preservation', () => {
   });
 
   it('keeps separate local rules and preserves ordinary import behavior', async () => {
-    const { store, uri } = createReviewStorageHarness();
+    const { store, uri } = createReviewStorageHarness('/workspace', true);
     await store.addLocalReviewThreads(uri, [finding('rv_first')]);
     await store.updateThread(uri, 'rv_first', { status: 'rejected' });
     const otherRule = { ...finding('rv_other_rule'), type: 'suggestion' as const, comment: 'Shorten this line.' };
@@ -58,7 +58,7 @@ describe('local review decision preservation', () => {
   });
 
   it('does not use human or AI decisions to suppress a local rule and rejects nonlocal input', async () => {
-    const { store, uri } = createReviewStorageHarness();
+    const { store, uri } = createReviewStorageHarness('/workspace', true);
     await store.addThread(uri, { ...finding('rv_human'), source: 'human' });
     await store.updateThread(uri, 'rv_human', { status: 'resolved' });
     assert.equal((await store.addLocalReviewThreads(uri, [finding('rv_local')])).addedThreads.length, 1);

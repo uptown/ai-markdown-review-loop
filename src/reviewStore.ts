@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { createHash } from 'crypto';
+import { createHash, randomUUID } from 'crypto';
 import { AsyncLocalStorage } from 'async_hooks';
 import { stat } from 'fs/promises';
 import path from 'path';
@@ -7,11 +7,15 @@ import { createRestoredReviewThread } from './reviewHistory';
 import {
   createEmptyReviewDocument,
   createPortableReviewSidecarPayload,
+  createLegacyReviewSidecarPayload,
+  createReviewTaskItem,
+  migrateLegacyReviewDocuments,
   mergeReviewDocuments,
   parseLegacyReviewDocument,
   parsePortableReviewSidecar,
   upsertThread
 } from './reviewSidecarCodec';
+import { compareReviewTaskCheckpoint, createReviewTaskCheckpoint, createReviewTaskFingerprint, getReviewTaskStatus, parseReviewTaskSidecar, type ReviewTaskCheckpoint } from './reviewTaskProtocol';
 import {
   LEGACY_CLOSED_REVIEW_FOLDER,
   LEGACY_OPEN_REVIEW_FOLDER,
@@ -59,14 +63,184 @@ export class ReviewStorageConflictError extends Error {
 
 interface DocumentTransaction {
   active: boolean;
+  writableAtEnqueue: boolean;
+  internalWrite?: boolean;
+  rebaseTaskRevision?: boolean;
+  allowTaskRemoval?: boolean;
   reads: Map<string, { uri: vscode.Uri; bytes: Uint8Array | undefined }>;
+}
+
+interface StoredReviewState {
+  phase?: 'preparing' | 'handedOff';
+  checkpoint?: ReviewTaskCheckpoint;
+  checkpointPath?: string;
+  knownCanonical?: boolean;
+  lastValidPath?: string;
+  lastHash?: string;
+  pendingWrite?: { hash: string; path: string };
+  historyPaths?: string[];
+  legacyPaths?: string[];
+}
+
+export class ReviewHandoffError extends Error {
+  constructor(message = '외부 편집에 전달되어 저장이 보류되었습니다. AI 작업이 끝나면 수정본 검수로 돌아오세요. 초안은 유지됩니다.') {
+    super(message);
+    this.name = 'ReviewHandoffError';
+  }
 }
 
 export class ReviewStore {
   private readonly queues = new Map<string, Promise<void>>();
   private readonly transactionContext = new AsyncLocalStorage<Map<string, DocumentTransaction>>();
+  private readonly states = new Map<string, StoredReviewState>();
+  private readonly epochs = new Map<string, number>();
 
   constructor(private readonly context: vscode.ExtensionContext) {}
+
+  getHandoffPhase(uri: vscode.Uri): StoredReviewState['phase'] { return this.state(uri).phase; }
+  isHandoffActive(uri: vscode.Uri): boolean { return Boolean(this.getHandoffPhase(uri)); }
+  getDocumentEpoch(uri: vscode.Uri): number { return this.epochs.get(uri.toString()) ?? 0; }
+
+  assertWritable(uri: vscode.Uri): void {
+    const phase = this.getHandoffPhase(uri);
+    const tx = this.transactionContext.getStore()?.get(uri.toString());
+    if (phase && !(tx?.active && (tx.internalWrite || (phase === 'preparing' && tx.writableAtEnqueue)))) {
+      throw new ReviewHandoffError();
+    }
+  }
+
+  /** Freeze ingress before draining operations already queued by the editor. */
+  async prepareHandoff(uri: vscode.Uri, saveDocument: () => Promise<boolean>, deliver: (sidecar: vscode.Uri, contents: string) => Promise<void>): Promise<void> {
+    if (this.isHandoffActive(uri)) throw new ReviewHandoffError();
+    this.states.set(uri.toString(), { ...this.state(uri), phase: 'preparing' });
+    try {
+      await this.withDocumentTransaction(uri, async () => {
+        await this.internalWrite(uri, async () => {
+          await this.persistState(uri, { phase: 'preparing' });
+          if (!await saveDocument()) throw new Error('문서 저장이 취소되어 전달하지 않았습니다.');
+          const sidecar = await this.getReviewFileUri(uri);
+          this.assertSidecarEditorClean(sidecar);
+          let pair = await this.readReviewDocuments(uri);
+          if (pair.reviewDocument.taskSchemaVersion === 2 || pair.resolvedReviewDocument.taskSchemaVersion === 2) {
+            await this.backupLegacy(uri);
+            pair = migrateLegacyReviewDocuments(pair);
+          }
+          // Archive completed records before removing them from the next agent input.
+          if (pair.resolvedReviewDocument.threads.length) {
+            const archive = createPortableReviewSidecarPayload(uri.toString(), createEmptyReviewDocument(uri.toString()), pair.resolvedReviewDocument, new Date().toISOString());
+            const archivePath = await this.backup(uri, 'completed', encoder.encode(JSON.stringify(archive, null, 2)));
+            await this.persistState(uri, { historyPaths: [...(this.state(uri).historyPaths ?? []), archivePath] });
+            pair.resolvedReviewDocument = { ...createEmptyReviewDocument(uri.toString()), taskSchemaVersion: 3 };
+          }
+          pair.reviewDocument.taskSchemaVersion = 3;
+          pair.resolvedReviewDocument.taskSchemaVersion = 3;
+          if (!pair.reviewDocument.threads.length) throw new Error('전달할 미처리 코멘트가 없습니다. 문서를 검수하고 코멘트를 남겨주세요.');
+          await this.writePortableReviewDocuments(sidecar, uri, pair.reviewDocument, pair.resolvedReviewDocument);
+          const bytes = await readFileIfExists(sidecar);
+          if (!bytes) throw new Error('전달할 리뷰 파일을 읽을 수 없습니다.');
+          const payload = parseReviewTaskSidecar(JSON.parse(decoder.decode(bytes)));
+          const checkpointPath = await this.backup(uri, 'handoff', bytes);
+          await this.persistState(uri, { checkpoint: createReviewTaskCheckpoint(payload), checkpointPath, phase: 'handedOff' });
+          this.advanceEpoch(uri);
+          await deliver(sidecar, decoder.decode(bytes));
+        });
+      });
+    } catch (error) {
+      // A failed save/copy does not leave a hidden permanent editing lock.
+      await this.persistState(uri, { phase: undefined, checkpoint: undefined, checkpointPath: undefined });
+      throw error;
+    }
+  }
+
+  async resumeReview(uri: vscode.Uri): Promise<void> {
+    await this.withDocumentTransaction(uri, async () => {
+      const sidecar = await this.getReviewFileUri(uri);
+      this.assertSidecarEditorClean(sidecar);
+      // Parsing also checks missing/changed immutable requests against the checkpoint.
+      await this.readReviewDocuments(uri);
+      await this.persistState(uri, { phase: undefined, checkpoint: undefined, checkpointPath: undefined });
+      this.advanceEpoch(uri);
+    });
+  }
+
+  async updateComment(uri: vscode.Uri, id: string, comment: string, expectedRevision?: number): Promise<void> {
+    this.assertWritable(uri);
+    await this.withDocumentTransaction(uri, async () => {
+      const open = await this.load(uri);
+      const thread = open.threads.find(item => item.id === id);
+      if (!thread) throw new Error('코멘트를 찾을 수 없습니다. 새로고침 후 다시 시도하세요.');
+      this.checkTaskRevision(thread, expectedRevision);
+      if (!comment.trim()) throw new Error('수정 요청을 입력하세요.');
+      Object.assign(thread, { comment: comment.trim(), taskRevision: (thread.taskRevision ?? 1) + 1, taskStatus: 'pending', taskResult: undefined, taskResultFor: undefined, legacyContext: undefined, updatedAt: new Date().toISOString() });
+      await this.save(uri, open);
+    });
+  }
+
+  async removeThread(uri: vscode.Uri, id: string, expectedRevision?: number): Promise<void> {
+    this.assertWritable(uri);
+    await this.withDocumentTransaction(uri, async () => {
+      const pair = await this.readReviewDocuments(uri);
+      const thread = [...pair.reviewDocument.threads, ...pair.resolvedReviewDocument.threads].find(item => item.id === id);
+      if (!thread) throw new Error('코멘트를 찾을 수 없습니다.');
+      this.checkTaskRevision(thread, expectedRevision);
+      const sidecar = await this.getReviewFileUri(uri);
+      const bytes = await readFileIfExists(sidecar);
+      if (bytes) await this.backup(uri, 'removed', bytes);
+      pair.reviewDocument.threads = pair.reviewDocument.threads.filter(item => item.id !== id);
+      pair.resolvedReviewDocument.threads = pair.resolvedReviewDocument.threads.filter(item => item.id !== id);
+      const tx = this.transactionContext.getStore()!.get(uri.toString())!;
+      tx.allowTaskRemoval = true;
+      try { await this.saveBoth(uri, pair.reviewDocument, pair.resolvedReviewDocument); } finally { tx.allowTaskRemoval = false; }
+    });
+  }
+
+  async loadArchived(uri: vscode.Uri): Promise<ReviewThread[]> {
+    const records = new Map<string, ReviewThread>();
+    for (const file of this.state(uri).historyPaths ?? []) {
+      const bytes = await readFileIfExists(vscode.Uri.file(file));
+      if (!bytes) continue;
+      const payload = JSON.parse(decoder.decode(bytes));
+      if (payload.schemaVersion === 3) payload.document = path.posix.basename(uri.path);
+      const pair = parsePortableReviewSidecar(uri.toString(), payload);
+      for (const thread of pair.resolvedReviewDocument.threads) records.set(thread.id, thread);
+    }
+    return [...records.values()];
+  }
+
+  getLegacyBackupPaths(uri: vscode.Uri): string[] { return [...(this.state(uri).legacyPaths ?? [])]; }
+
+  async restoreArchivedThread(uri: vscode.Uri, id: string): Promise<void> {
+    this.assertWritable(uri);
+    await this.withDocumentTransaction(uri, async () => {
+      const pair = await this.readReviewDocuments(uri);
+      if ([...pair.reviewDocument.threads, ...pair.resolvedReviewDocument.threads].some(item => item.id === id)) throw new Error('같은 ID의 현재 코멘트가 있습니다. 현재 목록에서 다시 열어주세요.');
+      const thread = (await this.loadArchived(uri)).find(item => item.id === id);
+      if (!thread) throw new Error('보관한 코멘트를 찾을 수 없습니다.');
+      pair.reviewDocument.threads.push(this.reopenTask(thread));
+      await this.saveBoth(uri, pair.reviewDocument, pair.resolvedReviewDocument);
+    });
+  }
+
+  /** Explicit recovery only; never resurrect a missing sidecar during ordinary reads. */
+  async restoreReviewBackup(uri: vscode.Uri): Promise<void> {
+    await this.withDocumentTransaction(uri, async () => this.internalWrite(uri, async () => {
+      const state = this.state(uri);
+      const backupPath = state.checkpointPath ?? state.lastValidPath;
+      if (!backupPath) throw new Error('복구할 리뷰 파일이 없습니다.');
+      const bytes = await readFileIfExists(vscode.Uri.file(backupPath));
+      if (!bytes) throw new Error('리뷰 복구 사본을 읽을 수 없습니다.');
+      parsePortableReviewSidecar(uri.toString(), JSON.parse(decoder.decode(bytes)));
+      const sidecar = await this.getReviewFileUri(uri);
+      this.assertSidecarEditorClean(sidecar);
+      const current = await readFileIfExists(sidecar);
+      if (current) await this.backup(uri, 'before-restore', current);
+      await this.commitCanonicalWrite(uri, sidecar, bytes, async () => {
+        if (!bytesEqual(current, await readFileIfExists(sidecar))) throw new ReviewStorageConflictError();
+      });
+      await this.persistState(uri, { phase: undefined, checkpoint: undefined, checkpointPath: undefined });
+      this.advanceEpoch(uri);
+    }));
+  }
 
   /** Keep the complete read/modify/write operation inside this callback. Nested calls are reentrant. */
   async withDocumentTransaction<T>(documentUri: vscode.Uri, operation: () => Promise<T>): Promise<T> {
@@ -78,11 +252,12 @@ export class ReviewStore {
     }
 
     const previous = this.queues.get(key) ?? Promise.resolve();
+    const writableAtEnqueue = !this.isHandoffActive(documentUri);
     let release!: () => void;
     const tail = new Promise<void>(resolve => { release = resolve; });
     this.queues.set(key, tail);
     await previous;
-    const transaction: DocumentTransaction = { active: true, reads: new Map() };
+    const transaction: DocumentTransaction = { active: true, writableAtEnqueue, reads: new Map() };
     const context = new Map(inherited);
     context.set(key, transaction);
 
@@ -98,22 +273,38 @@ export class ReviewStore {
   }
 
   async save(documentUri: vscode.Uri, reviewDocument: ReviewDocument): Promise<void> {
+    this.assertWritable(documentUri);
     return this.withDocumentTransaction(documentUri, () => this.saveUnlocked(documentUri, reviewDocument));
   }
 
   async saveBoth(documentUri: vscode.Uri, open: ReviewDocument, closed: ReviewDocument): Promise<void> {
+    this.assertWritable(documentUri);
     return this.withDocumentTransaction(documentUri, () => this.saveBothUnlocked(documentUri, open, closed));
   }
 
+  /** Undo replays request deltas while keeping revisions monotonically increasing. */
+  async saveBothForUndo(documentUri: vscode.Uri, open: ReviewDocument, closed: ReviewDocument): Promise<void> {
+    this.assertWritable(documentUri);
+    await this.withDocumentTransaction(documentUri, async () => {
+      const tx = this.transactionContext.getStore()!.get(documentUri.toString())!;
+      const previous = tx.rebaseTaskRevision;
+      tx.rebaseTaskRevision = true;
+      try { await this.saveBothUnlocked(documentUri, open, closed); } finally { tx.rebaseTaskRevision = previous; }
+    });
+  }
+
   async addThread(documentUri: vscode.Uri, thread: ReviewThread): Promise<ReviewDocument> {
+    this.assertWritable(documentUri);
     return this.withDocumentTransaction(documentUri, () => this.addThreadUnlocked(documentUri, thread));
   }
 
   async addThreads(documentUri: vscode.Uri, threads: ReviewThread[]): Promise<AddThreadsResult> {
+    this.assertWritable(documentUri);
     return this.withDocumentTransaction(documentUri, () => this.addThreadsUnlocked(documentUri, threads));
   }
 
   async addLocalReviewThreads(documentUri: vscode.Uri, threads: ReviewThread[]): Promise<AddLocalReviewThreadsResult> {
+    this.assertWritable(documentUri);
     return this.withDocumentTransaction(documentUri, async () => {
       if (threads.some(thread => thread.source !== 'local')) {
         throw new Error('Local checks can only create local review threads.');
@@ -146,18 +337,22 @@ export class ReviewStore {
   }
 
   async updateThread(documentUri: vscode.Uri, threadId: string, update: Partial<ReviewThread>): Promise<ReviewDocument> {
+    this.assertWritable(documentUri);
     return this.withDocumentTransaction(documentUri, () => this.updateThreadUnlocked(documentUri, threadId, update));
   }
 
   async updateThreadAnchors(documentUri: vscode.Uri, updates: AnchorLocationUpdate[]): Promise<boolean> {
+    this.assertWritable(documentUri);
     return this.withDocumentTransaction(documentUri, () => this.updateThreadAnchorsUnlocked(documentUri, updates));
   }
 
   async addReply(documentUri: vscode.Uri, threadId: string, text: string): Promise<ReviewDocument> {
+    this.assertWritable(documentUri);
     return this.withDocumentTransaction(documentUri, () => this.addReplyUnlocked(documentUri, threadId, text));
   }
 
   async restoreThread(documentUri: vscode.Uri, threadId: string): Promise<ReviewThread> {
+    this.assertWritable(documentUri);
     return this.withDocumentTransaction(documentUri, () => this.restoreThreadUnlocked(documentUri, threadId));
   }
 
@@ -165,21 +360,25 @@ export class ReviewStore {
     reviewMoved: boolean;
     resolvedMoved: boolean;
   }> {
+    this.assertWritable(oldDocumentUri);
+    this.assertWritable(newDocumentUri);
     const ordered = [oldDocumentUri, newDocumentUri].sort((left, right) => left.toString().localeCompare(right.toString()));
     return this.withDocumentTransaction(ordered[0], () => this.withDocumentTransaction(ordered[1],
       () => this.migrateDocumentUnlocked(oldDocumentUri, newDocumentUri)));
   }
 
   async deleteDocumentSidecars(documentUri: vscode.Uri, preservedDocumentUri?: vscode.Uri): Promise<void> {
+    this.assertWritable(documentUri);
     return this.withDocumentTransaction(documentUri, () => this.deleteDocumentSidecarsUnlocked(documentUri, preservedDocumentUri));
   }
 
   async saveResolved(documentUri: vscode.Uri, reviewDocument: ReviewDocument): Promise<void> {
+    this.assertWritable(documentUri);
     return this.withDocumentTransaction(documentUri, () => this.saveResolvedUnlocked(documentUri, reviewDocument));
   }
 
   async load(documentUri: vscode.Uri): Promise<ReviewDocument> {
-    return (await this.readReviewDocuments(documentUri)).reviewDocument;
+    return this.withDocumentTransaction(documentUri, async () => (await this.readReviewDocuments(documentUri)).reviewDocument);
   }
 
   private async saveUnlocked(documentUri: vscode.Uri, reviewDocument: ReviewDocument): Promise<void> {
@@ -198,22 +397,8 @@ export class ReviewStore {
     reviewDocument: ReviewDocument,
     resolvedReviewDocument: ReviewDocument
   ): Promise<void> {
-    const { reviewUri, resolvedUri } = await this.getSidecarLocations(documentUri);
-    const before = await this.captureSidecarBytes(reviewUri, resolvedUri);
-
-    try {
-      await this.writePortableReviewDocuments(
-        reviewUri,
-        documentUri,
-        reviewDocument,
-        resolvedReviewDocument
-      );
-    } catch (error) {
-      if (!(error instanceof ReviewStorageConflictError)) {
-        await this.restoreSidecarBytes(reviewUri, resolvedUri, before);
-      }
-      throw error;
-    }
+    const { reviewUri } = await this.getSidecarLocations(documentUri);
+    await this.writePortableReviewDocuments(reviewUri, documentUri, reviewDocument, resolvedReviewDocument);
   }
 
   private async addThreadUnlocked(documentUri: vscode.Uri, thread: ReviewThread): Promise<ReviewDocument> {
@@ -341,7 +526,7 @@ export class ReviewStore {
   }
 
   async loadResolved(documentUri: vscode.Uri): Promise<ReviewDocument> {
-    return (await this.readReviewDocuments(documentUri)).resolvedReviewDocument;
+    return this.withDocumentTransaction(documentUri, async () => (await this.readReviewDocuments(documentUri)).resolvedReviewDocument);
   }
 
   private async restoreThreadUnlocked(
@@ -352,6 +537,10 @@ export class ReviewStore {
     const existingOpenThread = reviewDocument.threads.find(candidate => candidate.id === threadId);
 
     if (existingOpenThread) {
+      if (existingOpenThread.taskStatus === 'blocked' || existingOpenThread.taskResultFor !== undefined) {
+        Object.assign(existingOpenThread, this.reopenTask(existingOpenThread));
+        await this.save(documentUri, reviewDocument);
+      }
       return existingOpenThread;
     }
 
@@ -362,10 +551,9 @@ export class ReviewStore {
       throw new Error(`Resolved review thread not found: ${threadId}`);
     }
 
-    const restoredThread = createRestoredReviewThread(
-      resolvedDocument.threads[resolvedIndex],
-      new Date().toISOString()
-    );
+    const restoredThread = reviewDocument.taskSchemaVersion === 3
+      ? this.reopenTask(resolvedDocument.threads[resolvedIndex])
+      : createRestoredReviewThread(resolvedDocument.threads[resolvedIndex], new Date().toISOString());
 
     resolvedDocument.threads.splice(resolvedIndex, 1);
     reviewDocument.threads.push(restoredThread);
@@ -425,41 +613,40 @@ export class ReviewStore {
     resolvedMoved: boolean;
   }> {
     const newLocations = await this.getSidecarLocations(newDocumentUri);
-    const beforeNewSidecars = await this.captureSidecarBytes(newLocations.reviewUri, newLocations.resolvedUri);
-
-    try {
+    this.assertWritable(oldDocumentUri);
+    this.assertWritable(newDocumentUri);
       const sourceDocuments = await this.readReviewDocuments(oldDocumentUri);
-      const targetDocuments = await this.readReviewDocuments(newDocumentUri);
+      const sourceUri = await this.getReviewFileUri(oldDocumentUri);
+      const aliasesSource = await sameFile(sourceUri, newLocations.reviewUri);
+      const targetDocuments = aliasesSource ? {
+        reviewDocument: createEmptyReviewDocument(newDocumentUri.toString()),
+        resolvedReviewDocument: createEmptyReviewDocument(newDocumentUri.toString())
+      } : await this.readReviewDocuments(newDocumentUri);
       const reviewMoved = sourceDocuments.reviewDocument.threads.length > 0;
       const resolvedMoved = sourceDocuments.resolvedReviewDocument.threads.length > 0;
 
-      if (reviewMoved || resolvedMoved) {
+      if (reviewMoved || resolvedMoved || this.state(oldDocumentUri).knownCanonical) {
+        const open = mergeReviewDocuments(targetDocuments.reviewDocument, sourceDocuments.reviewDocument, newDocumentUri.toString());
+        const closed = mergeReviewDocuments(targetDocuments.resolvedReviewDocument, sourceDocuments.resolvedReviewDocument, newDocumentUri.toString());
+        open.taskSchemaVersion = sourceDocuments.reviewDocument.taskSchemaVersion;
+        closed.taskSchemaVersion = sourceDocuments.resolvedReviewDocument.taskSchemaVersion;
+        open.guidance = sourceDocuments.reviewDocument.guidance;
         await this.writePortableReviewDocuments(
-          newLocations.reviewUri,
-          newDocumentUri,
-          mergeReviewDocuments(
-            targetDocuments.reviewDocument,
-            sourceDocuments.reviewDocument,
-            newDocumentUri.toString()
-          ),
-          mergeReviewDocuments(
-            targetDocuments.resolvedReviewDocument,
-            sourceDocuments.resolvedReviewDocument,
-            newDocumentUri.toString()
-          )
+          newLocations.reviewUri, newDocumentUri, open, closed, targetDocuments
         );
       }
-
+      this.advanceEpoch(oldDocumentUri);
+      this.advanceEpoch(newDocumentUri);
+      const previousState = this.state(oldDocumentUri);
+      await this.persistState(newDocumentUri, {
+        historyPaths: [...(this.state(newDocumentUri).historyPaths ?? []), ...(previousState.historyPaths ?? [])],
+        legacyPaths: [...(this.state(newDocumentUri).legacyPaths ?? []), ...(previousState.legacyPaths ?? [])]
+      });
       return { reviewMoved, resolvedMoved };
-    } catch (error) {
-      if (!(error instanceof ReviewStorageConflictError)) {
-        await this.restoreSidecarBytes(newLocations.reviewUri, newLocations.resolvedUri, beforeNewSidecars);
-      }
-      throw error;
-    }
   }
 
   private async deleteDocumentSidecarsUnlocked(documentUri: vscode.Uri, preservedDocumentUri?: vscode.Uri): Promise<void> {
+    this.assertWritable(documentUri);
     const { reviewUri, legacyReviewUri, legacyResolvedUri } = await this.getSidecarLocations(documentUri);
     const preservedUri = preservedDocumentUri ? (await this.getSidecarLocations(preservedDocumentUri)).reviewUri : undefined;
     const samePortableFile = preservedUri ? await sameFile(reviewUri, preservedUri) : false;
@@ -503,16 +690,35 @@ export class ReviewStore {
     const { reviewUri, legacyReviewUri, legacyResolvedUri } = await this.getSidecarLocations(documentUri);
     const portableBytes = await readFileIfExists(reviewUri);
     this.observeRead(documentUri, reviewUri, portableBytes);
+    await this.settlePendingWrite(documentUri, portableBytes);
 
-    if (portableBytes) {
+    if (portableBytes !== undefined) {
       try {
-        return parsePortableReviewSidecar(
-          documentUri.toString(),
-          JSON.parse(decoder.decode(portableBytes))
-        );
+        const value = JSON.parse(decoder.decode(portableBytes));
+        const pair = parsePortableReviewSidecar(documentUri.toString(), value);
+        const state = this.state(documentUri);
+        if (state.checkpoint) {
+          const compared = compareReviewTaskCheckpoint(state.checkpoint, parseReviewTaskSidecar(value));
+          if (!compared.valid) throw new Error('전달한 요청/위치/ID가 바뀌거나 누락되었습니다. 리뷰 파일을 확인하거나 전달 전 사본을 복구하세요.');
+        } else if (state.lastValidPath && state.lastHash !== hashText(decoder.decode(portableBytes)) && value.schemaVersion === 3) {
+          const previous = await readFileIfExists(vscode.Uri.file(state.lastValidPath));
+          if (previous) {
+            const old = JSON.parse(decoder.decode(previous));
+            if (old.schemaVersion === 3) {
+              const compared = compareReviewTaskCheckpoint(createReviewTaskCheckpoint(parseReviewTaskSidecar(old)), value);
+              if (compared.missingIds.length) throw new Error('리뷰 항목이 파일에서 사라졌습니다. 삭제를 완료로 처리하지 않습니다. 리뷰 파일을 확인하거나 복구하세요.');
+            }
+          }
+        }
+        await this.rememberValid(documentUri, portableBytes, true);
+        return pair;
       } catch (error) {
-        throw new Error(`Review sidecar is invalid: ${formatError(error)} If this happened after an AI edit, undo or restore the sidecar, and do not validate, strip, or rewrite existing openThreads or closedThreads with docs/agent-review-thread.schema.json; that schema is only for new AI-authored thread proposals.`);
+        throw new Error(`Review sidecar is invalid: ${formatError(error)} 저장된 코멘트를 덮어쓰지 않았습니다. 리뷰 파일을 확인하거나 복구하세요.`);
       }
+    }
+
+    if (this.state(documentUri).knownCanonical || this.getHandoffPhase(documentUri) === 'handedOff') {
+      throw new Error('리뷰 파일이 없습니다. 파일 삭제를 처리 완료로 해석하지 않습니다. 파일 이동 여부를 확인하거나 복구하세요.');
     }
 
     return {
@@ -552,10 +758,17 @@ export class ReviewStore {
     uri: vscode.Uri,
     documentUri: vscode.Uri,
     reviewDocument: ReviewDocument,
-    resolvedReviewDocument: ReviewDocument
+    resolvedReviewDocument: ReviewDocument,
+    baseline?: { reviewDocument: ReviewDocument; resolvedReviewDocument: ReviewDocument }
   ): Promise<void> {
+    this.assertWritable(documentUri);
+    this.assertSidecarEditorClean(uri);
+    const current = baseline ?? await this.readReviewDocuments(documentUri);
+    this.normalizeTaskWrite(documentUri, current, reviewDocument, resolvedReviewDocument);
     const updatedAt = new Date().toISOString();
-    const payload = createPortableReviewSidecarPayload(
+    const serialize = reviewDocument.taskSchemaVersion === 2 || resolvedReviewDocument.taskSchemaVersion === 2
+      ? createLegacyReviewSidecarPayload : createPortableReviewSidecarPayload;
+    const payload = serialize(
       documentUri.toString(),
       reviewDocument,
       resolvedReviewDocument,
@@ -565,9 +778,157 @@ export class ReviewStore {
     await vscode.workspace.fs.createDirectory(dirnameUri(uri));
     await this.assertUnchangedReads(documentUri);
     const bytes = encoder.encode(`${JSON.stringify(payload, null, 2)}\n`);
-    await vscode.workspace.fs.writeFile(uri, bytes);
+    await this.commitCanonicalWrite(documentUri, uri, bytes, () => this.assertUnchangedReads(documentUri));
     const transaction = this.transactionContext.getStore()?.get(documentUri.toString());
     transaction?.reads.set(uri.toString(), { uri, bytes });
+  }
+
+  private normalizeTaskWrite(
+    uri: vscode.Uri,
+    current: { reviewDocument: ReviewDocument; resolvedReviewDocument: ReviewDocument },
+    open: ReviewDocument,
+    closed: ReviewDocument
+  ): void {
+    if (open.taskSchemaVersion !== 3 || closed.taskSchemaVersion !== 3
+      || current.reviewDocument.taskSchemaVersion !== 3 || current.resolvedReviewDocument.taskSchemaVersion !== 3) return;
+    const previous = new Map([...current.reviewDocument.threads, ...current.resolvedReviewDocument.threads].map(thread => [thread.id, thread]));
+    const tx = this.transactionContext.getStore()?.get(uri.toString());
+    const outgoing = [...open.threads, ...closed.threads];
+    const ids = new Set(outgoing.map(thread => thread.id));
+    if (!tx?.internalWrite && !tx?.allowTaskRemoval && !tx?.rebaseTaskRevision && [...previous.keys()].some(id => !ids.has(id))) {
+      throw new ReviewStorageConflictError();
+    }
+    for (const thread of outgoing) {
+      const before = previous.get(thread.id);
+      if (!before) continue;
+      const revision = before.taskRevision ?? 1;
+      const proposed = thread.taskRevision ?? 1;
+      if (!tx?.rebaseTaskRevision && (proposed < revision || proposed > revision + 1)) throw new ReviewStorageConflictError();
+      const changed = createReviewTaskFingerprint({ ...createReviewTaskItem(before), rev: 1 })
+        !== createReviewTaskFingerprint({ ...createReviewTaskItem(thread), rev: 1 });
+      if (changed || (!tx?.rebaseTaskRevision && proposed === revision + 1)) {
+        Object.assign(thread, { taskRevision: revision + 1, taskStatus: 'pending', taskResult: undefined, taskResultFor: undefined,
+          status: 'open', closedAt: undefined, closedBy: undefined });
+      } else {
+        Object.assign(thread, { taskRevision: revision, taskStatus: before.taskStatus, taskResult: before.taskResult, taskResultFor: before.taskResultFor });
+        thread.status = getReviewTaskStatus(thread) === 'done' ? 'resolved' : 'open';
+      }
+    }
+    open.threads = outgoing.filter(thread => getReviewTaskStatus(thread) !== 'done');
+    closed.threads = outgoing.filter(thread => getReviewTaskStatus(thread) === 'done');
+  }
+
+  private async commitCanonicalWrite(documentUri: vscode.Uri, sidecar: vscode.Uri, bytes: Uint8Array, check?: () => Promise<void>): Promise<void> {
+    const pendingWrite = { hash: hashText(decoder.decode(bytes)), path: await this.backup(documentUri, 'valid', bytes) };
+    // The durable journal describes intent; last-valid continues to describe the committed file.
+    await this.persistState(documentUri, { pendingWrite });
+    try {
+      await this.atomicWrite(sidecar, bytes, check);
+    } catch (error) {
+      try { await this.persistState(documentUri, { pendingWrite: undefined }); } catch { /* A later read reconciles the uncommitted intent. */ }
+      throw error;
+    }
+    await this.finishCommittedWrite(documentUri, pendingWrite);
+  }
+
+  private async finishCommittedWrite(uri: vscode.Uri, committed: { hash: string; path: string }): Promise<void> {
+    const update = { lastHash: committed.hash, lastValidPath: committed.path, knownCanonical: true, pendingWrite: undefined };
+    try { await this.persistState(uri, update); } catch {
+      // Canonical bytes committed successfully. Do not trigger a source rollback: the durable
+      // pending record lets a restarted store finish this bookkeeping from the actual bytes.
+      this.states.set(uri.toString(), { ...this.state(uri), ...update, pendingWrite: committed });
+    }
+  }
+
+  private async settlePendingWrite(uri: vscode.Uri, bytes: Uint8Array | undefined): Promise<void> {
+    const pending = this.state(uri).pendingWrite;
+    if (!pending) return;
+    if (bytes && hashText(decoder.decode(bytes)) === pending.hash) {
+      await this.finishCommittedWrite(uri, pending);
+    } else {
+      await this.persistState(uri, { pendingWrite: undefined });
+    }
+  }
+
+  private state(uri: vscode.Uri): StoredReviewState {
+    const key = uri.toString();
+    if (!this.states.has(key)) this.states.set(key, this.context.workspaceState?.get<StoredReviewState>('reviewState.' + hashText(key)) ?? {});
+    return this.states.get(key)!;
+  }
+
+  private async persistState(uri: vscode.Uri, update: Partial<StoredReviewState>): Promise<void> {
+    const next = { ...this.state(uri), ...update };
+    await this.context.workspaceState?.update('reviewState.' + hashText(uri.toString()), next);
+    this.states.set(uri.toString(), next);
+  }
+
+  private advanceEpoch(uri: vscode.Uri): void {
+    this.epochs.set(uri.toString(), this.getDocumentEpoch(uri) + 1);
+  }
+
+  private async internalWrite<T>(uri: vscode.Uri, operation: () => Promise<T>): Promise<T> {
+    const tx = this.transactionContext.getStore()?.get(uri.toString());
+    if (!tx) throw new Error('Internal review write requires a transaction.');
+    const previous = tx.internalWrite;
+    tx.internalWrite = true;
+    try { return await operation(); } finally { tx.internalWrite = previous; }
+  }
+
+  private assertSidecarEditorClean(uri: vscode.Uri): void {
+    if (vscode.workspace.textDocuments?.some(document => document.uri.toString() === uri.toString() && document.isDirty)) {
+      throw new Error('열려 있는 리뷰 JSON에 저장하지 않은 변경이 있습니다. 먼저 해당 파일을 저장하거나 변경을 검토하세요.');
+    }
+  }
+
+  private checkTaskRevision(thread: ReviewThread, expected?: number): void {
+    if (expected !== undefined && expected !== (thread.taskRevision ?? 1)) throw new ReviewStorageConflictError();
+  }
+
+  private reopenTask(thread: ReviewThread): ReviewThread {
+    return { ...thread, status: 'open', taskStatus: 'pending', taskRevision: (thread.taskRevision ?? 1) + 1,
+      taskResult: undefined, taskResultFor: undefined, closedAt: undefined, closedBy: undefined,
+      thread: [], updatedAt: new Date().toISOString() };
+  }
+
+  private async backup(uri: vscode.Uri, kind: string, bytes: Uint8Array): Promise<string> {
+    const directory = vscode.Uri.joinPath(this.context.storageUri ?? this.context.globalStorageUri, 'review-recovery', hashText(uri.toString()));
+    await vscode.workspace.fs.createDirectory(directory);
+    const file = vscode.Uri.joinPath(directory, kind === 'valid' ? `valid-${this.state(uri).lastValidPath?.endsWith('valid-0.json') ? '1' : '0'}.json` : `${kind}-${hashText(decoder.decode(bytes))}.json`);
+    const previous = await readFileIfExists(file);
+    if (!bytesEqual(previous, bytes)) await this.atomicWrite(file, bytes);
+    if (!bytesEqual(bytes, await readFileIfExists(file))) throw new Error('리뷰 복구 사본 저장을 확인할 수 없습니다.');
+    return file.fsPath;
+  }
+
+  private async backupLegacy(uri: vscode.Uri): Promise<void> {
+    const locations = await this.getSidecarLocations(uri);
+    const paths = [...(this.state(uri).legacyPaths ?? [])];
+    for (const [kind, file] of [['legacy', locations.reviewUri], ['legacy-open', locations.legacyReviewUri], ['legacy-closed', locations.legacyResolvedUri]] as const) {
+      const bytes = await readFileIfExists(file);
+      if (bytes) paths.push(await this.backup(uri, kind, bytes));
+    }
+    await this.persistState(uri, { legacyPaths: [...new Set(paths)] });
+  }
+
+  private async rememberValid(uri: vscode.Uri, bytes: Uint8Array, externalRead: boolean): Promise<void> {
+    const state = this.state(uri);
+    const hash = hashText(decoder.decode(bytes));
+    if (state.lastHash === hash) return;
+    if (externalRead && state.lastHash) this.advanceEpoch(uri);
+    const lastValidPath = await this.backup(uri, 'valid', bytes);
+    await this.persistState(uri, { lastValidPath, lastHash: hash, knownCanonical: true });
+  }
+
+  private async atomicWrite(uri: vscode.Uri, bytes: Uint8Array, check?: () => Promise<void>): Promise<void> {
+    // Replacement prevents partial JSON reads. It is not a cross-process CAS.
+    const temporary = uri.with({ path: uri.path + '.tmp-' + randomUUID() });
+    try {
+      await vscode.workspace.fs.writeFile(temporary, bytes);
+      await check?.();
+      await vscode.workspace.fs.rename(temporary, uri, { overwrite: true });
+    } finally {
+      try { await vscode.workspace.fs.delete(temporary); } catch { /* Best-effort cleanup; canonical commit determines success. */ }
+    }
   }
 
   private observeRead(documentUri: vscode.Uri, uri: vscode.Uri, bytes: Uint8Array | undefined): void {
@@ -583,44 +944,18 @@ export class ReviewStore {
   }
 
   private async assertUnchangedReads(documentUri: vscode.Uri): Promise<void> {
-    const transaction = this.transactionContext.getStore()?.get(documentUri.toString());
-    if (!transaction?.active) {
-      return;
-    }
-    for (const { uri, bytes } of transaction.reads.values()) {
-      if (!bytesEqual(bytes, await readFileIfExists(uri))) {
-        throw new ReviewStorageConflictError();
+    const context = this.transactionContext.getStore();
+    if (!context?.get(documentUri.toString())?.active) return;
+    // Rename depends on both source and destination reads in its nested transactions.
+    for (const transaction of context.values()) {
+      if (!transaction.active) continue;
+      for (const { uri, bytes } of transaction.reads.values()) {
+        if (!bytesEqual(bytes, await readFileIfExists(uri))) throw new ReviewStorageConflictError();
       }
     }
   }
 
-  private async captureSidecarBytes(
-    reviewUri: vscode.Uri,
-    resolvedUri: vscode.Uri
-  ): Promise<{
-    reviewBytes: Uint8Array | undefined;
-    resolvedBytes: Uint8Array | undefined;
-  }> {
-    const reviewBytes = await readFileIfExists(reviewUri);
-    return {
-      reviewBytes,
-      resolvedBytes: reviewUri.toString() === resolvedUri.toString() ? reviewBytes : await readFileIfExists(resolvedUri)
-    };
-  }
 
-  private async restoreSidecarBytes(
-    reviewUri: vscode.Uri,
-    resolvedUri: vscode.Uri,
-    snapshot: {
-      reviewBytes: Uint8Array | undefined;
-      resolvedBytes: Uint8Array | undefined;
-    }
-  ): Promise<void> {
-    await restoreFile(reviewUri, snapshot.reviewBytes);
-    if (reviewUri.toString() !== resolvedUri.toString()) {
-      await restoreFile(resolvedUri, snapshot.resolvedBytes);
-    }
-  }
 }
 
 export function hashText(value: string): string {
