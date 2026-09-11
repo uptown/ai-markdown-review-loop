@@ -17,10 +17,10 @@ file format and outcomes.
 
 ## Handoff Boundary
 
-AI에 전달 saves current state and pauses extension writes. 내용 복사 uses
-the same boundary. 리뷰 파일 확인 is read-only inspection; it does not start
+Send to Agent saves current state and pauses extension writes. Copy Review File uses
+the same boundary. Inspect Review File is read-only inspection; it does not start
 a handoff or pause review mode. Wait for the agent to stop before
-수정본 검수 or 인계 취소 / 리뷰 계속; both validate the current review file before
+Review Changes or Cancel Handoff / Resume Review; both validate the current review file before
 resuming extension writes. Cancel does not roll back the agent's source edits.
 
 A direct file-path handoff is possible, but does not create this pause or a

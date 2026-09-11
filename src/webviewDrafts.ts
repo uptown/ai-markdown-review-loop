@@ -131,7 +131,7 @@ export function renderWebviewDraftScript(): string {
         const key = keyFor(message);
         if (isHandoffActive()) {
           collect(key);
-          status(formFor(key), '외부 편집에 전달됨 · 저장 보류. 초안은 이 창에 보관됩니다.');
+          status(formFor(key), 'Handed off to the agent · writes paused. This draft is kept in the current preview.');
           updateHandoff();
           return true;
         }
@@ -178,17 +178,17 @@ export function renderWebviewDraftScript(): string {
         }
         if (draft.recovery) return;
         if (draft.kind === 'reply') {
-          draft.recovery = '이전 답글 초안입니다. 내용을 복사해 수정 요청이나 외부 agent 대화에서 사용하세요.';
+          draft.recovery = 'This is a draft from an earlier reply. Copy it to use as a change request with your external agent.';
         } else if (draft.kind === 'comment') {
           if (draft.edit) {
             const current = findThread(draft.edit.threadId);
             if (!current || current.taskRevision !== draft.edit.revision || current.comment !== draft.edit.originalComment) {
-              draft.recovery = '수정 요청이 변경되었습니다. 초안을 복사해 현재 요청을 확인한 뒤 다시 편집하세요.';
+              draft.recovery = 'The change request changed. Copy the draft, confirm the current request, and edit it again.';
               return;
             }
           }
           activeCommentEdit = draft.edit;
-          commentComposer.querySelector('.comment-composer-label').textContent = draft.edit ? '수정 요청 편집' : '선택한 내용에 수정 요청';
+          commentComposer.querySelector('.comment-composer-label').textContent = draft.edit ? 'Edit change request' : 'Add a change request for the selection';
           activeSelectionText = draft.anchorText;
           activeSelectionOccurrence = draft.anchorOccurrence;
           activeSourceLine = draft.sourceLine;
@@ -293,10 +293,10 @@ export function renderWebviewDraftScript(): string {
           const form = formFor(key);
           const pending = Boolean(drafts[key]?.requestId);
           form.querySelectorAll('button[type="submit"]').forEach(button => { button.disabled = isHandoffActive() || pending; });
-          if (isHandoffActive() && visible(form)) status(form, '외부 편집에 전달됨 · 저장 보류. 초안은 이 창에 보관됩니다.');
+          if (isHandoffActive() && visible(form)) status(form, 'Handed off to the agent · writes paused. This draft is kept in the current preview.');
           else if (!pending && !drafts[key]?.error) {
             const message = form.querySelector('[data-save-status]');
-            if (message?.textContent.includes('저장 보류')) message.textContent = '초안을 확인한 뒤 저장하세요.';
+            if (message?.textContent.includes('writes paused')) message.textContent = 'Review the draft before saving.';
           }
         }
       }

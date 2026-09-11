@@ -326,7 +326,7 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
           return;
         }
         if (sidecarMutationTypes.has(message?.type) && this.store.isHandoffActive(document.uri)) {
-          throw new Error('외부 편집에 전달됨 · 저장 보류. 초안은 보관됩니다. 수정본 검수 또는 인계 취소 후 저장하세요.');
+          throw new Error('Review writes are paused while the agent edits the files. Drafts are kept. Choose Review Changes or Cancel Handoff before saving.');
         }
         if (sourceRevisionMessageTypes.has(message?.type)) {
           this.ensureDocumentRevision(document, sourceVersion);
@@ -2002,10 +2002,10 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
       <article id="markdown-body">${renderedMarkdown}</article>
     </main>
     <aside>
-      <h2>수정 요청</h2>
+      <h2>Change Requests</h2>
       ${storageWarning}
       <div id="threads"></div>
-      <details class="history-heading"><summary>처리 기록</summary>
+      <details class="history-heading"><summary>History</summary>
         <div id="history"></div>
       </details>
     </aside>
@@ -2711,8 +2711,8 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
 
     if (openThreads.length === 0) {
       threadsContainer.innerHTML = closedThreads.length > 0
-        ? '<p class="empty">미처리 요청이 없습니다. 수정된 문서를 다시 검수하세요.</p>'
-        : '<p class="empty">문서에서 텍스트를 선택해 수정 요청을 남기세요.</p>';
+        ? '<p class="empty">No pending requests. Review the revised document again.</p>'
+        : '<p class="empty">Select text in the document to add a change request.</p>';
     } else {
       for (const thread of openThreads) {
         const element = document.createElement('section');
@@ -2763,7 +2763,7 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
 
     function renderClosedHistory(threads) {
       if (threads.length === 0) {
-        historyContainer.innerHTML = '<p class="empty">이번 회차의 처리 기록이 없습니다.</p>';
+        historyContainer.innerHTML = '<p class="empty">No history for this round.</p>';
         return;
       }
 
@@ -2792,7 +2792,7 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
           historyState === 'linked'
             ? '<button type="button" class="secondary" aria-label="Show closed comment in document: ' + escapeHtml(thread.comment) + '" data-jump-thread>Show in document</button>'
             : '',
-          thread.taskStatus === 'done' ? '<button class="secondary" title="이 요청을 다시 검토합니다." data-thread-id="' + escapeHtml(thread.id) + '" data-write-action data-restore-thread>다시 열기</button>' : '',
+          thread.taskStatus === 'done' ? '<button class="secondary" title="Reopen this request." data-thread-id="' + escapeHtml(thread.id) + '" data-write-action data-restore-thread>Reopen</button>' : '',
           '</div>'
         ].join('');
 
@@ -4309,7 +4309,7 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
 
     function sourceKind(_thread) { return 'human'; }
 
-    function sourceDisplay(_kind) { return { label: '코멘트', cssClass: 'source-human' }; }
+    function sourceDisplay(_kind) { return { label: 'Comment', cssClass: 'source-human' }; }
 
     function sourceClass(thread) {
       return sourceDisplay(sourceKind(thread)).cssClass;
@@ -4376,7 +4376,7 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
     function renderTaskStatus(thread) {
       const status = thread.taskStatus || (thread.status === 'open' ? 'pending' : 'legacy');
       const stale = thread.taskResultFor !== undefined && thread.taskResultFor !== thread.taskRevision;
-      return '<span class="meta-chip">' + (stale ? '이전 요청의 결과 · 재검수 필요' : status === 'done' ? '처리 완료' : status === 'blocked' ? '확인 필요' : status === 'legacy' ? '이전 기록' : '미처리') + '</span>';
+      return '<span class="meta-chip">' + (stale ? 'Stale result · review again' : status === 'done' ? 'Done' : status === 'blocked' ? 'Blocked' : status === 'legacy' ? 'Legacy' : 'Pending') + '</span>';
     }
 
     function renderTaskResult(thread) {
@@ -4398,8 +4398,8 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
       return [
         '<div class="thread-actions">',
         '<button type="button" class="secondary" aria-label="Show comment in document: ' + escapeHtml(thread.comment) + '" data-jump-thread>Show in document</button>',
-        '<button type="button" class="secondary" data-write-action data-edit-comment data-thread-id="' + escapeHtml(thread.id) + '">수정</button>',
-        '<button type="button" class="secondary" data-write-action data-remove-comment data-thread-id="' + escapeHtml(thread.id) + '">삭제</button>',
+        '<button type="button" class="secondary" data-write-action data-edit-comment data-thread-id="' + escapeHtml(thread.id) + '">Edit</button>',
+        '<button type="button" class="secondary" data-write-action data-remove-comment data-thread-id="' + escapeHtml(thread.id) + '">Delete</button>',
         '</div>'
       ].join('');
     }
@@ -4978,14 +4978,14 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
       const paused = isHandoffActive();
       const primary = document.querySelector('[data-handoff-primary]');
       if (primary) {
-        primary.textContent = preparing ? '전달 준비 중…' : paused ? '수정본 검수' : 'AI에 전달';
+        primary.textContent = preparing ? 'Preparing Handoff…' : paused ? 'Review Changes' : 'Send to Agent';
         primary.setAttribute('data-handoff-action', paused ? 'resumeReview' : 'handoff');
         primary.disabled = preparing || (!paused && !state.threads.some(thread => thread.status === 'open'));
       }
       const notice = document.querySelector('[data-handoff-status]');
       if (notice) {
         notice.hidden = !paused;
-        notice.textContent = preparing ? '전달 준비 중 · 저장 보류. 초안은 보관됩니다.' : '외부 편집에 전달됨 · 저장 보류 — 다음 리뷰 초안으로 보관됨';
+        notice.textContent = preparing ? 'Preparing handoff · writes paused. Drafts are kept.' : 'Handed off to the agent · writes paused — kept as the next review draft.';
       }
       const copy = document.querySelector('[data-handoff-action="copyReviewFile"]');
       if (copy) copy.disabled = preparing;
@@ -5009,7 +5009,7 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
       activeSourceLine = thread.anchor.lineStart;
       activeSourceLineEnd = thread.anchor.lineEnd;
       commentBody.value = thread.comment;
-      commentComposer.querySelector('.comment-composer-label').textContent = '수정 요청 편집';
+      commentComposer.querySelector('.comment-composer-label').textContent = 'Edit change request';
       commentComposer.style.display = 'block';
       commentComposer.style.left = '16px';
       commentComposer.style.top = '48px';
@@ -5036,7 +5036,7 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
       }
       hideSelectionPopover();
       activeCommentEdit = undefined;
-      commentComposer.querySelector('.comment-composer-label').textContent = '선택한 내용에 수정 요청';
+      commentComposer.querySelector('.comment-composer-label').textContent = 'Add a change request for the selection';
       commentBody.value = '';
       updateCommentQualityWarning();
       renderDraftSelectionHighlight();
@@ -5212,25 +5212,25 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
     const blocked = open.filter(thread => getReviewTaskStatus(thread) === 'blocked').length;
     const done = resolvedReviewDocument.threads.filter(thread => thread.taskStatus !== undefined && getReviewTaskStatus(thread) === 'done').length;
     const disabled = open.length ? '' : ' disabled';
-    return `<section class="context-bootstrap-bar" aria-label="외부 agent에 수정 요청 전달">
+    return `<section class="context-bootstrap-bar" aria-label="Send change requests to an external agent">
     <div class="review-navigation-actions" role="group" aria-label="Review comment navigation">
       <button type="button" class="secondary compact" aria-label="Previous comment" title="Previous comment (Left Arrow)" data-review-nav="previous"${disabled}>← Previous</button>
       <span class="review-position" data-review-position role="status" aria-live="polite" aria-atomic="true">${open.length ? `${open.length} open` : 'No open comments'}</span>
       <button type="button" class="secondary compact" aria-label="Next comment" title="Next comment (Right Arrow)" data-review-nav="next"${disabled}>Next →</button>
     </div>
     <div class="context-bootstrap-actions">
-      <button type="button" class="compact" data-handoff-primary data-handoff-action="${phase ? 'resumeReview' : 'handoff'}"${phase === 'preparing' || (!phase && !open.length) ? ' disabled' : ''}>${phase === 'preparing' ? '전달 준비 중…' : phase ? '수정본 검수' : 'AI에 전달'}</button>
-      <button type="button" class="secondary compact" data-handoff-action="cancelHandoff"${phase ? '' : ' hidden'}>인계 취소 / 리뷰 계속</button>
-      <details><summary>더 보기</summary><div class="handoff-menu">
-        <button type="button" class="secondary compact" data-handoff-action="openReviewFile">리뷰 파일 확인</button>
-        <button type="button" class="secondary compact" data-handoff-action="copyReviewFile">내용 복사</button>
-        <button type="button" class="secondary compact" data-handoff-action="openReviewHistory">이전 처리 기록</button>
-        <button type="button" class="secondary compact" data-handoff-action="restoreReviewBackup">복구</button>
+      <button type="button" class="compact" data-handoff-primary data-handoff-action="${phase ? 'resumeReview' : 'handoff'}"${phase === 'preparing' || (!phase && !open.length) ? ' disabled' : ''}>${phase === 'preparing' ? 'Preparing Handoff…' : phase ? 'Review Changes' : 'Send to Agent'}</button>
+      <button type="button" class="secondary compact" data-handoff-action="cancelHandoff"${phase ? '' : ' hidden'}>Cancel Handoff / Resume Review</button>
+      <details><summary>More</summary><div class="handoff-menu">
+        <button type="button" class="secondary compact" data-handoff-action="openReviewFile">Inspect Review File</button>
+        <button type="button" class="secondary compact" data-handoff-action="copyReviewFile">Copy Review File</button>
+        <button type="button" class="secondary compact" data-handoff-action="openReviewHistory">Review History</button>
+        <button type="button" class="secondary compact" data-handoff-action="restoreReviewBackup">Restore Backup</button>
       </div></details>
     </div>
   </section>
-  <p class="review-position" data-review-summary>처리 ${done}개 · 미처리 ${open.length - blocked}개 · 확인 필요 ${blocked}개</p>
-  <p class="handoff-status" data-handoff-status role="status"${phase ? '' : ' hidden'}>외부 편집에 전달됨 · 저장 보류 — 다음 리뷰 초안으로 보관됨</p>`;
+  <p class="review-position" data-review-summary>${done} done · ${open.length - blocked} pending · ${blocked} blocked</p>
+  <p class="handoff-status" data-handoff-status role="status"${phase ? '' : ' hidden'}>Handed off to the agent · writes paused — kept as the next review draft.</p>`;
   }
 
   private getMarkerLineHints(reviewDocument: ReviewDocument): Record<string, number> {
@@ -5286,8 +5286,8 @@ export class ReviewEditorProvider implements vscode.CustomTextEditorProvider, vs
     <p>The sidecar for <code>${escapeHtml(document.fileName)}</code> could not be loaded, so this preview is paused to avoid overwriting existing review feedback.</p>
     <p>${escapeHtml(message)}</p>
     <button type="button" id="retry-preview">Retry refresh</button>
-    <button type="button" data-error-action="openReviewFile">리뷰 파일 확인</button>
-    <button type="button" data-error-action="restoreReviewBackup">복구</button>
+    <button type="button" data-error-action="openReviewFile">Inspect Review File</button>
+    <button type="button" data-error-action="restoreReviewBackup">Restore Backup</button>
     <div id="error-drafts"></div>
   </section>
   <script nonce="${nonce}">${renderErrorDraftScript(document.uri.toString())}</script>

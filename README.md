@@ -18,9 +18,9 @@ The images illustrate the workflow; they are not screenshots of a live agent run
 
 1. Open a Markdown file and choose **AI Markdown Review: Open Review Beside**.
 2. Select rendered text and save a comment describing the change you want.
-3. Choose **AI에 전달** (Send to Agent) and paste the copied request into your coding agent.
+3. Choose **Send to Agent** and paste the copied request into your coding agent.
 4. Let the agent edit the Markdown and record a short **done** or **blocked** result.
-5. Once the agent has stopped writing, choose **수정본 검수** (Review changes) and inspect the
+5. Once the agent has stopped writing, choose **Review Changes** and inspect the
    revised document. Reopen an item or add a new comment for another pass.
 
 The extension runs locally and does not call a model provider. Use an external
@@ -43,9 +43,9 @@ Markdown document or a conversation transcript.
 
 | Status | Meaning | Next action |
 | --- | --- | --- |
-| 미처리 · Pending | This request still needs work. | Send it to the agent. |
-| 처리 완료 · Done | The agent reports that this revision is handled. | Review the actual Markdown; reopen if needed. |
-| 확인 필요 · Blocked | The agent could not fully handle the request. | Read the reason, clarify with the agent or edit the request. |
+| Pending | This request still needs work. | Send it to the agent. |
+| Done | The agent reports that this revision is handled. | Review the actual Markdown; reopen if needed. |
+| Blocked | The agent could not fully handle the request. | Read the reason, clarify with the agent or edit the request. |
 
 A result belongs to the revision in `resultFor`. An externally returned result for an older revision is shown as stale and
 does not complete the current request. Editing a request or its target starts
@@ -55,19 +55,19 @@ See the [agent contract and JSON schema](./docs/AI-REVIEW-POLICY.md).
 
 ## Handoff And Recovery
 
-**AI에 전달** saves the current files, checkpoints the requests, and copies a
+**Send to Agent** saves the current files, checkpoints the requests, and copies a
 short request identifying the review file. During handoff the extension pauses
 review and source writes so the agent can work. This pause survives a preview or
 VS Code reload. You can keep reading and drafting comments; drafts are not saved
 requests until you return to review mode and save them.
 
-**수정본 검수** validates the returned file and its request identities before
+**Review Changes** validates the returned file and its request identities before
 resuming writes. Wait until the agent stops writing first. Missing items, changed
 requests, invalid JSON, and interrupted writes require recovery; they are not
 silently treated as completion. Canceling a handoff resumes review after the same
 checks and does not undo the agent's Markdown changes.
 
-**내용 복사** uses the same handoff boundary. **리뷰 파일 확인** opens a
+**Copy Review File** uses the same handoff boundary. **Inspect Review File** opens a
 read-only view for inspection without starting a handoff. You
 can also give the colocated file path to an agent directly, but this bypasses the
 extension's pause, checkpoint, and automatic history cleanup. In that case, keep

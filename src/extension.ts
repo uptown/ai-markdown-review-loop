@@ -32,7 +32,7 @@ export function activate(context: vscode.ExtensionContext): void {
         viewColumn: vscode.ViewColumn.Beside
       });
     }),
-    registerMarkdownCommand(provider, 'aiMarkdownReviewLoop.handoff', 'AI에 전달', async document => {
+    registerMarkdownCommand(provider, 'aiMarkdownReviewLoop.handoff', 'Send to Agent', async document => {
       try {
         await store.prepareHandoff(document.uri, async () => document.save(), async (sidecar) => {
           const baseDirectory = vscode.workspace.getWorkspaceFolder(document.uri)?.uri.fsPath
@@ -41,10 +41,10 @@ export function activate(context: vscode.ExtensionContext): void {
           await vscode.env.clipboard.writeText(`Base directory: ${JSON.stringify(baseDirectory)}.\nRead ${JSON.stringify(relative)}. Follow its guidance, edit the referenced Markdown, and update each item's status/result/resultFor. Stop writing both files before I review the result.`);
         });
         provider.resetReviewUndo(document.uri);
-        vscode.window.showInformationMessage('전달 문구를 복사했습니다. AI에 붙여넣으세요. 작업이 끝나면 수정본 검수를 눌러주세요.');
+        vscode.window.showInformationMessage('Copied handoff instructions. Paste them into your AI agent. When it finishes, choose Review Changes.');
       } finally { await provider.refreshDocument(document.uri); }
     }),
-    registerMarkdownCommand(provider, 'aiMarkdownReviewLoop.copyReviewFile', '리뷰 파일 내용 복사', async document => {
+    registerMarkdownCommand(provider, 'aiMarkdownReviewLoop.copyReviewFile', 'Copy Review File', async document => {
       try {
         if (store.isHandoffActive(document.uri)) {
           await store.load(document.uri);
@@ -56,44 +56,44 @@ export function activate(context: vscode.ExtensionContext): void {
           });
           provider.resetReviewUndo(document.uri);
         }
-        vscode.window.showInformationMessage('AI 가이던스가 포함된 리뷰 JSON을 복사했습니다. AI가 파일을 편집할 수 있도록 문서와 리뷰 파일도 함께 제공하세요.');
+        vscode.window.showInformationMessage('Copied the review JSON with AI guidance. Provide both the Markdown document and review file so the agent can edit them.');
       } finally { await provider.refreshDocument(document.uri); }
     }),
-    ...['resumeReview', 'cancelHandoff'].map(id => registerMarkdownCommand(provider, `aiMarkdownReviewLoop.${id}`, id === 'resumeReview' ? '수정본 검수' : '전달 취소', async document => {
+    ...['resumeReview', 'cancelHandoff'].map(id => registerMarkdownCommand(provider, `aiMarkdownReviewLoop.${id}`, id === 'resumeReview' ? 'Review Changes' : 'Cancel Handoff', async document => {
       await store.resumeReview(document.uri);
       provider.resetReviewUndo(document.uri);
       await provider.refreshDocument(document.uri);
     })),
-    registerMarkdownCommand(provider, 'aiMarkdownReviewLoop.openReviewFile', '리뷰 파일 확인', async document => {
+    registerMarkdownCommand(provider, 'aiMarkdownReviewLoop.openReviewFile', 'Inspect Review File', async document => {
       const sidecar = await store.getReviewFileUri(document.uri);
       const contents = new TextDecoder().decode(await vscode.workspace.fs.readFile(sidecar));
-      await openReadOnlyMarkdownPrompt('리뷰 파일 확인', '```json\n' + contents + '\n```');
+      await openReadOnlyMarkdownPrompt('Inspect Review File', '```json\n' + contents + '\n```');
     }),
-    registerMarkdownCommand(provider, 'aiMarkdownReviewLoop.openReviewHistory', '이전 완료 내역', async document => {
+    registerMarkdownCommand(provider, 'aiMarkdownReviewLoop.openReviewHistory', 'Review History', async document => {
       const archived = await store.loadArchived(document.uri);
       const legacy = store.getLegacyBackupPaths(document.uri);
       const choices = [
         ...archived.map(thread => ({ label: thread.comment.split('\n')[0], description: thread.taskResult ?? '', thread, backup: '' })),
-        ...legacy.map(backup => ({ label: '이전 버전 원본 백업', description: path.basename(backup), thread: undefined, backup }))
+        ...legacy.map(backup => ({ label: 'Legacy source backup', description: path.basename(backup), thread: undefined, backup }))
       ];
-      if (!choices.length) { vscode.window.showInformationMessage('보관된 이전 완료 내역이 없습니다. 현재 회차의 완료 항목은 리뷰 화면에 표시됩니다.'); return; }
-      const choice = await vscode.window.showQuickPick(choices, { placeHolder: '완료 내역을 선택하여 확인하거나 다시 열기' });
+      if (!choices.length) { vscode.window.showInformationMessage('No archived review history. Completed items from this round remain in the review view.'); return; }
+      const choice = await vscode.window.showQuickPick(choices, { placeHolder: 'Select a history item to inspect or reopen' });
       if (!choice) return;
       if (choice.backup) {
         const raw = new TextDecoder().decode(await vscode.workspace.fs.readFile(vscode.Uri.file(choice.backup)));
-        await openReadOnlyMarkdownPrompt('이전 버전 리뷰 원본', '```json\n' + raw + '\n```');
+        await openReadOnlyMarkdownPrompt('Legacy Review Source', '```json\n' + raw + '\n```');
       } else if (choice.thread) {
         const thread = choice.thread;
-        await openReadOnlyMarkdownPrompt('이전 완료 내역', `# 요청\n\n${thread.comment}\n\n# AI 처리 결과\n\n${thread.taskResult ?? ''}\n\nID: ${thread.id}`);
-        if (await vscode.window.showInformationMessage('이 코멘트를 미처리 요청으로 다시 열 수 있습니다.', '다시 열기') === '다시 열기') {
+        await openReadOnlyMarkdownPrompt('Review History Item', `# Comment\n\n${thread.comment}\n\n# Agent Result\n\n${thread.taskResult ?? ''}\n\nID: ${thread.id}`);
+        if (await vscode.window.showInformationMessage('Reopen this comment as a pending request?', 'Reopen') === 'Reopen') {
           await store.restoreArchivedThread(document.uri, thread.id);
           await provider.refreshDocument(document.uri);
         }
       }
     }),
-    registerMarkdownCommand(provider, 'aiMarkdownReviewLoop.restoreReviewBackup', '리뷰 사본 복구', async document => {
-      const choice = await vscode.window.showWarningMessage('AI의 파일 편집을 중지한 뒤 복구하세요. 리뷰 JSON을 저장된 사본으로 복구하고 현재 JSON도 별도로 보관합니다. Markdown 본문은 변경하지 않습니다.', { modal: true }, '복구');
-      if (choice !== '복구') return;
+    registerMarkdownCommand(provider, 'aiMarkdownReviewLoop.restoreReviewBackup', 'Restore Review Backup', async document => {
+      const choice = await vscode.window.showWarningMessage('Stop the agent before restoring. The saved review backup will replace the current review JSON, and the current JSON will be preserved separately. The Markdown source is unchanged.', { modal: true }, 'Restore');
+      if (choice !== 'Restore') return;
       await store.restoreReviewBackup(document.uri);
       provider.resetReviewUndo(document.uri);
       await provider.refreshDocument(document.uri);

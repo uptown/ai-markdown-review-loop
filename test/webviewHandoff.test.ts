@@ -49,7 +49,7 @@ describe('external agent handoff webview', () => {
       const initialMessages = messagesBeforeReady;
       ready(); await opening;
       assert.match(initialHtml, /data-handoff-primary/);
-      assert.match(initialHtml, new RegExp(phase === 'preparing' ? '전달 준비 중' : '수정본 검수'));
+      assert.match(initialHtml, new RegExp(phase === 'preparing' ? 'Preparing Handoff' : 'Review Changes'));
       assert.equal(initialMessages, 0);
       h.setHandoffPhase(undefined);
       await h.provider.refreshDocument(h.document.uri);
@@ -65,14 +65,14 @@ describe('external agent handoff webview', () => {
     const { render } = await setup([legacy]);
     const dom = runWebview(render());
     assert.equal(dom.document.querySelectorAll('[data-handoff-primary]').length, 1);
-    assert.equal(dom.document.querySelector('[data-handoff-primary]').textContent, 'AI에 전달');
+    assert.equal(dom.document.querySelector('[data-handoff-primary]').textContent, 'Send to Agent');
     for (const selector of ['[data-reply-form]', '[data-reply-template]', '[data-apply-suggested-patch]', '[data-open-feedback-loop-prompt]', '[data-open-context-bootstrap-prompt]']) {
       assert.equal(dom.document.querySelector(selector), undefined, selector);
     }
     assert.ok(dom.document.querySelector('[data-edit-comment]'));
     assert.ok(dom.document.querySelector('[data-remove-comment]'));
     assert.equal(dom.document.getElementById('threads').textContent.includes('An old discussion.'), false);
-    assert.equal(dom.document.querySelector('.review-badge').textContent, '코멘트');
+    assert.equal(dom.document.querySelector('.review-badge').textContent, 'Comment');
     assert.equal(dom.messages.some(message => message.type === 'anchorLocated'), false);
   });
 
@@ -98,7 +98,7 @@ describe('external agent handoff webview', () => {
     dom.dispatch(form, 'submit');
     assert.equal(dom.messages.some(message => message.type === 'addComment'), false);
     assert.equal(dom.savedState.drafts.comment.text, 'Keep this next-review request.');
-    assert.equal(dom.document.querySelector('[data-handoff-primary]').textContent, '수정본 검수');
+    assert.equal(dom.document.querySelector('[data-handoff-primary]').textContent, 'Review Changes');
     h.setHandoffPhase(undefined);
     const resumed = runWebview(render(), dom.savedState);
     const resumedForm = resumed.document.getElementById('comment-composer');
@@ -134,7 +134,7 @@ describe('external agent handoff webview', () => {
     assert.equal(dom.document.getElementById('block-editor-submit').disabled, true);
     assert.equal(dom.document.querySelector('[data-edit-comment]').disabled, true);
     assert.equal(dom.document.querySelector('[data-handoff-primary]').disabled, true);
-    assert.match(dom.document.querySelector('[data-handoff-status]').textContent, /전달 준비/);
+    assert.match(dom.document.querySelector('[data-handoff-status]').textContent, /Preparing handoff/);
     dom.dispatch(dom.document.getElementById('block-editor'), 'submit');
     assert.equal(dom.messages.some(message => message.type === 'editMarkdownBlock'), false);
     assert.match(dom.savedState.drafts.block.html, /Keep my rich draft/);
@@ -151,7 +151,7 @@ describe('external agent handoff webview', () => {
       await h.message({type,requestId:type,documentVersion:1,threadId:'rv_request',comment:'Lost update?',anchorText:'First.',lineStart:1,lineEnd:1,intent:'manual_block_edit',rawMarkdown:'Changed.'});
       const result = h.postedMessages.find(message => message.type === 'reviewMutationResult' && message.requestId === type);
       assert.equal(result.ok, false, type);
-      assert.match(result.error, /저장 보류/, type);
+      assert.match(result.error, /writes are paused/, type);
     }
     await h.message({type:'deleteMarkdownBlock',documentVersion:1,lineStart:1,lineEnd:1});
     assert.equal(h.edits.length, 0);
@@ -170,7 +170,7 @@ describe('external agent handoff webview', () => {
     await h.message(dom.messages.find(message => message.type === 'handoff'));
     for (const message of h.postedMessages) dom.receive(message);
     assert.equal(dom.document.querySelector('[data-handoff-primary]').disabled, false);
-    assert.equal(dom.document.querySelector('[data-handoff-primary]').textContent, 'AI에 전달');
+    assert.equal(dom.document.querySelector('[data-handoff-primary]').textContent, 'Send to Agent');
     assert.equal(dom.document.getElementById('comment-body').value, 'Keep the unsaved request.');
     assert.match(dom.document.getElementById('review-refresh-error').textContent, /Sidecar temporarily unreadable/);
   });
@@ -217,7 +217,7 @@ describe('external agent handoff webview', () => {
     open[0].comment = 'A different current request.';
     open[0].taskRevision = 2;
     const next = runWebview(render(), dom.savedState);
-    assert.match(next.document.querySelector('.draft-recovery').textContent, /수정 요청이 변경/);
+    assert.match(next.document.querySelector('.draft-recovery').textContent, /change request changed/);
     assert.equal(next.document.querySelector('.draft-recovery textarea').value, 'My updated requirement.');
     assert.equal(next.messages.some(value => value.type === 'editComment'), false);
   });
@@ -229,25 +229,25 @@ describe('external agent handoff webview', () => {
     legacy.status = 'accepted';
     const { render } = await setup([task('rv_pending'),task('rv_blocked','blocked')],[task('rv_done','done'),legacy]);
     const dom = runWebview(render());
-    assert.equal(dom.document.querySelector('[data-review-summary]').textContent, '처리 1개 · 미처리 1개 · 확인 필요 1개');
+    assert.equal(dom.document.querySelector('[data-review-summary]').textContent, '1 done · 1 pending · 1 blocked');
     assert.equal(dom.document.querySelector('.history-heading').hasAttribute('open'), false);
-    assert.match(dom.document.querySelector('.is-closed[data-thread-id="rv_done"]').textContent, /처리 완료.*Recovery steps recorded/);
+    assert.match(dom.document.querySelector('.is-closed[data-thread-id="rv_done"]').textContent, /Done.*Recovery steps recorded/);
     assert.ok(dom.document.querySelector('.is-closed[data-thread-id="rv_done"] [data-restore-thread]'));
     assert.equal(dom.document.querySelector('.is-closed[data-thread-id="rv_legacy"] [data-restore-thread]'), undefined);
-    assert.match(dom.document.querySelector('.is-closed[data-thread-id="rv_legacy"]').textContent, /이전 기록/);
+    assert.match(dom.document.querySelector('.is-closed[data-thread-id="rv_legacy"]').textContent, /Legacy/);
   });
 
   it('counts outdated blocked reports as pending and keeps review resumption available with no open requests', async () => {
     const stale = task('rv_stale', 'blocked'); stale.taskRevision = 2;
     const { render, h, open } = await setup([stale], [task('rv_done', 'done')]);
-    assert.equal(runWebview(render()).document.querySelector('[data-review-summary]').textContent, '처리 1개 · 미처리 1개 · 확인 필요 0개');
+    assert.equal(runWebview(render()).document.querySelector('[data-review-summary]').textContent, '1 done · 1 pending · 0 blocked');
     open.splice(0);
     const empty = runWebview(render());
     assert.equal(empty.document.querySelector('[data-handoff-primary]').disabled, true);
     h.setHandoffPhase('handedOff');
     const paused = runWebview(render());
     assert.equal(paused.document.querySelector('[data-handoff-primary]').disabled, false);
-    assert.equal(paused.document.querySelector('[data-handoff-primary]').textContent, '수정본 검수');
+    assert.equal(paused.document.querySelector('[data-handoff-primary]').textContent, 'Review Changes');
   });
 
   it('ignores retired conversation, patch and prompt messages without changing source', async () => {

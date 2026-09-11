@@ -54,10 +54,10 @@ code --install-extension ai-markdown-review-loop-<version>.vsix --force
 
 1. Open a Markdown file beside its preview and add comments on text, a table,
    image, code, and Mermaid content. Navigate and reattach a missing target.
-2. AI에 전달; verify saved v3 JSON, a short copied request, write pause, and
+2. Send to Agent; verify saved v3 JSON, a short copied request, write pause, and
    local draft preservation. Reload VS Code and confirm the pause survives.
 3. Use a file-capable external agent to edit Markdown, mark one item done, and
-   block another. Confirm it stops writing before 수정본 검수 resumes review.
+   block another. Confirm it stops writing before Review Changes resumes review.
 4. Inspect the revised source, clarify or reopen work, and send a second round.
    Confirm completed work remains in local history and unfinished work remains
    in active JSON. Reopen an archived request.

@@ -151,7 +151,7 @@ export function renderReanchorScript(): string {
         const message = event.data;
         if (message?.type === 'handoffPhase') {
           confirm.disabled = isHandoffActive() || !selectedTarget || Boolean(pendingRequest);
-          if (isHandoffActive() && !panel.hidden) status.textContent = '외부 편집에 전달됨 · 재연결 저장 보류.';
+          if (isHandoffActive() && !panel.hidden) status.textContent = 'Handed off to the agent · reattachment is paused.';
           return;
         }
         if (message?.type !== 'reviewMutationResult' || message.requestId !== pendingRequest || !pendingRequest) return;

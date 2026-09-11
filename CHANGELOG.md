@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.1 - 2026-09-11
+
+- Keeps the public README, workflow documentation, and user-facing labels and
+  messages in English while retaining the same v3 task-file behavior.
+- Removes a tracked local review sidecar so workspace-specific review history and
+  absolute paths are not part of the repository or release package.
+
 ## 0.1.0 - 2026-09-11
 
 - Simplifies the workflow to comments → Send to Agent → Review Changes. Removes in-extension conversation replies, AI patch approval, local checks, and multiple prompt commands.

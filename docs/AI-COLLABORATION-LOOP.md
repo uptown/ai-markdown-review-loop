@@ -7,12 +7,12 @@ requests and displays outcomes without running a model.
 ## A Review Round
 
 1. Open the review preview and save comments on specific content.
-2. Choose **AI에 전달**. The extension saves a request checkpoint, pauses its
+2. Choose **Send to Agent**. The extension saves a request checkpoint, pauses its
    writes, and copies a short request pointing to the colocated JSON.
 3. Paste that request into an agent with workspace file access.
 4. The agent reads current Markdown, edits it, then records a short done or
    blocked result for each handled item and stops writing.
-5. Choose **수정본 검수**. Inspect the revised source and results. Reopen an
+5. Choose **Review Changes**. Inspect the revised source and results. Reopen an
    unsatisfactory item, clarify blocked work, or save new comments.
 6. Send the next round. Previously completed items move to local history before
    being removed from active JSON; unfinished requests remain.
