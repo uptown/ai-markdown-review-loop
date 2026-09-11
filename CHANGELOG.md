@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.3.2 - 2026-09-12
+
+- Removes the last retired `reattach` and status wording from the published
+  review workflow documentation.
+
 ## 0.3.1 - 2026-09-12
 
 - Removes `pending`, `done`, and `blocked` from new JSON task files; the agent
