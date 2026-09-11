@@ -14,7 +14,7 @@ function thread(id: string, text: string, lineStart: number, status: ReviewThrea
 async function reviewDom(open: ReviewThread[], closed: ReviewThread[] = [], source = 'Shared target.\n\nAnother target.') {
   const h = await createProviderHarness(source);
   const document = (threads: ReviewThread[]) => ({ documentUri: h.document.uri.toString(), threads, updatedAt: '' });
-  return runWebview(h.provider.renderHtml(h.webview, h.document, document(open), document(closed)));
+  return runWebview(h.provider.renderHtml(h.webview, h.document, document(open)));
 }
 
 describe('review navigation and keyboard destinations', () => {
@@ -80,14 +80,15 @@ describe('review navigation and keyboard destinations', () => {
     assert.equal(dom.document.querySelector('.thread [data-jump-thread]').disabled, true);
   });
 
-  it('distinguishes first-use empty state from completed feedback', async () => {
+  it('uses one current-comment empty state regardless of prior agent outcomes', async () => {
     const fresh = await reviewDom([]);
-    assert.equal(fresh.document.getElementById('threads').textContent, 'Select text in the document to add a change request.');
+    assert.equal(fresh.document.getElementById('threads').textContent, 'Select text in the document to add a comment.');
     assert.equal(fresh.document.querySelector('[data-review-position]').textContent, 'No open comments');
     assert.equal(fresh.document.querySelector('[data-review-nav="next"]').disabled, true);
     const completed = await reviewDom([], [thread('rv_closed', 'Shared target.', 1, 'resolved')]);
-    assert.equal(completed.document.getElementById('threads').textContent, 'No pending requests. Review the revised document again.');
-    assert.ok(completed.document.querySelector('.is-closed [data-jump-thread]'));
+    assert.equal(completed.document.getElementById('threads').textContent, 'Select text in the document to add a comment.');
+    assert.equal(completed.document.querySelector('.history-heading'), undefined);
+    assert.equal(completed.document.querySelector('[data-reanchor-thread]'), undefined);
   });
 
   it('respects reduced motion when jumping from a thread to its source', async () => {
@@ -100,49 +101,21 @@ describe('review navigation and keyboard destinations', () => {
     assert.equal(behavior, 'auto');
   });
 
-  it('offers the same keyboard source destination for linked closed feedback', async () => {
-    const dom = await reviewDom([], [thread('rv_closed', 'Shared target.', 1, 'resolved')]);
-    const source = dom.document.querySelector('#markdown-body p');
-    let focused = false;
-    Object.defineProperty(source, 'focus', { value: () => { focused = true; } });
-    dom.dispatch(dom.document.querySelector('.is-closed [data-jump-thread]'), 'click');
-    assert.equal(focused, true);
-    assert.equal(source.getAttribute('tabindex'), '-1');
-    assert.equal(dom.document.querySelector('.is-closed').getAttribute('aria-current'), 'true');
-  });
-
-  it('navigates a verified multi-block history span even when Markdown syntax is absent from rendered text', async () => {
-    const source = '# Updated heading\n\nFirst revised paragraph.\n\nSecond revised paragraph.';
-    const closed = thread('rv_multiblock', '# Updated heading First revised paragraph. Second revised paragraph.', 1, 'accepted');
-    closed.anchor.lineEnd = 5;
-    const dom = await reviewDom([], [closed], source);
-    const heading = dom.document.querySelector('#markdown-body h1');
-    let focused = false;
-    Object.defineProperty(heading, 'focus', { value: () => { focused = true; } });
-    assert.equal(dom.evaluate('state.historyAnchorLocations.rv_multiblock.lineEnd'), 5);
-    dom.dispatch(dom.document.querySelector('.is-closed [data-jump-thread]'), 'click');
-    assert.equal(focused, true);
-    assert.equal(heading.classList.contains('history-anchor-target'), true);
-  });
-
-  it('uses the verified current history location after source moved instead of a stale line hint', async () => {
-    const source = 'Intro\n\nBefore\n\n# Heading\n\nRevised paragraph.\n\nAfter';
-    const closed = thread('rv_moved', '# Heading Revised paragraph.', 1, 'resolved');
-    closed.anchor = { ...closed.anchor, occurrence: 0, contextBefore: 'Before', contextAfter: 'After' };
-    const dom = await reviewDom([], [closed], source);
-    assert.equal(dom.evaluate('state.historyAnchorLocations.rv_moved.lineStart'), 5);
-    assert.equal(dom.evaluate('findHistoryAnchorElement(closedThreads[0]).tagName'), 'H1');
-  });
-
-  it('does not use stale line hints as a source fallback for outdated or ambiguous closed feedback', async () => {
-    const removed = thread('rv_removed', '# Removed Missing paragraph.', 1, 'resolved');
-    const dom = await reviewDom([], [removed], '# Current\n\nOther paragraph.');
-    assert.equal(dom.evaluate('state.historyAnchorLocations.rv_removed'), undefined);
-    assert.equal(dom.evaluate('findHistoryAnchorElement(closedThreads[0])'), undefined);
-    const duplicate = thread('rv_ambiguous', '# Heading Paragraph.', 99, 'resolved');
-    duplicate.anchor.occurrence = 0;
-    const ambiguous = await reviewDom([], [duplicate], '# Heading\n\nParagraph.\n\n# Heading\n\nParagraph.');
-    assert.equal(ambiguous.evaluate('state.historyAnchorLocations.rv_ambiguous'), undefined);
-    assert.equal(ambiguous.evaluate('findHistoryAnchorElement(closedThreads[0])'), undefined);
+  it('toggles the comments sidebar and keeps the control keyboard accessible', async () => {
+    const dom = await reviewDom([thread('rv_a', 'Shared target.', 1)]);
+    const layout = dom.document.querySelector('.layout');
+    const sidebar = dom.document.getElementById('review-sidebar');
+    const toggle = dom.document.querySelector('[data-toggle-sidebar]');
+    assert.equal(toggle.getAttribute('aria-expanded'), 'true');
+    assert.equal(sidebar.hidden, false);
+    dom.dispatch(toggle, 'click');
+    assert.equal(sidebar.hidden, true);
+    assert.equal(toggle.getAttribute('aria-expanded'), 'false');
+    assert.equal(toggle.textContent, 'Show comments');
+    assert.equal(layout.classList.contains('sidebar-collapsed'), true);
+    dom.dispatch(toggle, 'click');
+    assert.equal(sidebar.hidden, false);
+    assert.equal(toggle.getAttribute('aria-expanded'), 'true');
+    assert.equal(toggle.textContent, 'Hide comments');
   });
 });

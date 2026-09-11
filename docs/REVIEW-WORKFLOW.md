@@ -17,9 +17,9 @@ file-capable agent can open the sidecar directly. The extension does not create
 a second prompt, lock the editor, or coordinate an agent conversation.
 
 The agent must read the current Markdown, verify each quote and context, edit
-the source first, then set `done` or `blocked` with a one-line `result` and the
-handled `resultFor` revision. It should preserve other items and delete the JSON
-after recording outcomes.
+the source first, and record a one-line result. It must preserve every user
+comment and target; it must not add replies, close, archive, or reattach
+comments. Delete the JSON after recording outcomes.
 
 ## Review the result
 
@@ -28,9 +28,9 @@ deletes the JSON, the extension shows the last valid snapshot and a notice that
 the round is ready for review. Inspect the Markdown itself; `done` is only an
 agent report. Add a new comment to start another round and recreate the JSON.
 
-Missing or ambiguous anchors remain visible as blocked work. Reattach is an
-explicit location change that preserves the request ID and increments its
-revision.
+Missing or ambiguous targets are reported in the agent result instead of being
+silently moved. The user edits or deletes the comment and creates the next JSON
+round.
 
 ## Safety boundaries
 

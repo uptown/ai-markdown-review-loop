@@ -145,7 +145,7 @@ export async function createProviderHarness(initialText = 'First.\n\nSecond.\n')
       return { store: realStore, undo };
     },
     changeText(value: string) { text = value; version++; },
-    render() { return provider.renderHtml(webview, document, empty(), empty()); },
+    render() { return provider.renderHtml(webview, document, empty()); },
     async open() {
       await provider.resolveCustomTextEditor(document, { webview, onDidDispose: () => disposable, onDidChangeViewState: () => disposable }, {});
     },

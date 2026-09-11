@@ -15,7 +15,7 @@ import {
   parsePortableReviewSidecar,
   upsertThread
 } from './reviewSidecarCodec';
-import { compareReviewTaskCheckpoint, createReviewTaskCheckpoint, createReviewTaskFingerprint, getReviewTaskStatus, parseReviewTaskSidecar, type ReviewTaskCheckpoint } from './reviewTaskProtocol';
+import { compareReviewTaskCheckpoint, createReviewTaskCheckpoint, createReviewTaskFingerprint, parseReviewTaskSidecar, type ReviewTaskCheckpoint } from './reviewTaskProtocol';
 import {
   LEGACY_CLOSED_REVIEW_FOLDER,
   LEGACY_OPEN_REVIEW_FOLDER,
@@ -857,11 +857,13 @@ export class ReviewStore {
           status: 'open', closedAt: undefined, closedBy: undefined });
       } else {
         Object.assign(thread, { taskRevision: revision, taskStatus: before.taskStatus, taskResult: before.taskResult, taskResultFor: before.taskResultFor });
-        thread.status = getReviewTaskStatus(thread) === 'done' ? 'resolved' : 'open';
+        // v3 keeps every user-owned comment in the current list. Agent outcomes
+        // are metadata on that comment, never a second resolved/history list.
+        thread.status = 'open';
       }
     }
-    open.threads = outgoing.filter(thread => getReviewTaskStatus(thread) !== 'done');
-    closed.threads = outgoing.filter(thread => getReviewTaskStatus(thread) === 'done');
+    open.threads = outgoing;
+    closed.threads = [];
   }
 
   private async commitCanonicalWrite(documentUri: vscode.Uri, sidecar: vscode.Uri, bytes: Uint8Array, check?: () => Promise<void>): Promise<void> {

@@ -50,7 +50,7 @@ function legacyThread(id: string): ReviewThread {
 }
 
 describe('compact review task protocol', () => {
-  it('roundtrips mixed statuses, exact targets, custom guidance, and item order through engine adapters', () => {
+  it('roundtrips mixed outcomes as one current comment list through engine adapters', () => {
     const payload = sidecar();
     payload.guidance = 'Preserve product constraints. 사용자 지침.';
     payload.items.unshift({
@@ -60,9 +60,8 @@ describe('compact review task protocol', () => {
       ...structuredClone(payload.items[1]), id: 'rv_blocked', status: 'blocked', result: 'Need an allowed timeout.', resultFor: 2
     });
     const pair = parsePortableReviewSidecar(uri, payload);
-    assert.deepEqual(pair.reviewDocument.threads.map(thread => thread.id), ['rv_first', 'rv_blocked']);
-    assert.deepEqual(pair.resolvedReviewDocument.threads.map(thread => thread.id), ['rv_done']);
-    assert.equal(pair.resolvedReviewDocument.threads[0].closedBy, undefined);
+    assert.deepEqual(pair.reviewDocument.threads.map(thread => thread.id), ['rv_done', 'rv_first', 'rv_blocked']);
+    assert.equal(pair.resolvedReviewDocument.threads.length, 0);
     assert.deepEqual(createPortableReviewSidecarPayload(uri, pair.reviewDocument, pair.resolvedReviewDocument, now), payload);
     assert.deepEqual(parsePortableReviewSidecar(uri, payload), pair, 'Repeated reads must not fabricate new dates');
   });
@@ -237,9 +236,11 @@ describe('legacy to task conversion', () => {
     assert.deepEqual(migrateLegacyReviewDocuments(converted), converted);
   });
 
-  it('requires explicit archival rather than reinterpreting old closed history as AI done', () => {
-    assert.throws(() => createPortableReviewSidecarPayload(uri, createEmptyReviewDocument(uri),
-      { documentUri: uri, threads: [{ ...legacyThread('rv_closed'), status: 'resolved' }], updatedAt: now }, now), /Archive legacy/);
+  it('does not serialize resolved history into the v3 current comment list', () => {
+    const current = parsePortableReviewSidecar(uri, sidecar()).reviewDocument;
+    const history = { documentUri: uri, threads: [{ ...legacyThread('rv_closed'), status: 'resolved' as const }], updatedAt: now };
+    const payload = createPortableReviewSidecarPayload(uri, current, history, now);
+    assert.deepEqual(payload.items.map(item => item.id), ['rv_first']);
   });
 
   it('rejects falsy malformed legacy threads and unsupported versions without treating them as empty', () => {

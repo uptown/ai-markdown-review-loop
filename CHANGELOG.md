@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.3.0 - 2026-09-12
+
+- Removes the reattach workflow, closed-comment history panel, and in-preview
+  status/location labels from the shipped review surface.
+- Keeps every v3 comment in one current list; agent results stay attached to the
+  user comment until the user edits or deletes it.
+- Adds a collapsible comments sidebar and removes the unused prompt document
+  provider.
+- Updates the JSON guidance, schema docs, README, and regression coverage for
+  the user-managed comment cycle.
+
 ## 0.2.0 - 2026-09-11
 
 - Removes the Send to Agent / Review Changes handoff state, write pause, and

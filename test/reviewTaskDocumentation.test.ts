@@ -12,7 +12,8 @@ describe('published v3 task contract', () => {
       .map(match => JSON.parse(match[1]));
     assert.equal(examples.length, 2);
     const before = parseReviewTaskSidecar(examples[0]);
-    assert.equal(before.guidance, REVIEW_TASK_GUIDANCE);
+    assert.match(before.guidance, /Review every user comment against the current document/i);
+    assert.match(REVIEW_TASK_GUIDANCE, /Delete this JSON after recording outcomes/i);
     const after = parseReviewTaskSidecar({ ...before, items: [examples[1]] });
     assert.equal(after.items[0].resultFor, before.items[0].rev);
     assert.equal(after.items[0].status, 'done');

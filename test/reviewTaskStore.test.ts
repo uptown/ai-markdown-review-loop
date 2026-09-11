@@ -67,17 +67,17 @@ describe('v3 review task lifecycle and recovery', () => {
     assert.equal(restarted.isHandoffActive(h.uri), true);
   });
 
-  it('accepts mixed done/blocked results, archives done on the next round, and reopens history', async () => {
+  it('keeps mixed agent outcomes on the current comments until the user edits or deletes them', async () => {
     const h = await seed(); await h.handoff();
     const payload = h.read(); finish(payload.items[0]); finish(payload.items[1], 'blocked'); h.write(payload);
     await h.store.resumeReview(h.uri);
-    assert.deepEqual((await h.store.loadResolved(h.uri)).threads.map(t => t.id), ['rv_one']);
-    assert.equal((await h.store.load(h.uri)).threads[0].taskStatus, 'blocked');
-    await h.handoff(); assert.deepEqual(h.read().items.map((t: any) => t.id), ['rv_two']);
-    assert.deepEqual((await h.store.loadArchived(h.uri)).map(t => t.id), ['rv_one']);
-    await h.store.resumeReview(h.uri); await h.store.restoreArchivedThread(h.uri, 'rv_one');
-    const reopened = h.read().items.find((t: any) => t.id === 'rv_one');
-    assert.equal(reopened.status, 'pending'); assert.equal(reopened.rev, 2); assert.equal(reopened.result, undefined);
+    assert.equal((await h.store.loadResolved(h.uri)).threads.length, 0);
+    assert.deepEqual((await h.store.load(h.uri)).threads.map(t => t.id), ['rv_one', 'rv_two']);
+    assert.equal((await h.store.load(h.uri)).threads[0].taskStatus, 'done');
+    assert.equal((await h.store.load(h.uri)).threads[1].taskStatus, 'blocked');
+    await h.handoff();
+    assert.deepEqual(h.read().items.map((t: any) => t.id), ['rv_one', 'rv_two']);
+    assert.deepEqual((await h.store.loadArchived(h.uri)).map(t => t.id), []);
   });
 
   it('increments edited request revisions, resets handling reports, and rejects stale editor edits', async () => {
@@ -317,7 +317,7 @@ describe('v3 review task lifecycle and recovery', () => {
     await h.store.saveBoth(h.uri, open, closed);
     assert.equal(h.read().items[0].status, 'done');
     assert.equal(h.read().items[0].result, latest.items[0].result);
-    assert.deepEqual(closed.threads.map(thread => thread.id), ['rv_one']);
+    assert.deepEqual(closed.threads.map(thread => thread.id), []);
   });
 
   it('rejects a cached whole-document save that would remove a later comment', async () => {

@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/uptown/ai-markdown-review-loop/blob/main/docs/review-task.schema.json",
   "title": "AI Markdown Review Loop task file v3",
-  "description": "Canonical colocated agent task file. The runtime additionally checks unique item IDs and lineEnd >= line. Agents update only status, result and resultFor after saving Markdown, then may delete the file when the round is complete.",
+  "description": "Canonical colocated current-comment file. The runtime additionally checks unique item IDs and lineEnd >= line. Comments belong to the user; an agent may record a short outcome after saving Markdown, then delete the file when the round is complete.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -28,7 +28,7 @@
       "items": {
         "$ref": "#/$defs/item"
       },
-      "description": "Each item ID must be unique. Preserve items while the agent is processing the round."
+      "description": "Each item ID must be unique. Preserve the current user comments while the agent is processing the round; do not add history or replies."
     }
   },
   "$defs": {
@@ -75,7 +75,7 @@
             "missing",
             "ambiguous"
           ],
-          "description": "Preserve this state; do not guess a replacement target."
+          "description": "The target could not be verified in the current document; do not guess or move the comment."
         }
       },
       "dependentRequired": {
