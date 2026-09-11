@@ -82,11 +82,11 @@ describe('review navigation and keyboard destinations', () => {
 
   it('distinguishes first-use empty state from completed feedback', async () => {
     const fresh = await reviewDom([]);
-    assert.equal(fresh.document.getElementById('threads').textContent, '문서에서 텍스트를 선택해 수정 요청을 남기세요.');
+    assert.equal(fresh.document.getElementById('threads').textContent, 'Select text in the document to add a change request.');
     assert.equal(fresh.document.querySelector('[data-review-position]').textContent, 'No open comments');
     assert.equal(fresh.document.querySelector('[data-review-nav="next"]').disabled, true);
     const completed = await reviewDom([], [thread('rv_closed', 'Shared target.', 1, 'resolved')]);
-    assert.equal(completed.document.getElementById('threads').textContent, '미처리 요청이 없습니다. 수정된 문서를 다시 검수하세요.');
+    assert.equal(completed.document.getElementById('threads').textContent, 'No pending requests. Review the revised document again.');
     assert.ok(completed.document.querySelector('.is-closed [data-jump-thread]'));
   });
 

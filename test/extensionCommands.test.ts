@@ -60,7 +60,7 @@ describe('review task command handoff', () => {
     document.save = async () => false;
     await h.run('handoff');
     assert.equal(h.clipboard.length, 0);
-    assert.match(h.errors[0].message, /문서 저장이 취소/);
+    assert.match(h.errors[0].message, /document save was cancelled/);
     assert.deepEqual(h.files.get(sidecar.toString()), before);
     assert.equal(h.store.isHandoffActive(document.uri), false); h.dispose();
   });
@@ -114,7 +114,7 @@ describe('review command error recovery', () => {
     h.files.set(sidecar.toString(), invalid);
     await h.run('handoff');
     assert.equal(h.errors.length, 1);
-    assert.match(h.errors[0].message, /AI에 전달 failed for spec\.md: Review sidecar is invalid/);
+    assert.match(h.errors[0].message, /Send to Agent failed for spec\.md: Review sidecar is invalid/);
     assert.deepEqual(h.files.get(sidecar.toString()), invalid);
     assert.equal(h.information.length, 0);
     h.dispose();

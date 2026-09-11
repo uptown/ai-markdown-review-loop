@@ -107,7 +107,7 @@ describe('draft persistence and save confirmation', () => {
     next.receive({type:'reviewMutationResult', requestId:message.requestId, ok:true});
     assert.equal(next.savedState.drafts.comment, undefined);
     assert.equal(next.savedState.drafts['reply:rv_later'].text, 'Keep this independent reply.');
-    assert.match(next.document.querySelector('.draft-recovery').textContent, /이전 답글 초안/);
+    assert.match(next.document.querySelector('.draft-recovery').textContent, /draft from an earlier reply/);
   });
 
   it('uses render-carried confirmations when an earlier webview missed the save response', async () => {
@@ -169,7 +169,7 @@ describe('draft persistence and save confirmation', () => {
     saved.drafts['reply:rv_previous'] = {kind:'reply',threadId:'rv_previous',text:'Keep the earlier decision.'};
     const dom = runWebview(h.render(), saved);
     assert.equal(dom.document.querySelector('[data-reply-form]'), undefined);
-    assert.match(dom.document.querySelector('.draft-recovery').textContent, /이전 답글 초안/);
+    assert.match(dom.document.querySelector('.draft-recovery').textContent, /draft from an earlier reply/);
     dom.dispatch(dom.document.querySelector('.draft-recovery button'), 'click');
     assert.equal(dom.messages.find(value => value.type === 'copyDraft').text, 'Keep the earlier decision.');
     assert.equal(dom.savedState.drafts['reply:rv_previous'].text, 'Keep the earlier decision.');

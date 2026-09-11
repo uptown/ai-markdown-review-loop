@@ -104,7 +104,7 @@ export async function createProviderHarness(initialText = 'First.\n\nSecond.\n')
   const store: any = {
     getHandoffPhase: () => handoffPhase,
     isHandoffActive: () => Boolean(handoffPhase),
-    assertWritable: () => { if (handoffPhase) throw new Error('저장 보류'); },
+    assertWritable: () => { if (handoffPhase) throw new Error('writes paused'); },
     withDocumentTransaction: async (_uri: Uri, operation: () => Promise<unknown>) => operation(),
     load: async () => empty(), loadResolved: async () => empty(),
     saveBoth: async () => { saveCount++; },

@@ -83,7 +83,7 @@ interface StoredReviewState {
 }
 
 export class ReviewHandoffError extends Error {
-  constructor(message = '외부 편집에 전달되어 저장이 보류되었습니다. AI 작업이 끝나면 수정본 검수로 돌아오세요. 초안은 유지됩니다.') {
+  constructor(message = 'Review writes are paused while the agent edits the files. When it finishes, return to Review Changes. Drafts are kept.') {
     super(message);
     this.name = 'ReviewHandoffError';
   }
@@ -117,7 +117,7 @@ export class ReviewStore {
       await this.withDocumentTransaction(uri, async () => {
         await this.internalWrite(uri, async () => {
           await this.persistState(uri, { phase: 'preparing' });
-          if (!await saveDocument()) throw new Error('문서 저장이 취소되어 전달하지 않았습니다.');
+          if (!await saveDocument()) throw new Error('The document save was cancelled, so the handoff was not sent.');
           const sidecar = await this.getReviewFileUri(uri);
           this.assertSidecarEditorClean(sidecar);
           let pair = await this.readReviewDocuments(uri);
@@ -134,10 +134,10 @@ export class ReviewStore {
           }
           pair.reviewDocument.taskSchemaVersion = 3;
           pair.resolvedReviewDocument.taskSchemaVersion = 3;
-          if (!pair.reviewDocument.threads.length) throw new Error('전달할 미처리 코멘트가 없습니다. 문서를 검수하고 코멘트를 남겨주세요.');
+          if (!pair.reviewDocument.threads.length) throw new Error('There are no pending comments to send. Review the document and add a comment first.');
           await this.writePortableReviewDocuments(sidecar, uri, pair.reviewDocument, pair.resolvedReviewDocument);
           const bytes = await readFileIfExists(sidecar);
-          if (!bytes) throw new Error('전달할 리뷰 파일을 읽을 수 없습니다.');
+          if (!bytes) throw new Error('The review file could not be read for handoff.');
           const payload = parseReviewTaskSidecar(JSON.parse(decoder.decode(bytes)));
           const checkpointPath = await this.backup(uri, 'handoff', bytes);
           await this.persistState(uri, { checkpoint: createReviewTaskCheckpoint(payload), checkpointPath, phase: 'handedOff' });
@@ -168,9 +168,9 @@ export class ReviewStore {
     await this.withDocumentTransaction(uri, async () => {
       const open = await this.load(uri);
       const thread = open.threads.find(item => item.id === id);
-      if (!thread) throw new Error('코멘트를 찾을 수 없습니다. 새로고침 후 다시 시도하세요.');
+      if (!thread) throw new Error('The comment could not be found. Refresh and try again.');
       this.checkTaskRevision(thread, expectedRevision);
-      if (!comment.trim()) throw new Error('수정 요청을 입력하세요.');
+      if (!comment.trim()) throw new Error('Enter a change request.');
       Object.assign(thread, { comment: comment.trim(), taskRevision: (thread.taskRevision ?? 1) + 1, taskStatus: 'pending', taskResult: undefined, taskResultFor: undefined, legacyContext: undefined, updatedAt: new Date().toISOString() });
       await this.save(uri, open);
     });
@@ -181,7 +181,7 @@ export class ReviewStore {
     await this.withDocumentTransaction(uri, async () => {
       const pair = await this.readReviewDocuments(uri);
       const thread = [...pair.reviewDocument.threads, ...pair.resolvedReviewDocument.threads].find(item => item.id === id);
-      if (!thread) throw new Error('코멘트를 찾을 수 없습니다.');
+      if (!thread) throw new Error('The comment could not be found.');
       this.checkTaskRevision(thread, expectedRevision);
       const sidecar = await this.getReviewFileUri(uri);
       const bytes = await readFileIfExists(sidecar);
@@ -213,9 +213,9 @@ export class ReviewStore {
     this.assertWritable(uri);
     await this.withDocumentTransaction(uri, async () => {
       const pair = await this.readReviewDocuments(uri);
-      if ([...pair.reviewDocument.threads, ...pair.resolvedReviewDocument.threads].some(item => item.id === id)) throw new Error('같은 ID의 현재 코멘트가 있습니다. 현재 목록에서 다시 열어주세요.');
+      if ([...pair.reviewDocument.threads, ...pair.resolvedReviewDocument.threads].some(item => item.id === id)) throw new Error('A current comment already uses this ID. Reopen it from the current list.');
       const thread = (await this.loadArchived(uri)).find(item => item.id === id);
-      if (!thread) throw new Error('보관한 코멘트를 찾을 수 없습니다.');
+      if (!thread) throw new Error('The archived comment could not be found.');
       pair.reviewDocument.threads.push(this.reopenTask(thread));
       await this.saveBoth(uri, pair.reviewDocument, pair.resolvedReviewDocument);
     });
@@ -226,9 +226,9 @@ export class ReviewStore {
     await this.withDocumentTransaction(uri, async () => this.internalWrite(uri, async () => {
       const state = this.state(uri);
       const backupPath = state.checkpointPath ?? state.lastValidPath;
-      if (!backupPath) throw new Error('복구할 리뷰 파일이 없습니다.');
+      if (!backupPath) throw new Error('There is no review backup to restore.');
       const bytes = await readFileIfExists(vscode.Uri.file(backupPath));
-      if (!bytes) throw new Error('리뷰 복구 사본을 읽을 수 없습니다.');
+      if (!bytes) throw new Error('The review backup could not be read.');
       parsePortableReviewSidecar(uri.toString(), JSON.parse(decoder.decode(bytes)));
       const sidecar = await this.getReviewFileUri(uri);
       this.assertSidecarEditorClean(sidecar);
@@ -699,26 +699,26 @@ export class ReviewStore {
         const state = this.state(documentUri);
         if (state.checkpoint) {
           const compared = compareReviewTaskCheckpoint(state.checkpoint, parseReviewTaskSidecar(value));
-          if (!compared.valid) throw new Error('전달한 요청/위치/ID가 바뀌거나 누락되었습니다. 리뷰 파일을 확인하거나 전달 전 사본을 복구하세요.');
+          if (!compared.valid) throw new Error('A handed-off request, location, or ID changed or is missing. Inspect the review file or restore the pre-handoff backup.');
         } else if (state.lastValidPath && state.lastHash !== hashText(decoder.decode(portableBytes)) && value.schemaVersion === 3) {
           const previous = await readFileIfExists(vscode.Uri.file(state.lastValidPath));
           if (previous) {
             const old = JSON.parse(decoder.decode(previous));
             if (old.schemaVersion === 3) {
               const compared = compareReviewTaskCheckpoint(createReviewTaskCheckpoint(parseReviewTaskSidecar(old)), value);
-              if (compared.missingIds.length) throw new Error('리뷰 항목이 파일에서 사라졌습니다. 삭제를 완료로 처리하지 않습니다. 리뷰 파일을 확인하거나 복구하세요.');
+              if (compared.missingIds.length) throw new Error('Review items disappeared from the file. Deletion is not treated as completion. Inspect the review file or restore the backup.');
             }
           }
         }
         await this.rememberValid(documentUri, portableBytes, true);
         return pair;
       } catch (error) {
-        throw new Error(`Review sidecar is invalid: ${formatError(error)} 저장된 코멘트를 덮어쓰지 않았습니다. 리뷰 파일을 확인하거나 복구하세요.`);
+        throw new Error(`Review sidecar is invalid: ${formatError(error)} Saved comments were left untouched. Inspect the review file or restore the backup.`);
       }
     }
 
     if (this.state(documentUri).knownCanonical || this.getHandoffPhase(documentUri) === 'handedOff') {
-      throw new Error('리뷰 파일이 없습니다. 파일 삭제를 처리 완료로 해석하지 않습니다. 파일 이동 여부를 확인하거나 복구하세요.');
+      throw new Error('The review file is missing. File deletion is not treated as completion. Check whether it moved or restore the backup.');
     }
 
     return {
@@ -876,7 +876,7 @@ export class ReviewStore {
 
   private assertSidecarEditorClean(uri: vscode.Uri): void {
     if (vscode.workspace.textDocuments?.some(document => document.uri.toString() === uri.toString() && document.isDirty)) {
-      throw new Error('열려 있는 리뷰 JSON에 저장하지 않은 변경이 있습니다. 먼저 해당 파일을 저장하거나 변경을 검토하세요.');
+      throw new Error('The open review JSON has unsaved changes. Save that file or review the changes first.');
     }
   }
 
@@ -896,7 +896,7 @@ export class ReviewStore {
     const file = vscode.Uri.joinPath(directory, kind === 'valid' ? `valid-${this.state(uri).lastValidPath?.endsWith('valid-0.json') ? '1' : '0'}.json` : `${kind}-${hashText(decoder.decode(bytes))}.json`);
     const previous = await readFileIfExists(file);
     if (!bytesEqual(previous, bytes)) await this.atomicWrite(file, bytes);
-    if (!bytesEqual(bytes, await readFileIfExists(file))) throw new Error('리뷰 복구 사본 저장을 확인할 수 없습니다.');
+    if (!bytesEqual(bytes, await readFileIfExists(file))) throw new Error('The review backup could not be verified after saving.');
     return file.fsPath;
   }
 

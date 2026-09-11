@@ -39,7 +39,7 @@ describe('v3 review task lifecycle and recovery', () => {
       order.push('copy'); assert.match(text, /Already queued edit/);
     });
     assert.equal(h.store.getHandoffPhase(h.uri), 'preparing');
-    await assert.rejects(h.store.addThread(h.uri, storageThread('rv_late')), /보류/);
+    await assert.rejects(h.store.addThread(h.uri, storageThread('rv_late')), /paused/);
     release(); await Promise.all([mutation, sending]);
     assert.deepEqual(order, ['save', 'copy']); assert.equal(h.store.getHandoffPhase(h.uri), 'handedOff');
   });
@@ -47,9 +47,9 @@ describe('v3 review task lifecycle and recovery', () => {
   it('keeps the pause and immutable request checkpoint across extension reload', async () => {
     const h = await seed(); await h.handoff();
     const restarted = h.restartStore(); assert.equal(restarted.isHandoffActive(h.uri), true);
-    await assert.rejects(restarted.updateComment(h.uri, 'rv_one', 'Forbidden'), /보류/);
+    await assert.rejects(restarted.updateComment(h.uri, 'rv_one', 'Forbidden'), /paused/);
     const payload = h.read(); payload.items[0].comment = 'Unexpected replacement'; h.write(payload);
-    await assert.rejects(restarted.resumeReview(h.uri), /요청\/위치\/ID/);
+    await assert.rejects(restarted.resumeReview(h.uri), /request, location, or ID/);
     assert.equal(restarted.isHandoffActive(h.uri), true);
   });
 
@@ -87,12 +87,12 @@ describe('v3 review task lifecycle and recovery', () => {
   it('does not resurrect legacy data after a known canonical file disappears', async () => {
     const h = await seed(); const legacy = (await h.store.getReviewStateFileUris(h.uri)).find(uri => uri.path.includes('/documents/'))!;
     h.files.set(legacy.path, encoder.encode(JSON.stringify({ documentUri: h.uri.toString(), updatedAt: '', threads: [storageThread('rv_legacy')] })));
-    h.files.delete(h.sidecar.path); await assert.rejects(h.restartStore().load(h.uri), /ファイル|리뷰 파일이 없습니다/);
+    h.files.delete(h.sidecar.path); await assert.rejects(h.restartStore().load(h.uri), /ファイル|review file is missing/);
   });
 
   it('rejects destructive direct-file edits even without a protected handoff', async () => {
     const h = await seed(); const value = h.read(); value.items = []; h.write(value);
-    await assert.rejects(h.store.load(h.uri), /사라졌습니다/);
+    await assert.rejects(h.store.load(h.uri), /disappeared from the file/);
     await h.store.restoreReviewBackup(h.uri); assert.equal(h.read().items.length, 2);
   });
 
@@ -105,7 +105,7 @@ describe('v3 review task lifecycle and recovery', () => {
 
   it('unfreezes after cancelled source save or failed clipboard delivery', async () => {
     const h = await seed();
-    await assert.rejects(h.store.prepareHandoff(h.uri, async () => false, async () => {}), /저장이 취소/);
+    await assert.rejects(h.store.prepareHandoff(h.uri, async () => false, async () => {}), /document save was cancelled/);
     assert.equal(h.store.isHandoffActive(h.uri), false);
     await assert.rejects(h.store.prepareHandoff(h.uri, async () => true, async () => { throw new Error('Clipboard failed'); }), /Clipboard/);
     assert.equal(h.store.isHandoffActive(h.uri), false); assert.equal(h.read().items.length, 2);
@@ -114,8 +114,8 @@ describe('v3 review task lifecycle and recovery', () => {
   it('refuses writes and handoff while the JSON editor has unsaved changes', async () => {
     const h = await seed(); const original = h.read();
     h.vscode.workspace.textDocuments.push({ uri: h.sidecar as any, isDirty: true });
-    await assert.rejects(h.store.updateComment(h.uri, 'rv_one', 'Conflict'), /저장하지 않은/);
-    await assert.rejects(h.handoff(), /저장하지 않은/); assert.deepEqual(h.read(), original);
+    await assert.rejects(h.store.updateComment(h.uri, 'rv_one', 'Conflict'), /unsaved changes/);
+    await assert.rejects(h.handoff(), /unsaved changes/); assert.deepEqual(h.read(), original);
   });
 
   it('preserves active data when recovery/archive storage cannot be written', async () => {
@@ -325,7 +325,7 @@ describe('v3 review task lifecycle and recovery', () => {
     const legacy = (await h.store.getReviewStateFileUris(h.uri)).find(uri => uri.path.includes('/resolved/'))!;
     const original = encoder.encode(JSON.stringify({ threads: [storageThread('rv_old_closed', { status: 'accepted' })] }));
     h.files.set(legacy.path, original);
-    await assert.rejects(h.store.prepareHandoff(h.uri, async () => true, async () => {}), /미처리 코멘트/);
+    await assert.rejects(h.store.prepareHandoff(h.uri, async () => true, async () => {}), /no pending comments/);
     assert.equal(h.store.isHandoffActive(h.uri), false);
     assert.deepEqual(h.files.get(legacy.path), original);
     assert.ok(h.store.getLegacyBackupPaths(h.uri).some(file => Buffer.from(h.files.get(file)!).equals(Buffer.from(original))));

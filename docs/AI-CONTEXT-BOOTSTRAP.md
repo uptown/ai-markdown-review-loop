@@ -1,6 +1,6 @@
 # Migrating From The Old Bootstrap Prompts
 
-Version 0.1 uses one v3 task file and **AI에 전달**. The former bootstrap,
+Version 0.1 uses one v3 task file and **Send to Agent**. The former bootstrap,
 feedback-loop, and per-thread continuation prompts are retired.
 
 Start from the [current review workflow](./AI-COLLABORATION-LOOP.md). The review
