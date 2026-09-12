@@ -83,7 +83,7 @@ describe('review navigation and keyboard destinations', () => {
   it('uses one current-comment empty state regardless of prior agent outcomes', async () => {
     const fresh = await reviewDom([]);
     assert.equal(fresh.document.getElementById('threads').textContent, 'Select text in the document to add a comment.');
-    assert.equal(fresh.document.querySelector('[data-review-position]').textContent, 'No open comments');
+    assert.equal(fresh.document.querySelector('[data-review-position]').textContent, 'No comments');
     assert.equal(fresh.document.querySelector('[data-review-nav="next"]').disabled, true);
     const completed = await reviewDom([], [thread('rv_closed', 'Shared target.', 1, 'resolved')]);
     assert.equal(completed.document.getElementById('threads').textContent, 'Select text in the document to add a comment.');

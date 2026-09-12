@@ -1,7 +1,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { htmlBlockToMarkdown } from '../src/htmlToMarkdown';
-import { createProviderHarness, runWebview } from './helpers/providerHarness';
+import { createProviderHarness, runWebviewInEditMode as runWebview } from './helpers/providerHarness';
 
 describe('rendered edit event paths', () => {
   it('keeps quote and list children inside their source-owning parent editor (R09)', async () => {

@@ -1,0 +1,53 @@
+{
+  "schemaVersion": 1,
+  "generator": {
+    "file": "scripts/render-marketplace-assets.mjs",
+    "sha256": "9c5e45ddb6cd275ff09d571b51fc86bd1f33340eef5d37d10241137c13d340cb"
+  },
+  "toolchain": {
+    "imageMagick": "Version: ImageMagick 7.1.1-43 Q16-HDRI aarch64 22550 https://imagemagick.org",
+    "ffmpeg": "ffmpeg version 7.1 Copyright (c) 2000-2024 the FFmpeg developers"
+  },
+  "artifacts": [
+    {
+      "file": "marketplace-icon.svg",
+      "sha256": "455de3ee636529281c932cee05081c3b2fb83657ba32a3ccd38ec31cfe75e61c",
+      "bytes": 1311
+    },
+    {
+      "file": "marketplace-icon.png",
+      "sha256": "68f22c3f989b94780436c6d976f1ccb38ab62d180524379ff3c6c7204639e106",
+      "bytes": 27454
+    },
+    {
+      "file": "marketplace-hero.svg",
+      "sha256": "2aea0d6e5bf53539448c9446b0e42df8c6a0b050265e5af1018661f909b95e98",
+      "bytes": 4182
+    },
+    {
+      "file": "marketplace-hero.png",
+      "sha256": "1b7fa9fb633683c0cd70dedfb853bf34e24d7b379fc40ffecc9fca96e5d3338b",
+      "bytes": 512154
+    },
+    {
+      "file": "review-loop-demo-poster.svg",
+      "sha256": "928f250edb0e0b5f65c5cc63f2b3c03fb48f6ef496ed52d361861a9859c79a80",
+      "bytes": 2488
+    },
+    {
+      "file": "review-loop-demo-poster.png",
+      "sha256": "a98710c7e3a4a4bb3ff4548b50f164c79e1f21c038fec854ce0276cc1ab9d602",
+      "bytes": 286332
+    },
+    {
+      "file": "review-loop-demo.gif",
+      "sha256": "5c35b334edd2952e1d7885f7221371b91ffede5eb12087cc8fa6ed5daf248fe8",
+      "bytes": 175165
+    },
+    {
+      "file": "review-loop-demo.mp4",
+      "sha256": "2e5e1b6aad0ae89dd9a0f05c3bf1f19abd6ebb3f087c7c5cfecf29bd234f9bf7",
+      "bytes": 85755
+    }
+  ]
+}

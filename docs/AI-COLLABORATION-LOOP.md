@@ -1,40 +1,22 @@
 # Comment → JSON → Agent Edit → Review
 
-This extension is a local review surface. It collects comments and writes one
-small JSON task file; the external coding agent owns the Markdown edit.
+The user creates, edits and deletes comments. The external agent changes the
+Markdown. The [task contract](./AI-REVIEW-POLICY.md) is authoritative.
 
-## One review round
+1. Select text in the review preview and save a comment.
+2. Give the agent the sidecar path, or use **Copy Review JSON** for pasted input.
+3. The agent reads the current Markdown and every current comment. It leaves
+   already-satisfied requests unchanged and asks about ambiguous targets.
+4. It saves Markdown changes and deletes the JSON.
+5. Review the actual Markdown. Manage your comments and prepare the next pass
+   by saving a comment or copying JSON.
 
-1. Open the preview and select the text that needs a change.
-2. Save a clear comment. The sidecar `.<filename>.ai-review.json` is created or
-   updated beside the Markdown file.
-3. Use **Copy Review JSON** only when the agent needs pasted content. Agents
-   with workspace access can read the sidecar directly.
-4. The agent reads the guidance, reviews every current comment against the
-   latest Markdown, edits the source, and records a one-line result.
-5. The agent stops writing and deletes the JSON file.
-6. The preview keeps the last valid task snapshot and shows a removal notice.
-   Inspect the revised Markdown, then add a new comment for another round.
+A missing JSON ends a round but does not clear current comments. Restarting
+VS Code restores the last valid comments if recovery storage is available.
+A fast write followed by deletion cannot deliver a reliable result to a closed
+editor; therefore this workflow does not display or depend on agent results.
 
-There is no in-extension conversation, reply transcript, patch approval, or
-write pause. The user and agent should still avoid editing the same files at
-the same time.
-
-## Expected outcomes
-
-- **Normal:** every comment has a matching Markdown change and a short result.
-- **Partial:** the result explains what could not be completed. The user can
-  edit or delete the comment before the next round.
-- **Stale target:** the agent reports the ambiguity instead of guessing.
-- **Interrupted run:** the agent reads the current Markdown and JSON before
-  continuing. A missing JSON leaves the last valid result visible; saving a
-  new comment creates a fresh sidecar.
-
-## File contract
-
-The JSON contains only `schemaVersion`, the Markdown basename, one guidance
-string, and the current user comments. Each item preserves its `rv_*` ID,
-`rev`, target quote and line hints, comment, and optional agent result metadata.
-The agent must preserve comment fields and never add replies, history records,
-or replacement targets. The extension rejects malformed or stale revisions and
-never treats an agent result as proof that the source is correct.
+There are no replies, completion statuses, history/reopen actions or write locks.
+Avoid simultaneous source edits. If JSON conflicts with newer user comments,
+use **Restore Review Backup** after inspecting the error. If no valid data can
+be recovered, **Start New Review** offers an explicit empty restart.

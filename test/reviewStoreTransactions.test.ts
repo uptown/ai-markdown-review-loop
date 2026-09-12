@@ -8,16 +8,17 @@ import { createReviewStorageHarness, storageThread } from './helpers/reviewStora
 const now = '2026-09-09T00:00:00Z';
 
 describe('review store transactions', () => {
-  it('preserves both concurrent replies and automatic anchor updates', async () => {
-    const { store, uri } = createReviewStorageHarness('/workspace', true);
+  it('preserves concurrent comment changes and automatic anchor updates', async () => {
+    const { store, uri } = createReviewStorageHarness();
     await store.addThread(uri, storageThread('rv_original'));
     await Promise.all([
-      store.addReply(uri, 'rv_original', 'first reply'),
+      store.updateComment(uri, 'rv_original', 'first edit'),
       store.updateThreadAnchors(uri, [{ threadId: 'rv_original', lineStart: 2, lineEnd: 2, confidence: 'recovered', locatedAt: now }]),
-      store.addReply(uri, 'rv_original', 'second reply')
+      store.updateComment(uri, 'rv_original', 'second edit')
     ]);
     const thread = (await store.load(uri)).threads[0];
-    assert.deepEqual(thread.thread.map(reply => reply.text), ['first reply', 'second reply']);
+    assert.equal(thread.comment, 'second edit');
+    assert.equal(thread.taskRevision, 4);
     assert.equal(thread.anchor.lineStart, 2);
   });
 
@@ -36,12 +37,12 @@ describe('review store transactions', () => {
       await store.save(uri, document);
     });
     await read;
-    const reply = store.addReply(uri, 'rv_original', 'queued reply');
+    const reply = store.addThread(uri, storageThread('rv_queued'));
     unblock();
     await Promise.all([providerWrite, reply]);
     const thread = (await store.load(uri)).threads[0];
     assert.equal(thread.comment, 'provider edit');
-    assert.equal(thread.thread[0].text, 'queued reply');
+    assert.equal((await store.load(uri)).threads[1].id, 'rv_queued');
   });
 
   it('rejects externally changed sidecars without restoring stale bytes over them', async () => {
@@ -67,9 +68,9 @@ describe('review store transactions', () => {
     const { store, uri, failNextWrites } = createReviewStorageHarness('/workspace', true);
     await store.addThread(uri, storageThread('rv_original'));
     failNextWrites();
-    await assert.rejects(store.addReply(uri, 'rv_original', 'failed'), /Injected write failure/);
-    await store.addReply(uri, 'rv_original', 'survives');
-    assert.deepEqual((await store.load(uri)).threads[0].thread.map(reply => reply.text), ['survives']);
+    await assert.rejects(store.updateComment(uri, 'rv_original', 'failed'), /Injected write failure/);
+    await store.updateComment(uri, 'rv_original', 'survives');
+    assert.equal((await store.load(uri)).threads[0].comment, 'survives');
   });
 });
 
@@ -83,6 +84,11 @@ describe('review sidecar rename identity', () => {
     vscode.workspace.fs.writeFile = async (value, bytes) => { await fs.promises.writeFile(value.path, bytes); };
     vscode.workspace.fs.rename = async (from, to) => { await fs.promises.rename(from.path, to.path); };
     vscode.workspace.fs.delete = async value => { await fs.promises.unlink(value.path); };
+    vscode.workspace.fs.readDirectory = async value => (await fs.promises.readdir(value.path, { withFileTypes: true })).map(entry => [entry.name, entry.isFile() ? 1 : 2]);
+    vscode.workspace.fs.stat = async value => {
+      const stat = await fs.promises.stat(value.path);
+      return { type: 1, ctime: stat.ctimeMs, mtime: stat.mtimeMs, size: stat.size };
+    };
     const target = uriFor(path.join(directory, 'Spec.md'));
     const sourceSidecar = path.join(directory, '.spec.md.ai-review.json');
     const targetSidecar = path.join(directory, '.Spec.md.ai-review.json');

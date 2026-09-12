@@ -3,6 +3,7 @@ import path from 'path';
 import { isDeepStrictEqual } from 'util';
 import {
   parseReviewTaskSidecar,
+  currentReviewGuidance,
   REVIEW_TASK_GUIDANCE,
   REVIEW_TASK_SCHEMA_VERSION,
   type ReviewTaskItem,
@@ -50,7 +51,7 @@ export function createPortableReviewSidecarPayload(
   return parseReviewTaskSidecar({
     schemaVersion: REVIEW_SIDECAR_SCHEMA_VERSION,
     document: reviewTaskDocumentName(documentUri),
-    guidance: reviewDocument.guidance ?? REVIEW_TASK_GUIDANCE,
+    guidance: currentReviewGuidance(reviewDocument.guidance),
     items: threads.map(createReviewTaskItem)
   });
 }

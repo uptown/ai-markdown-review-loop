@@ -2,7 +2,7 @@
   "name": "ai-markdown-review-loop",
   "displayName": "AI Markdown Review Loop",
   "description": "Review Markdown with comments and share a compact JSON task file with your AI agent.",
-  "version": "0.3.2",
+  "version": "0.4.0",
   "publisher": "uptown",
   "license": "MIT",
   "repository": {
@@ -22,6 +22,19 @@
   "engines": {
     "vscode": "^1.85.0"
   },
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": "limited",
+      "description": "Preview Markdown in Restricted Mode. Writing comments, copying review JSON, and recovery changes require a trusted workspace."
+    },
+    "virtualWorkspaces": {
+      "supported": false,
+      "description": "Requires local files in VS Code Desktop. Virtual workspaces are not supported."
+    }
+  },
+  "extensionKind": [
+    "ui"
+  ],
   "categories": [
     "Other",
     "Visualization"
@@ -70,6 +83,18 @@
       {
         "command": "aiMarkdownReviewLoop.copyReviewJson",
         "title": "AI Markdown Review: Copy Review JSON"
+      },
+      {
+        "command": "aiMarkdownReviewLoop.restoreReviewBackup",
+        "title": "AI Markdown Review: Restore Review Backup"
+      },
+      {
+        "command": "aiMarkdownReviewLoop.startNewReview",
+        "title": "AI Markdown Review: Start New Review"
+      },
+      {
+        "command": "aiMarkdownReviewLoop.purgeRecovery",
+        "title": "AI Markdown Review: Purge Recovery Data"
       }
     ],
     "menus": {
@@ -176,30 +201,36 @@
     }
   },
   "scripts": {
-    "compile": "tsc -p ./ --noEmit && esbuild src/extension.ts --bundle --platform=node --format=cjs --external:vscode --outfile=out/extension.js && node scripts/copy-vendor.mjs",
-    "watch": "tsc -watch -p ./",
-    "check": "tsc -p ./ --noEmit && npm run test:unit",
+    "typecheck": "tsc -p ./ --noEmit && tsc -p tsconfig.webview.json",
+    "compile": "npm run typecheck && node scripts/build.mjs",
+    "watch": "node scripts/build.mjs --watch",
+    "check": "npm run typecheck && npm run test:unit",
     "test": "npm run check",
     "test:unit": "tsc -p tsconfig.test.json && node scripts/run-unit-tests.mjs",
+    "test:host": "node scripts/run-extension-host-smoke.mjs",
     "assets:marketplace": "node scripts/render-marketplace-assets.mjs",
+    "assets:check": "node scripts/check-marketplace-assets.mjs",
+    "notices:generate": "node scripts/check-third-party-notices.mjs --write",
     "notices:check": "node scripts/check-third-party-notices.mjs",
+    "security:check": "npm audit --audit-level=low",
     "package:hygiene": "node scripts/check-vsix-hygiene.mjs",
-    "release:check": "npm run assets:marketplace && npm run check && npm run notices:check && npm run package && npm run package:hygiene",
+    "release:check": "npm run assets:check && npm run check && npm run security:check && npm run package && npm run notices:check && npm run package:hygiene",
     "vscode:prepublish": "npm run compile",
     "package": "vsce package"
   },
   "dependencies": {
-    "markdown-it": "^14.1.0",
-    "mermaid": "^11.15.0",
+    "markdown-it": "^14.3.1",
+    "mermaid": "^11.17.2",
     "turndown": "^7.2.4"
   },
   "devDependencies": {
     "@types/markdown-it": "^14.1.2",
     "@types/node": "^20.19.25",
     "@types/turndown": "^5.0.6",
-    "@types/vscode": "^1.85.0",
-    "@vscode/vsce": "^3.9.1",
-    "esbuild": "^0.28.0",
+    "@types/vscode": "1.85.0",
+    "@vscode/vsce": "^3.9.2",
+    "esbuild": "^0.28.2",
+    "playwright-core": "1.63.0",
     "typescript": "^5.9.3"
   }
 }

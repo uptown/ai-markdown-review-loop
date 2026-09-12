@@ -6,18 +6,69 @@ on:
   pull_request:
     branches: [main]
 
+permissions:
+  contents: read
+
 jobs:
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
 
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version-file: .nvmrc
           cache: npm
       - run: npm ci
       - run: npm run check
+      - run: npm run security:check
+      - run: npm run assets:check
+      - run: npm run package
       - run: npm run notices:check
-      - run: npx vsce package
       - run: npm run package:hygiene
+      - uses: actions/upload-artifact@v4
+        with:
+          name: candidate-vsix
+          path: '*.vsix'
+          if-no-files-found: error
+
+  installed-host:
+    needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            vscode: stable
+          - os: ubuntu-latest
+            vscode: '1.85.0'
+          - os: macos-latest
+            vscode: stable
+          - os: windows-latest
+            vscode: stable
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    env:
+      CODE_VERSION: ${{ matrix.vscode }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - uses: actions/download-artifact@v4
+        with:
+          name: candidate-vsix
+      - if: runner.os == 'Linux'
+        run: xvfb-run -a npm run test:host -- --output .agent/host-evidence.json
+      - if: runner.os != 'Linux'
+        run: npm run test:host -- --output .agent/host-evidence.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: host-${{ matrix.os }}-${{ matrix.vscode }}
+          path: .agent/host-evidence.json
+          include-hidden-files: true
+          if-no-files-found: error

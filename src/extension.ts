@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import path from 'path';
 import { ReviewEditorProvider, reviewEditorViewType } from './reviewEditorProvider';
 import { ReviewStore } from './reviewStore';
+import { createReviewClipboard, resolveReviewClipboardContext } from './reviewClipboard';
 
 export function activate(context: vscode.ExtensionContext): void {
   const store = new ReviewStore(context);
@@ -15,7 +16,7 @@ export function activate(context: vscode.ExtensionContext): void {
       }
     }),
     vscode.workspace.onDidRenameFiles(event => {
-      void migrateRenamedMarkdownReviews(store, event.files);
+      if (vscode.workspace.isTrusted !== false) void migrateRenamedMarkdownReviews(store, event.files);
     }),
     registerMarkdownCommand(provider, 'aiMarkdownReviewLoop.openReviewPreview', 'Open Review Preview', async document => {
       await vscode.commands.executeCommand('vscode.openWith', document.uri, reviewEditorViewType);
@@ -31,11 +32,32 @@ export function activate(context: vscode.ExtensionContext): void {
       });
     }),
     registerMarkdownCommand(provider, 'aiMarkdownReviewLoop.copyReviewJson', 'Copy Review JSON', async document => {
+      const folders = (vscode.workspace.workspaceFolders ?? []).map(folder => ({ name: folder.name, fsPath: folder.uri.fsPath }));
+      resolveReviewClipboardContext(document.uri.fsPath, folders);
       const exported = await store.exportReviewJson(document.uri, async () => document.save());
-      await vscode.env.clipboard.writeText(exported.contents);
-      vscode.window.showInformationMessage(`Copied review JSON for ${path.basename(exported.sidecar.fsPath)}. The external agent can update the Markdown and remove the JSON when finished.`);
+      const copied = createReviewClipboard(exported.contents, document.uri.fsPath, folders);
+      await vscode.env.clipboard.writeText(copied);
+      vscode.window.showInformationMessage(`Copied review JSON for ${path.basename(document.uri.fsPath)}. The agent should review the current Markdown and delete the JSON after saving changes.`);
       await provider.refreshDocument(document.uri);
-    })
+    }, true),
+    registerMarkdownCommand(provider, 'aiMarkdownReviewLoop.restoreReviewBackup', 'Restore Review Backup', async document => {
+      const choice = await vscode.window.showWarningMessage('Restore the latest valid comments? The current JSON will be backed up first. Markdown will not change.', { modal: true }, 'Restore');
+      if (choice !== 'Restore') return;
+      await store.restoreReviewBackup(document.uri);
+      await provider.refreshDocument(document.uri);
+    }, true),
+    registerMarkdownCommand(provider, 'aiMarkdownReviewLoop.startNewReview', 'Start New Review', async document => {
+      const choice = await vscode.window.showWarningMessage('Start an empty review when no valid comments can be recovered? This resets unavailable review state and preserves the Markdown.', { modal: true }, 'Start New Review');
+      if (choice !== 'Start New Review') return;
+      await store.startNewReview(document.uri);
+      await provider.refreshDocument(document.uri);
+    }, true),
+    registerMarkdownCommand(provider, 'aiMarkdownReviewLoop.purgeRecovery', 'Purge Recovery Data', async document => {
+      const choice = await vscode.window.showWarningMessage('Permanently remove old recovery copies for this document? Current comments, Markdown, and the latest recovery copy are kept.', { modal: true }, 'Purge');
+      if (choice !== 'Purge') return;
+      const count = await store.purgeRecovery(document.uri);
+      vscode.window.showInformationMessage(`Removed ${count} old recovery copies.`);
+    }, true)
   );
 }
 
@@ -47,7 +69,8 @@ function registerMarkdownCommand(
   provider: ReviewEditorProvider,
   id: string,
   label: string,
-  run: (document: vscode.TextDocument) => Promise<void>
+  run: (document: vscode.TextDocument) => Promise<void>,
+  requiresTrust = false
 ): vscode.Disposable {
   return vscode.commands.registerCommand(id, async (targetUri?: vscode.Uri) => {
     // Keep Retry attached to the original target even if focus changes while the
@@ -57,6 +80,12 @@ function registerMarkdownCommand(
       ? activeDocument.uri : provider.getCurrentDocumentUri());
     for (;;) {
       try {
+        if (requiresTrust && vscode.workspace.isTrusted === false) {
+          throw new Error('Trust this workspace before changing or copying review data. Preview remains available in Restricted Mode.');
+        }
+        if (retryTarget && retryTarget.scheme !== 'file') {
+          throw new Error('Only saved local Markdown files are supported. Save the document to a local folder first.');
+        }
         const document = await resolveMarkdownDocument(provider, retryTarget);
         if (!document) {
           vscode.window.showWarningMessage(`Open a Markdown document before using ${label}.`);
@@ -116,13 +145,12 @@ async function migrateRenamedMarkdownReviews(
   files: readonly { oldUri: vscode.Uri; newUri: vscode.Uri }[]
 ): Promise<void> {
   for (const file of files) {
-    if (!looksLikeMarkdownUri(file.newUri)) {
+    if (file.oldUri.scheme !== 'file' || file.newUri.scheme !== 'file' || !looksLikeMarkdownUri(file.newUri)) {
       continue;
     }
 
     try {
-      await store.migrateDocument(file.oldUri, file.newUri);
-      await store.deleteDocumentSidecars(file.oldUri, file.newUri);
+      await store.renameDocument(file.oldUri, file.newUri);
     } catch (error) {
       vscode.window.showWarningMessage(`AI Markdown Review could not migrate review state after rename: ${formatError(error)}`);
     }

@@ -1,12 +1,15 @@
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const rootDir = path.resolve(__dirname, '..');
-const mediaDir = path.join(rootDir, 'media');
+const outputArgument = process.argv.indexOf('--output-dir');
+if (outputArgument >= 0 && !process.argv[outputArgument + 1]) throw new Error('--output-dir requires a directory.');
+const mediaDir = outputArgument >= 0 ? path.resolve(process.argv[outputArgument + 1]) : path.join(rootDir, 'media');
 const frameDir = mkdtempSync(path.join(tmpdir(), 'markdown-review-marketplace-'));
 
 mkdirSync(mediaDir, { recursive: true });
@@ -15,6 +18,8 @@ mkdirSync(frameDir, { recursive: true });
 function run(command, args) {
   execFileSync(command, args, { stdio: 'inherit' });
 }
+
+const pngOptions = ['-strip', '-define', 'png:exclude-chunks=date,time'];
 
 function writeMedia(fileName, contents) {
   writeFileSync(path.join(mediaDir, fileName), contents);
@@ -50,11 +55,11 @@ function heroSvg() {
   return `<?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" width="1280" height="720" viewBox="0 0 1280 720" role="img" aria-labelledby="title desc">
   <title id="title">Comment, export, and review revised Markdown</title>
-  <desc id="desc">Illustrated workflow: add a targeted comment, export a compact JSON task file to an external coding agent, then inspect its source changes and short result. This is not a live screenshot.</desc>
+  <desc id="desc">Illustrated workflow: add a targeted comment, export compact JSON to an external coding agent, let the agent save Markdown changes and delete the JSON, then review the source. This is not a live screenshot.</desc>
   <rect width="1280" height="720" fill="#0b1120"/>
   <g font-family="Inter, Arial, sans-serif">
     <text x="64" y="68" fill="#a3e635" font-size="18" font-weight="700" letter-spacing="2">AI MARKDOWN REVIEW LOOP</text>
-    <text x="64" y="132" fill="#f8fafc" font-size="46" font-weight="800">Comment. Export. Review the result.</text>
+    <text x="64" y="132" fill="#f8fafc" font-size="46" font-weight="800">Comment. Export. Review Markdown.</text>
     <text x="64" y="176" fill="#cbd5e1" font-size="23">A small JSON task file for the coding agent you choose.</text>
 
     <rect x="64" y="220" width="352" height="384" rx="18" fill="#172334" stroke="#34475e"/>
@@ -85,17 +90,17 @@ function heroSvg() {
     <text x="472" y="566" fill="#cbd5e1" font-size="17">The agent reads current comments.</text>
 
     <rect x="832" y="220" width="384" height="384" rx="18" fill="#172334" stroke="#34475e"/>
-    <text x="856" y="259" fill="#c4b5fd" font-size="17" font-weight="700">03  AGENT REVIEW</text>
+    <text x="856" y="259" fill="#c4b5fd" font-size="17" font-weight="700">03  EDIT &amp; REVIEW</text>
     <text x="856" y="306" fill="#f8fafc" font-size="28" font-weight="700">Updated Markdown</text>
     <rect x="856" y="331" width="336" height="109" rx="8" fill="#16332a"/>
     <text x="872" y="360" fill="#dcfce7" font-size="18">Retry up to three times.</text>
     <text x="872" y="390" fill="#dcfce7" font-size="18">Then show the failure reason</text>
     <text x="872" y="420" fill="#dcfce7" font-size="18">and a retry action.</text>
-    <text x="856" y="485" fill="#cbd5e1" font-size="15">A short agent result for this round</text>
+    <text x="856" y="485" fill="#cbd5e1" font-size="15">The agent saves Markdown, then deletes JSON.</text>
     <text x="856" y="524" fill="#94a3b8" font-size="16">Comments remain owned by the user.</text>
     <text x="856" y="566" fill="#cbd5e1" font-size="17">Inspect the source, then comment again.</text>
 
-    <text x="64" y="656" fill="#e2e8f0" font-size="21">Comment → JSON → Agent edit → Your review</text>
+    <text x="64" y="656" fill="#e2e8f0" font-size="21">Comment → JSON → Markdown edit → Delete JSON → Your review</text>
     <text x="64" y="691" fill="#8292a8" font-size="14">Illustrated workflow · external file-capable agent required · no built-in model calls</text>
   </g>
 </svg>`;
@@ -105,13 +110,12 @@ function demoFrame(step) {
   const steps = [
     ['Comment on the document', 'Select the content and describe the change you want.', '#a3e635'],
     ['Export the task file', 'One colocated JSON file carries the comments and brief guidance.', '#7dd3fc'],
-    ['The agent reviews comments', 'Save source changes first, record a short result, then delete the JSON.', '#a3e635'],
-    ['Review the revised document', 'Inspect the changes, then edit or add comments for the next round.', '#c4b5fd']
+    ['The agent edits Markdown', 'The agent saves Markdown changes, then deletes the JSON.', '#a3e635'],
+    ['Review the revised document', 'Inspect the source, then keep, edit or delete your own comments.', '#c4b5fd']
   ];
   const [title, subtitle, accent] = steps[step - 1];
   const revised = step >= 3;
-  const result = step >= 3;
-  const taskTitle = step === 1 ? 'Your comment' : 'Task file';
+  const taskTitle = step === 2 ? 'Task file · abbreviated' : 'Your comments';
   return `<?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" width="960" height="540" viewBox="0 0 960 540" role="img" aria-labelledby="title desc">
   <title id="title">${title}</title>
@@ -130,13 +134,13 @@ function demoFrame(step) {
     <text x="64" y="397" fill="#94a3b8" font-size="16">${revised ? 'The source is the work to review.' : 'Select a specific target for your request.'}</text>
 
     <rect x="502" y="125" width="418" height="315" rx="16" fill="#172334" stroke="${accent}"/>
-    <text x="526" y="160" fill="${accent}" font-size="16" font-weight="700">${taskTitle}${step >= 2 ? ' · abbreviated' : ''}</text>
+    <text x="526" y="160" fill="${accent}" font-size="16" font-weight="700">${taskTitle}</text>
     <text x="526" y="204" fill="#f8fafc" font-size="22" font-weight="700">Define the retry behavior</text>
     <text x="526" y="241" fill="#e2e8f0" font-size="18">Specify the retry limit and the</text>
     <text x="526" y="269" fill="#e2e8f0" font-size="18">message after the final failure.</text>
     <text x="526" y="315" fill="#94a3b8" font-size="15">rv_retry · revision 1</text>
-    <text x="526" y="360" fill="#cbd5e1" font-size="15" font-weight="700">${result ? 'Agent result recorded' : 'Current user comment'}</text>
-    <text x="526" y="404" fill="#cbd5e1" font-size="16">${result ? 'Defined three retries and a failure action.' : 'Guidance and target travel with the comment.'}</text>
+    <text x="526" y="360" fill="#cbd5e1" font-size="15" font-weight="700">Current user comment</text>
+    <text x="526" y="404" fill="#cbd5e1" font-size="16">${revised ? 'You decide which comments to keep.' : 'Guidance and target travel with the comment.'}</text>
     <text x="40" y="480" fill="#e2e8f0" font-size="20">${subtitle}</text>
     <text x="40" y="515" fill="#8292a8" font-size="13">Illustrated workflow · use an external agent with workspace file access</text>
   </g>
@@ -153,12 +157,12 @@ for (let step = 1; step <= 4; step += 1) {
   const pngPath = path.join(frameDir, `review-loop-demo-${String(step).padStart(2, '0')}.png`);
   writeFileSync(svgPath, demoFrame(step));
   framePngs.push(pngPath);
-  run('magick', ['-background', 'none', '-density', '144', svgPath, '-resize', '960x540!', pngPath]);
+  run('magick', ['-background', 'none', '-density', '144', svgPath, '-resize', '960x540!', ...pngOptions, pngPath]);
 }
 
-run('magick', ['-background', 'none', '-density', '192', path.join(mediaDir, 'marketplace-icon.svg'), '-resize', '512x512!', path.join(mediaDir, 'marketplace-icon.png')]);
-run('magick', ['-background', '#0b1020', '-density', '144', path.join(mediaDir, 'marketplace-hero.svg'), '-resize', '1280x720!', path.join(mediaDir, 'marketplace-hero.png')]);
-run('magick', ['-background', '#0f172a', '-density', '144', path.join(mediaDir, 'review-loop-demo-poster.svg'), '-resize', '960x540!', path.join(mediaDir, 'review-loop-demo-poster.png')]);
+run('magick', ['-background', 'none', '-density', '192', path.join(mediaDir, 'marketplace-icon.svg'), '-resize', '512x512!', ...pngOptions, path.join(mediaDir, 'marketplace-icon.png')]);
+run('magick', ['-background', '#0b1020', '-density', '144', path.join(mediaDir, 'marketplace-hero.svg'), '-resize', '1280x720!', ...pngOptions, path.join(mediaDir, 'marketplace-hero.png')]);
+run('magick', ['-background', '#0f172a', '-density', '144', path.join(mediaDir, 'review-loop-demo-poster.svg'), '-resize', '960x540!', ...pngOptions, path.join(mediaDir, 'review-loop-demo-poster.png')]);
 
 if (framePngs.every((file) => existsSync(file))) {
   run('magick', ['-delay', '250', '-loop', '0', ...framePngs, path.join(mediaDir, 'review-loop-demo.gif')]);
@@ -175,6 +179,14 @@ if (framePngs.every((file) => existsSync(file))) {
     path.join(frameDir, 'review-loop-demo-*.png'),
     '-vf',
     'fps=24,format=yuv420p,scale=960:540',
+    '-map_metadata',
+    '-1',
+    '-fflags',
+    '+bitexact',
+    '-flags:v',
+    '+bitexact',
+    '-threads',
+    '1',
     '-movflags',
     '+faststart',
     path.join(mediaDir, 'review-loop-demo.mp4')
@@ -182,3 +194,22 @@ if (framePngs.every((file) => existsSync(file))) {
 }
 
 rmSync(frameDir, { recursive: true, force: true });
+
+const generatedFiles = [
+  'marketplace-icon.svg', 'marketplace-icon.png', 'marketplace-hero.svg', 'marketplace-hero.png',
+  'review-loop-demo-poster.svg', 'review-loop-demo-poster.png', 'review-loop-demo.gif', 'review-loop-demo.mp4'
+];
+const hash = bytes => createHash('sha256').update(bytes).digest('hex');
+const manifest = {
+  schemaVersion: 1,
+  generator: { file: 'scripts/render-marketplace-assets.mjs', sha256: hash(readFileSync(fileURLToPath(import.meta.url))) },
+  toolchain: {
+    imageMagick: execFileSync('magick', ['-version'], { encoding: 'utf8' }).split('\n')[0],
+    ffmpeg: execFileSync('ffmpeg', ['-version'], { encoding: 'utf8' }).split('\n')[0]
+  },
+  artifacts: generatedFiles.map(file => {
+    const bytes = readFileSync(path.join(mediaDir, file));
+    return { file, sha256: hash(bytes), bytes: bytes.length };
+  })
+};
+writeMedia('asset-manifest.json', JSON.stringify(manifest, null, 2) + '\n');

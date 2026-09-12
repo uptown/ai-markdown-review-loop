@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" width="960" height="540" viewBox="0 0 960 540" role="img" aria-labelledby="title desc">
   <title id="title">Review the revised document</title>
-  <desc id="desc">Illustrated workflow, step 4 of 4: Inspect the changes, then edit or add comments for the next round.</desc>
+  <desc id="desc">Illustrated workflow, step 4 of 4: Inspect the source, then keep, edit or delete your own comments.</desc>
   <rect width="960" height="540" fill="#0b1120"/>
   <g font-family="Inter, Arial, sans-serif">
     <text x="40" y="44" fill="#c4b5fd" font-size="14" font-weight="700" letter-spacing="1.5">AI MARKDOWN REVIEW LOOP</text>
@@ -16,14 +16,14 @@
     <text x="64" y="397" fill="#94a3b8" font-size="16">The source is the work to review.</text>
 
     <rect x="502" y="125" width="418" height="315" rx="16" fill="#172334" stroke="#c4b5fd"/>
-    <text x="526" y="160" fill="#c4b5fd" font-size="16" font-weight="700">Task file · abbreviated</text>
+    <text x="526" y="160" fill="#c4b5fd" font-size="16" font-weight="700">Your comments</text>
     <text x="526" y="204" fill="#f8fafc" font-size="22" font-weight="700">Define the retry behavior</text>
     <text x="526" y="241" fill="#e2e8f0" font-size="18">Specify the retry limit and the</text>
     <text x="526" y="269" fill="#e2e8f0" font-size="18">message after the final failure.</text>
     <text x="526" y="315" fill="#94a3b8" font-size="15">rv_retry · revision 1</text>
-    <text x="526" y="360" fill="#cbd5e1" font-size="15" font-weight="700">Agent result recorded</text>
-    <text x="526" y="404" fill="#cbd5e1" font-size="16">Defined three retries and a failure action.</text>
-    <text x="40" y="480" fill="#e2e8f0" font-size="20">Inspect the changes, then edit or add comments for the next round.</text>
+    <text x="526" y="360" fill="#cbd5e1" font-size="15" font-weight="700">Current user comment</text>
+    <text x="526" y="404" fill="#cbd5e1" font-size="16">You decide which comments to keep.</text>
+    <text x="40" y="480" fill="#e2e8f0" font-size="20">Inspect the source, then keep, edit or delete your own comments.</text>
     <text x="40" y="515" fill="#8292a8" font-size="13">Illustrated workflow · use an external agent with workspace file access</text>
   </g>
 </svg>

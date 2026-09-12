@@ -1,11 +1,13 @@
 # Using the Review JSON
 
-The review JSON is the only handoff context. It contains the Markdown filename,
-short [agent guidance](./AI-REVIEW-POLICY.md), and the current user comments for
-this pass.
+The JSON carries the current user comments and [agent guidance](./AI-REVIEW-POLICY.md).
+Give a file-capable agent its sidecar path, or use **Copy Review JSON** for
+compact pasted input with a workspace-relative document location.
 
-Give a file-capable agent the sidecar path, or use **Copy Review JSON** when the
-agent needs pasted input. The agent should read the current Markdown, verify
-targets, edit the source, preserve the comments, record a short result, and
-delete the JSON after the round. No bootstrap prompt or in-extension
-conversation is required.
+The agent reads the current Markdown, reviews every comment, preserves
+user-owned fields, saves changes and deletes the JSON. Already-satisfied requests
+need no source change. If the destination or quote is ambiguous, ask the user.
+
+Review the Markdown itself, then edit, delete or add comments for the next pass.
+No extra bootstrap prompt, in-extension conversation or agent-result delivery
+is needed.

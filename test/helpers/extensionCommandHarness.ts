@@ -18,6 +18,7 @@ export async function createExtensionCommandHarness() {
   const warnings: string[] = [];
   const errors: Array<{ message: string; actions: string[] }> = [];
   const choices: Array<{ choice?: string; action?: () => void }> = [];
+  const warningChoices: Array<string | undefined> = [];
   const openFailures = new Map<string, Error[]>();
   const openAttempts: string[] = [];
   const shownDocuments: any[] = [];
@@ -50,17 +51,19 @@ export async function createExtensionCommandHarness() {
     };
   }
   const vscode: any = {
-    Uri, FileSystemError,
+    Uri, FileSystemError, FileType: { File: 1, Directory: 2 },
     env: { clipboard: { writeText: async (text: string) => { if (clipboardFailure) throw new Error("Clipboard unavailable"); clipboard.push(text); } } },
     Disposable: class { constructor(readonly dispose: () => void) {} },
     EventEmitter: class { event = () => disposable; fire() {} dispose() {} },
     ViewColumn: { Active: -1, Beside: -2 },
     workspace: {
+      isTrusted: true,
+      get workspaceFolders() { return workspaceFolders.map((folder, index) => ({ uri: Uri.file(folder), name: path.basename(folder), index })); },
       textDocuments: [],
       getWorkspaceFolder: (uri: Uri) => {
         const folder = workspaceFolders.filter(root => uri.scheme === 'file' && uri.path.startsWith(root + '/'))
           .sort((left, right) => right.length - left.length)[0];
-        return folder ? { uri: Uri.file(folder) } : undefined;
+        return folder ? { uri: Uri.file(folder), name: path.basename(folder) } : undefined;
       },
       asRelativePath: (uri: Uri) => path.relative('/workspace', uri.path),
       onDidRenameFiles: () => disposable,
@@ -79,6 +82,13 @@ export async function createExtensionCommandHarness() {
         return document;
       },
       fs: {
+        stat: async (uri: Uri) => {
+          const bytes = files.get(uri.toString());
+          if (!bytes) throw new FileSystemError();
+          return { type: 1, ctime: 0, mtime: [...files.keys()].indexOf(uri.toString()), size: bytes.byteLength };
+        },
+        readDirectory: async (uri: Uri) => [...files.keys()].filter(file => file.startsWith(uri.toString() + '/'))
+          .map(file => [file.slice(uri.toString().length + 1), 1]),
         createDirectory: async () => {},
         readFile: async (uri: Uri) => { const bytes = files.get(uri.toString()); if (!bytes) { throw new FileSystemError(); } return Uint8Array.from(bytes); },
         writeFile: async (uri: Uri, bytes: Uint8Array) => { files.set(uri.toString(), Uint8Array.from(bytes)); },
@@ -91,7 +101,7 @@ export async function createExtensionCommandHarness() {
       registerCustomEditorProvider: (_viewType: string, value: any) => { provider = value; return disposable; },
       showTextDocument: async (document: any) => { shownDocuments.push(document); vscode.window.activeTextEditor = { document }; },
       showInformationMessage: async (message: string) => { information.push(message); },
-      showWarningMessage: async (message: string) => { warnings.push(message); },
+      showWarningMessage: async (message: string) => { warnings.push(message); return warningChoices.shift(); },
       showErrorMessage: async (message: string, ...actions: string[]) => {
         errors.push({ message, actions });
         const next = choices.shift();
@@ -114,6 +124,8 @@ export async function createExtensionCommandHarness() {
     files, information, warnings, errors, executed, shownDocuments, openAttempts, clipboard, commands,
     failClipboard: () => { clipboardFailure = true; },
     setWorkspaceFolders: (folders: string[]) => { workspaceFolders = folders; },
+    setTrusted: (trusted: boolean) => { vscode.workspace.isTrusted = trusted; },
+    chooseOnWarning: (choice?: string) => { warningChoices.push(choice); },
     get store(): any { return provider.store; },
     addDocument(filePath: string, text = '# Spec\n\nTODO: choose a limit.\n\n## Acceptance Criteria\n\n- Checks pass.', languageId = 'markdown') {
       const document = textDocument(Uri.file(filePath), text, languageId);

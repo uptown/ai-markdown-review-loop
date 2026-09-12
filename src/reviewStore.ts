@@ -3,7 +3,6 @@ import { createHash, randomUUID } from 'crypto';
 import { AsyncLocalStorage } from 'async_hooks';
 import { stat } from 'fs/promises';
 import path from 'path';
-import { createRestoredReviewThread } from './reviewHistory';
 import {
   createEmptyReviewDocument,
   createPortableReviewSidecarPayload,
@@ -23,20 +22,17 @@ import {
   createColocatedReviewSidecarFileName
 } from './reviewSidecarPaths';
 import { isDuplicateReviewThread } from './reviewThreadDedup';
-import { createReviewAnchorIdentityKey } from './reviewAnchorIdentity';
 import { AnchorConfidence, ReviewDocument, ReviewThread } from './types';
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder('utf-8');
+const retainedNamedSnapshots = 4;
+const retainedNamedBytes = 8 * 1024 * 1024;
+const recoveryFilePattern = /^(?:valid-[01]|(?:removed|before-restore|before-start-over|legacy(?:-open|-closed)?|handoff|completed)-[a-f0-9]{24})\.json$/;
 
 interface AddThreadsResult {
   reviewDocument: ReviewDocument;
   addedThreads: ReviewThread[];
-}
-
-interface AddLocalReviewThreadsResult extends AddThreadsResult {
-  existingOpenCount: number;
-  previouslyClosedCount: number;
 }
 
 interface ReviewSidecarLocations {
@@ -63,7 +59,6 @@ export class ReviewStorageConflictError extends Error {
 
 interface DocumentTransaction {
   active: boolean;
-  writableAtEnqueue: boolean;
   internalWrite?: boolean;
   rebaseTaskRevision?: boolean;
   allowTaskRemoval?: boolean;
@@ -77,18 +72,18 @@ interface StoredReviewState {
   knownCanonical?: boolean;
   lastValidPath?: string;
   lastHash?: string;
+  acceptedCopies?: { path: string; hash: string }[];
   pendingWrite?: { hash: string; path: string };
   historyPaths?: string[];
   legacyPaths?: string[];
+  renameCheckpoint?: {
+    destination: string;
+    sourceHash?: string;
+    destinationHash?: string;
+    files: { path: string; hash?: string }[];
+  };
   /** The external agent removed the canonical JSON after processing it. */
   sidecarMissing?: boolean;
-}
-
-export class ReviewHandoffError extends Error {
-  constructor(message = 'Review writes are paused while the agent edits the files. When it finishes, return to Review Changes. Drafts are kept.') {
-    super(message);
-    this.name = 'ReviewHandoffError';
-  }
 }
 
 export class ReviewStore {
@@ -99,74 +94,10 @@ export class ReviewStore {
 
   constructor(private readonly context: vscode.ExtensionContext) {}
 
-  getHandoffPhase(uri: vscode.Uri): StoredReviewState['phase'] { return this.state(uri).phase; }
-  isHandoffActive(uri: vscode.Uri): boolean { return Boolean(this.getHandoffPhase(uri)); }
   getReviewFileState(uri: vscode.Uri): 'active' | 'removed' {
     return this.state(uri).sidecarMissing ? 'removed' : 'active';
   }
   getDocumentEpoch(uri: vscode.Uri): number { return this.epochs.get(uri.toString()) ?? 0; }
-
-  assertWritable(uri: vscode.Uri): void {
-    const phase = this.getHandoffPhase(uri);
-    const tx = this.transactionContext.getStore()?.get(uri.toString());
-    if (phase && !(tx?.active && (tx.internalWrite || (phase === 'preparing' && tx.writableAtEnqueue)))) {
-      throw new ReviewHandoffError();
-    }
-  }
-
-  /** Freeze ingress before draining operations already queued by the editor. */
-  async prepareHandoff(uri: vscode.Uri, saveDocument: () => Promise<boolean>, deliver: (sidecar: vscode.Uri, contents: string) => Promise<void>): Promise<void> {
-    if (this.isHandoffActive(uri)) throw new ReviewHandoffError();
-    this.states.set(uri.toString(), { ...this.state(uri), phase: 'preparing' });
-    try {
-      await this.withDocumentTransaction(uri, async () => {
-        await this.internalWrite(uri, async () => {
-          await this.persistState(uri, { phase: 'preparing' });
-          if (!await saveDocument()) throw new Error('The document save was cancelled, so the handoff was not sent.');
-          const sidecar = await this.getReviewFileUri(uri);
-          this.assertSidecarEditorClean(sidecar);
-          let pair = await this.readReviewDocuments(uri);
-          if (pair.reviewDocument.taskSchemaVersion === 2 || pair.resolvedReviewDocument.taskSchemaVersion === 2) {
-            await this.backupLegacy(uri);
-            pair = migrateLegacyReviewDocuments(pair);
-          }
-          // Archive completed records before removing them from the next agent input.
-          if (pair.resolvedReviewDocument.threads.length) {
-            const archive = createPortableReviewSidecarPayload(uri.toString(), createEmptyReviewDocument(uri.toString()), pair.resolvedReviewDocument, new Date().toISOString());
-            const archivePath = await this.backup(uri, 'completed', encoder.encode(JSON.stringify(archive, null, 2)));
-            await this.persistState(uri, { historyPaths: [...(this.state(uri).historyPaths ?? []), archivePath] });
-            pair.resolvedReviewDocument = { ...createEmptyReviewDocument(uri.toString()), taskSchemaVersion: 3 };
-          }
-          pair.reviewDocument.taskSchemaVersion = 3;
-          pair.resolvedReviewDocument.taskSchemaVersion = 3;
-          if (!pair.reviewDocument.threads.length) throw new Error('There are no pending comments to send. Review the document and add a comment first.');
-          await this.writePortableReviewDocuments(sidecar, uri, pair.reviewDocument, pair.resolvedReviewDocument);
-          const bytes = await readFileIfExists(sidecar);
-          if (!bytes) throw new Error('The review file could not be read for handoff.');
-          const payload = parseReviewTaskSidecar(JSON.parse(decoder.decode(bytes)));
-          const checkpointPath = await this.backup(uri, 'handoff', bytes);
-          await this.persistState(uri, { checkpoint: createReviewTaskCheckpoint(payload), checkpointPath, phase: 'handedOff' });
-          this.advanceEpoch(uri);
-          await deliver(sidecar, decoder.decode(bytes));
-        });
-      });
-    } catch (error) {
-      // A failed save/copy does not leave a hidden permanent editing lock.
-      await this.persistState(uri, { phase: undefined, checkpoint: undefined, checkpointPath: undefined });
-      throw error;
-    }
-  }
-
-  async resumeReview(uri: vscode.Uri): Promise<void> {
-    await this.withDocumentTransaction(uri, async () => {
-      const sidecar = await this.getReviewFileUri(uri);
-      this.assertSidecarEditorClean(sidecar);
-      // Parsing also checks missing/changed immutable requests against the checkpoint.
-      await this.readReviewDocuments(uri);
-      await this.persistState(uri, { phase: undefined, checkpoint: undefined, checkpointPath: undefined });
-      this.advanceEpoch(uri);
-    });
-  }
 
   /**
    * Prepare the canonical JSON for an external agent without creating a
@@ -175,7 +106,7 @@ export class ReviewStore {
    * returned sidecar path directly.
    */
   async exportReviewJson(uri: vscode.Uri, saveDocument: () => Promise<boolean>): Promise<{ sidecar: vscode.Uri; contents: string }> {
-    this.assertWritable(uri);
+
     return this.withDocumentTransaction(uri, async () => {
       if (!await saveDocument()) throw new Error('The document save was cancelled, so the review JSON was not exported.');
       const sidecar = await this.getReviewFileUri(uri);
@@ -198,7 +129,7 @@ export class ReviewStore {
   }
 
   async updateComment(uri: vscode.Uri, id: string, comment: string, expectedRevision?: number): Promise<void> {
-    this.assertWritable(uri);
+
     await this.withDocumentTransaction(uri, async () => {
       const open = await this.load(uri);
       const thread = open.threads.find(item => item.id === id);
@@ -211,7 +142,7 @@ export class ReviewStore {
   }
 
   async removeThread(uri: vscode.Uri, id: string, expectedRevision?: number): Promise<void> {
-    this.assertWritable(uri);
+
     await this.withDocumentTransaction(uri, async () => {
       const pair = await this.readReviewDocuments(uri);
       const thread = [...pair.reviewDocument.threads, ...pair.resolvedReviewDocument.threads].find(item => item.id === id);
@@ -228,52 +159,116 @@ export class ReviewStore {
     });
   }
 
-  async loadArchived(uri: vscode.Uri): Promise<ReviewThread[]> {
-    const records = new Map<string, ReviewThread>();
-    for (const file of this.state(uri).historyPaths ?? []) {
-      const bytes = await readFileIfExists(vscode.Uri.file(file));
-      if (!bytes) continue;
-      const payload = JSON.parse(decoder.decode(bytes));
-      if (payload.schemaVersion === 3) payload.document = path.posix.basename(uri.path);
-      const pair = parsePortableReviewSidecar(uri.toString(), payload);
-      for (const thread of pair.resolvedReviewDocument.threads) records.set(thread.id, thread);
-    }
-    return [...records.values()];
-  }
-
-  getLegacyBackupPaths(uri: vscode.Uri): string[] { return [...(this.state(uri).legacyPaths ?? [])]; }
-
-  async restoreArchivedThread(uri: vscode.Uri, id: string): Promise<void> {
-    this.assertWritable(uri);
-    await this.withDocumentTransaction(uri, async () => {
-      const pair = await this.readReviewDocuments(uri);
-      if ([...pair.reviewDocument.threads, ...pair.resolvedReviewDocument.threads].some(item => item.id === id)) throw new Error('A current comment already uses this ID. Reopen it from the current list.');
-      const thread = (await this.loadArchived(uri)).find(item => item.id === id);
-      if (!thread) throw new Error('The archived comment could not be found.');
-      pair.reviewDocument.threads.push(this.reopenTask(thread));
-      await this.saveBoth(uri, pair.reviewDocument, pair.resolvedReviewDocument);
-    });
-  }
-
   /** Explicit recovery only; never resurrect a missing sidecar during ordinary reads. */
   async restoreReviewBackup(uri: vscode.Uri): Promise<void> {
     await this.withDocumentTransaction(uri, async () => this.internalWrite(uri, async () => {
-      const state = this.state(uri);
-      const backupPath = state.checkpointPath ?? state.lastValidPath;
-      if (!backupPath) throw new Error('There is no review backup to restore.');
-      const bytes = await readFileIfExists(vscode.Uri.file(backupPath));
-      if (!bytes) throw new Error('The review backup could not be read.');
-      parsePortableReviewSidecar(uri.toString(), JSON.parse(decoder.decode(bytes)));
+      await this.migrateStoredState(uri);
+      const bytes = await this.findRecoveryBytes(uri);
+      if (!bytes) throw new Error('No valid review backup is available. Run Start New Review to begin an empty comment list.');
       const sidecar = await this.getReviewFileUri(uri);
       this.assertSidecarEditorClean(sidecar);
       const current = await readFileIfExists(sidecar);
       if (current) await this.backup(uri, 'before-restore', current);
+      await this.preserveUnconfirmedWrite(uri);
       await this.commitCanonicalWrite(uri, sidecar, bytes, async () => {
         if (!bytesEqual(current, await readFileIfExists(sidecar))) throw new ReviewStorageConflictError();
       });
       await this.persistState(uri, { phase: undefined, checkpoint: undefined, checkpointPath: undefined });
       this.advanceEpoch(uri);
     }));
+  }
+
+  /** User-confirmed restart only when no accepted comment copy is recoverable. */
+  async startNewReview(uri: vscode.Uri): Promise<void> {
+    await this.withDocumentTransaction(uri, async () => {
+      await this.migrateStoredState(uri);
+      const sidecar = await this.getReviewFileUri(uri);
+      this.assertSidecarEditorClean(sidecar);
+      const current = await readFileIfExists(sidecar);
+      if (current) {
+        try {
+          parsePortableReviewSidecar(uri.toString(), JSON.parse(decoder.decode(current)));
+          throw new ReviewStorageConflictError();
+        } catch (error) {
+          if (error instanceof ReviewStorageConflictError) {
+            throw new Error('The current JSON contains valid comments. Edit or delete them in the preview instead.');
+          }
+        }
+      }
+      if (await this.findRecoveryBytes(uri)) throw new Error('A valid comment copy is available. Run Restore Review Backup instead.');
+      if (current) await this.backup(uri, 'before-start-over', current);
+      await this.preserveUnconfirmedWrite(uri);
+      const empty = createEmptyReviewDocument(uri.toString());
+      const bytes = encoder.encode(JSON.stringify(createPortableReviewSidecarPayload(uri.toString(), empty, empty, ''), null, 2) + '\n');
+      await this.commitCanonicalWrite(uri, sidecar, bytes, async () => {
+        if (!bytesEqual(current, await readFileIfExists(sidecar))) throw new ReviewStorageConflictError();
+      });
+      this.advanceEpoch(uri);
+    });
+  }
+
+  /** Remove private historical copies while retaining the accepted current comments. */
+  async purgeRecovery(uri: vscode.Uri): Promise<number> {
+    return this.withDocumentTransaction(uri, async () => {
+      await this.migrateStoredState(uri);
+      // Load first: never purge a recovery baseline while an external conflict is unresolved.
+      await this.readReviewDocuments(uri);
+      const removed = await this.pruneRecovery(uri, undefined, true);
+      const state = this.state(uri);
+      await this.persistState(uri, { historyPaths: [], legacyPaths: [],
+        acceptedCopies: state.lastValidPath && state.lastHash ? [{ path: state.lastValidPath, hash: state.lastHash }] : [] });
+      return removed;
+    });
+  }
+
+  private async findRecoveryBytes(uri: vscode.Uri): Promise<Uint8Array | undefined> {
+    const state = this.state(uri);
+    // An alternating slot can contain a prepared write that never committed.
+    // Only explicitly accepted hashes are eligible for recovery.
+    const candidates = [{ path: state.lastValidPath, hash: state.lastHash }, ...(state.acceptedCopies ?? [])];
+    for (const { path: file, hash } of candidates) {
+      if (!file || (file === state.pendingWrite?.path && file !== state.lastValidPath)) continue;
+      const bytes = await readFileIfExists(vscode.Uri.file(file));
+      if (!bytes) continue;
+      if (hash && hashText(decoder.decode(bytes)) !== hash) continue;
+      try { parsePortableReviewSidecar(uri.toString(), JSON.parse(decoder.decode(bytes))); return bytes; } catch { /* Try the other accepted slot. */ }
+    }
+    return undefined;
+  }
+
+  private recoveryDirectory(uri: vscode.Uri): vscode.Uri {
+    return vscode.Uri.joinPath(this.context.storageUri ?? this.context.globalStorageUri, 'review-recovery', hashText(uri.toString()));
+  }
+
+  private async pruneRecovery(uri: vscode.Uri, keep?: string, purge = false): Promise<number> {
+    const directory = this.recoveryDirectory(uri);
+    let entries: [string, vscode.FileType][];
+    try { entries = await vscode.workspace.fs.readDirectory(directory); } catch (error) {
+      if (isFileNotFoundError(error)) return 0;
+      throw error;
+    }
+    const state = this.state(uri);
+    const protectedPaths = new Set([state.lastValidPath, state.pendingWrite?.path, keep].filter(Boolean));
+    const candidates: { file: vscode.Uri; size: number; mtime: number; valid: boolean }[] = [];
+    for (const [name, type] of entries) {
+      if (type !== vscode.FileType.File || !recoveryFilePattern.test(name)) continue;
+      const file = vscode.Uri.joinPath(directory, name);
+      if (protectedPaths.has(file.fsPath)) continue;
+      const stat = await vscode.workspace.fs.stat(file);
+      candidates.push({ file, size: stat.size, mtime: stat.mtime, valid: name.startsWith('valid-') });
+    }
+    candidates.sort((a, b) => b.mtime - a.mtime || a.file.path.localeCompare(b.file.path));
+    const keptNamed = keep && !/valid-[01]\.json$/.test(keep) ? await vscode.workspace.fs.stat(vscode.Uri.file(keep)) : undefined;
+    let count = keptNamed ? 1 : 0, bytes = keptNamed?.size ?? 0, removed = 0;
+    for (const candidate of candidates) {
+      if (!purge && candidate.valid) continue;
+      if (!purge && count < retainedNamedSnapshots && bytes + candidate.size <= retainedNamedBytes) {
+        count++; bytes += candidate.size; continue;
+      }
+      await vscode.workspace.fs.delete(candidate.file);
+      removed++;
+    }
+    return removed;
   }
 
   /** Keep the complete read/modify/write operation inside this callback. Nested calls are reentrant. */
@@ -286,12 +281,11 @@ export class ReviewStore {
     }
 
     const previous = this.queues.get(key) ?? Promise.resolve();
-    const writableAtEnqueue = !this.isHandoffActive(documentUri);
     let release!: () => void;
     const tail = new Promise<void>(resolve => { release = resolve; });
     this.queues.set(key, tail);
     await previous;
-    const transaction: DocumentTransaction = { active: true, writableAtEnqueue, reads: new Map() };
+    const transaction: DocumentTransaction = { active: true, reads: new Map() };
     const context = new Map(inherited);
     context.set(key, transaction);
 
@@ -307,18 +301,18 @@ export class ReviewStore {
   }
 
   async save(documentUri: vscode.Uri, reviewDocument: ReviewDocument): Promise<void> {
-    this.assertWritable(documentUri);
+
     return this.withDocumentTransaction(documentUri, () => this.saveUnlocked(documentUri, reviewDocument));
   }
 
   async saveBoth(documentUri: vscode.Uri, open: ReviewDocument, closed: ReviewDocument): Promise<void> {
-    this.assertWritable(documentUri);
+
     return this.withDocumentTransaction(documentUri, () => this.saveBothUnlocked(documentUri, open, closed));
   }
 
   /** Undo replays request deltas while keeping revisions monotonically increasing. */
   async saveBothForUndo(documentUri: vscode.Uri, open: ReviewDocument, closed: ReviewDocument): Promise<void> {
-    this.assertWritable(documentUri);
+
     await this.withDocumentTransaction(documentUri, async () => {
       const tx = this.transactionContext.getStore()!.get(documentUri.toString())!;
       const previous = tx.rebaseTaskRevision;
@@ -328,91 +322,60 @@ export class ReviewStore {
   }
 
   async addThread(documentUri: vscode.Uri, thread: ReviewThread): Promise<ReviewDocument> {
-    this.assertWritable(documentUri);
+
     return this.withDocumentTransaction(documentUri, () => this.addThreadUnlocked(documentUri, thread));
   }
 
   async addThreads(documentUri: vscode.Uri, threads: ReviewThread[]): Promise<AddThreadsResult> {
-    this.assertWritable(documentUri);
+
     return this.withDocumentTransaction(documentUri, () => this.addThreadsUnlocked(documentUri, threads));
   }
 
-  async addLocalReviewThreads(documentUri: vscode.Uri, threads: ReviewThread[]): Promise<AddLocalReviewThreadsResult> {
-    this.assertWritable(documentUri);
-    return this.withDocumentTransaction(documentUri, async () => {
-      if (threads.some(thread => thread.source !== 'local')) {
-        throw new Error('Local checks can only create local review threads.');
-      }
-      const reviewDocument = await this.load(documentUri);
-      const closedDocument = await this.loadResolved(documentUri);
-      const addedThreads: ReviewThread[] = [];
-      let existingOpenCount = 0;
-      let previouslyClosedCount = 0;
-
-      for (const thread of threads) {
-        const sameFinding = (existing: ReviewThread) => existing.source === 'local'
-          && existing.type === thread.type
-          && existing.comment === thread.comment
-          && createReviewAnchorIdentityKey(existing) === createReviewAnchorIdentityKey(thread);
-        if (reviewDocument.threads.some(sameFinding)) {
-          existingOpenCount++;
-        } else if (closedDocument.threads.some(sameFinding)) {
-          previouslyClosedCount++;
-        } else {
-          reviewDocument.threads.push(thread);
-          addedThreads.push(thread);
-        }
-      }
-      if (addedThreads.length > 0) {
-        await this.save(documentUri, reviewDocument);
-      }
-      return { reviewDocument, addedThreads, existingOpenCount, previouslyClosedCount };
-    });
-  }
-
   async updateThread(documentUri: vscode.Uri, threadId: string, update: Partial<ReviewThread>): Promise<ReviewDocument> {
-    this.assertWritable(documentUri);
+
     return this.withDocumentTransaction(documentUri, () => this.updateThreadUnlocked(documentUri, threadId, update));
   }
 
   async updateThreadAnchors(documentUri: vscode.Uri, updates: AnchorLocationUpdate[]): Promise<boolean> {
-    this.assertWritable(documentUri);
+
     return this.withDocumentTransaction(documentUri, () => this.updateThreadAnchorsUnlocked(documentUri, updates));
-  }
-
-  async addReply(documentUri: vscode.Uri, threadId: string, text: string): Promise<ReviewDocument> {
-    this.assertWritable(documentUri);
-    return this.withDocumentTransaction(documentUri, () => this.addReplyUnlocked(documentUri, threadId, text));
-  }
-
-  async restoreThread(documentUri: vscode.Uri, threadId: string): Promise<ReviewThread> {
-    this.assertWritable(documentUri);
-    return this.withDocumentTransaction(documentUri, () => this.restoreThreadUnlocked(documentUri, threadId));
   }
 
   async migrateDocument(oldDocumentUri: vscode.Uri, newDocumentUri: vscode.Uri): Promise<{
     reviewMoved: boolean;
     resolvedMoved: boolean;
   }> {
-    this.assertWritable(oldDocumentUri);
-    this.assertWritable(newDocumentUri);
+
+
     const ordered = [oldDocumentUri, newDocumentUri].sort((left, right) => left.toString().localeCompare(right.toString()));
     return this.withDocumentTransaction(ordered[0], () => this.withDocumentTransaction(ordered[1],
       () => this.migrateDocumentUnlocked(oldDocumentUri, newDocumentUri)));
   }
 
-  async deleteDocumentSidecars(documentUri: vscode.Uri, preservedDocumentUri?: vscode.Uri): Promise<void> {
-    this.assertWritable(documentUri);
-    return this.withDocumentTransaction(documentUri, () => this.deleteDocumentSidecarsUnlocked(documentUri, preservedDocumentUri));
+  /** Keep both document queues locked until the copied review is finalized. */
+  async renameDocument(oldDocumentUri: vscode.Uri, newDocumentUri: vscode.Uri): Promise<void> {
+    if (oldDocumentUri.toString() === newDocumentUri.toString()) return;
+    const ordered = [oldDocumentUri, newDocumentUri].sort((left, right) => left.toString().localeCompare(right.toString()));
+    await this.withDocumentTransaction(ordered[0], () => this.withDocumentTransaction(ordered[1], async () => {
+      await this.migrateDocumentUnlocked(oldDocumentUri, newDocumentUri);
+      await this.deleteDocumentSidecarsUnlocked(oldDocumentUri, newDocumentUri);
+    }));
   }
 
-  async saveResolved(documentUri: vscode.Uri, reviewDocument: ReviewDocument): Promise<void> {
-    this.assertWritable(documentUri);
-    return this.withDocumentTransaction(documentUri, () => this.saveResolvedUnlocked(documentUri, reviewDocument));
+  async deleteDocumentSidecars(documentUri: vscode.Uri, preservedDocumentUri?: vscode.Uri): Promise<void> {
+    const ordered = [documentUri, ...(preservedDocumentUri ? [preservedDocumentUri] : [])]
+      .sort((left, right) => left.toString().localeCompare(right.toString()));
+    return this.withDocumentTransaction(ordered[0], () => this.withDocumentTransaction(ordered[1] ?? ordered[0],
+      () => this.deleteDocumentSidecarsUnlocked(documentUri, preservedDocumentUri)));
   }
 
   async load(documentUri: vscode.Uri): Promise<ReviewDocument> {
     return this.withDocumentTransaction(documentUri, async () => (await this.readReviewDocuments(documentUri)).reviewDocument);
+  }
+
+  /** Restricted previews may read comments without accepting or persisting state. */
+  async loadReadonly(documentUri: vscode.Uri): Promise<ReviewDocument> {
+    return this.withDocumentTransaction(documentUri, async () => (await this.readReviewDocuments(documentUri, true)).reviewDocument);
   }
 
   private async saveUnlocked(documentUri: vscode.Uri, reviewDocument: ReviewDocument): Promise<void> {
@@ -536,63 +499,8 @@ export class ReviewStore {
     return true;
   }
 
-  private async addReplyUnlocked(
-    documentUri: vscode.Uri,
-    threadId: string,
-    text: string
-  ): Promise<ReviewDocument> {
-    const reviewDocument = await this.load(documentUri);
-    const thread = reviewDocument.threads.find(candidate => candidate.id === threadId);
-
-    if (!thread) {
-      throw new Error(`Review thread not found: ${threadId}`);
-    }
-
-    const now = new Date().toISOString();
-    thread.thread.push({
-      role: 'user',
-      text,
-      createdAt: now
-    });
-    thread.updatedAt = now;
-    await this.save(documentUri, reviewDocument);
-    return reviewDocument;
-  }
-
   async loadResolved(documentUri: vscode.Uri): Promise<ReviewDocument> {
     return this.withDocumentTransaction(documentUri, async () => (await this.readReviewDocuments(documentUri)).resolvedReviewDocument);
-  }
-
-  private async restoreThreadUnlocked(
-    documentUri: vscode.Uri,
-    threadId: string
-  ): Promise<ReviewThread> {
-    const reviewDocument = await this.load(documentUri);
-    const existingOpenThread = reviewDocument.threads.find(candidate => candidate.id === threadId);
-
-    if (existingOpenThread) {
-      if (existingOpenThread.taskStatus === 'blocked' || existingOpenThread.taskResultFor !== undefined) {
-        Object.assign(existingOpenThread, this.reopenTask(existingOpenThread));
-        await this.save(documentUri, reviewDocument);
-      }
-      return existingOpenThread;
-    }
-
-    const resolvedDocument = await this.loadResolved(documentUri);
-    const resolvedIndex = resolvedDocument.threads.findIndex(candidate => candidate.id === threadId);
-
-    if (resolvedIndex < 0) {
-      throw new Error(`Resolved review thread not found: ${threadId}`);
-    }
-
-    const restoredThread = reviewDocument.taskSchemaVersion === 3
-      ? this.reopenTask(resolvedDocument.threads[resolvedIndex])
-      : createRestoredReviewThread(resolvedDocument.threads[resolvedIndex], new Date().toISOString());
-
-    resolvedDocument.threads.splice(resolvedIndex, 1);
-    reviewDocument.threads.push(restoredThread);
-    await this.saveBoth(documentUri, reviewDocument, resolvedDocument);
-    return restoredThread;
   }
 
   async getReviewFileUri(documentUri: vscode.Uri): Promise<vscode.Uri> {
@@ -647,9 +555,15 @@ export class ReviewStore {
     resolvedMoved: boolean;
   }> {
     const newLocations = await this.getSidecarLocations(newDocumentUri);
-    this.assertWritable(oldDocumentUri);
-    this.assertWritable(newDocumentUri);
+
+
       const sourceDocuments = await this.readReviewDocuments(oldDocumentUri);
+      const sourceFiles: { path: string; hash?: string }[] = [];
+      for (const uri of await this.getReviewStateFileUris(oldDocumentUri)) {
+        const bytes = await readFileIfExists(uri);
+        this.observeRead(oldDocumentUri, uri, bytes);
+        sourceFiles.push({ path: uri.fsPath, hash: bytes === undefined ? undefined : hashText(decoder.decode(bytes)) });
+      }
       const sourceUri = await this.getReviewFileUri(oldDocumentUri);
       const aliasesSource = await sameFile(sourceUri, newLocations.reviewUri);
       const targetDocuments = aliasesSource ? {
@@ -676,30 +590,87 @@ export class ReviewStore {
         historyPaths: [...(this.state(newDocumentUri).historyPaths ?? []), ...(previousState.historyPaths ?? [])],
         legacyPaths: [...(this.state(newDocumentUri).legacyPaths ?? []), ...(previousState.legacyPaths ?? [])]
       });
+      if (aliasesSource) {
+        const canonical = sourceFiles.find(file => file.path === sourceUri.fsPath)!;
+        const bytes = await readFileIfExists(sourceUri);
+        const hash = bytes === undefined ? undefined : hashText(decoder.decode(bytes));
+        if (hash !== canonical.hash && hash !== this.state(newDocumentUri).lastHash) throw new ReviewStorageConflictError();
+        canonical.hash = hash;
+      }
+      await this.persistState(oldDocumentUri, { renameCheckpoint: {
+        destination: newDocumentUri.toString(), sourceHash: previousState.lastHash,
+        destinationHash: this.state(newDocumentUri).lastHash, files: sourceFiles
+      } });
       return { reviewMoved, resolvedMoved };
   }
 
   private async deleteDocumentSidecarsUnlocked(documentUri: vscode.Uri, preservedDocumentUri?: vscode.Uri): Promise<void> {
-    this.assertWritable(documentUri);
+    if (documentUri.toString() === preservedDocumentUri?.toString()) return;
+
     const { reviewUri, legacyReviewUri, legacyResolvedUri } = await this.getSidecarLocations(documentUri);
     const preservedUri = preservedDocumentUri ? (await this.getSidecarLocations(preservedDocumentUri)).reviewUri : undefined;
     const samePortableFile = preservedUri ? await sameFile(reviewUri, preservedUri) : false;
+    if (preservedDocumentUri && preservedUri) {
+      const checkpoint = this.state(documentUri).renameCheckpoint;
+      if (!checkpoint || checkpoint.destination !== preservedDocumentUri.toString()
+        || checkpoint.sourceHash !== this.state(documentUri).lastHash) {
+        throw new Error('Review comments changed while rename was completing. Original files and recovery copies were retained.');
+      }
+      for (const file of checkpoint.files) {
+        const bytes = await readFileIfExists(vscode.Uri.file(file.path));
+        if ((bytes === undefined ? undefined : hashText(decoder.decode(bytes))) !== file.hash) {
+          throw new Error('Review comments changed while rename was completing. Original files and recovery copies were retained.');
+        }
+      }
+      const destination = await readFileIfExists(preservedUri);
+      if ((destination === undefined ? undefined : hashText(decoder.decode(destination))) !== checkpoint.destinationHash) {
+        throw new Error('The destination review changed while rename was completing. Original files and recovery copies were retained.');
+      }
+      if (!destination) {
+        if (this.state(documentUri).knownCanonical || await readFileIfExists(reviewUri)) {
+          throw new Error('The renamed review JSON is missing; original recovery copies were retained.');
+        }
+      } else {
+        parsePortableReviewSidecar(preservedDocumentUri.toString(), JSON.parse(decoder.decode(destination)));
+        await this.moveRecoveryAfterRename(documentUri, preservedDocumentUri);
+      }
+    }
     await Promise.all([
       samePortableFile ? Promise.resolve() : restoreFile(reviewUri, undefined),
       restoreFile(legacyReviewUri, undefined),
       restoreFile(legacyResolvedUri, undefined)
     ]);
+    if (preservedDocumentUri) {
+      await this.context.workspaceState?.update('reviewState.' + hashText(documentUri.toString()), undefined);
+      this.states.set(documentUri.toString(), {});
+    }
   }
 
-  private async saveResolvedUnlocked(documentUri: vscode.Uri, reviewDocument: ReviewDocument): Promise<void> {
-    const { reviewUri } = await this.getSidecarLocations(documentUri);
-    const { reviewDocument: openReviewDocument } = await this.readReviewDocuments(documentUri);
-    await this.writePortableReviewDocuments(
-      reviewUri,
-      documentUri,
-      openReviewDocument,
-      reviewDocument
-    );
+  /** A rename keeps one bounded recovery directory, not a trail of private copies. */
+  private async moveRecoveryAfterRename(from: vscode.Uri, to: vscode.Uri): Promise<void> {
+    if (from.toString() === to.toString()) return;
+    const source = this.recoveryDirectory(from);
+    let entries: [string, vscode.FileType][];
+    try { entries = await vscode.workspace.fs.readDirectory(source); } catch (error) {
+      if (isFileNotFoundError(error)) return;
+      throw error;
+    }
+    const files: { name: string; uri: vscode.Uri; mtime: number }[] = [];
+    for (const [name, type] of entries) {
+      if (type !== vscode.FileType.File || !recoveryFilePattern.test(name)) continue;
+      const uri = vscode.Uri.joinPath(source, name);
+      files.push({ name, uri, mtime: (await vscode.workspace.fs.stat(uri)).mtime });
+    }
+    // Copy named recovery records before deleting anything. Current accepted
+    // comments already have a verified baseline at the renamed destination.
+    files.sort((a, b) => a.mtime - b.mtime);
+    for (const file of files) {
+      if (file.name.startsWith('valid-')) continue;
+      const bytes = await readFileIfExists(file.uri);
+      if (bytes) await this.backup(to, file.name.replace(/-[a-f0-9]{24}\.json$/, ''), bytes);
+    }
+    for (const file of files) await vscode.workspace.fs.delete(file.uri);
+    await this.persistState(to, { historyPaths: [], legacyPaths: [] });
   }
 
   private async getSidecarLocations(documentUri: vscode.Uri): Promise<ReviewSidecarLocations> {
@@ -717,54 +688,61 @@ export class ReviewStore {
     };
   }
 
-  private async readReviewDocuments(documentUri: vscode.Uri): Promise<{
+  private async readReviewDocuments(documentUri: vscode.Uri, readOnly = false): Promise<{
     reviewDocument: ReviewDocument;
     resolvedReviewDocument: ReviewDocument;
   }> {
+    if (!readOnly) await this.migrateStoredState(documentUri);
     const { reviewUri, legacyReviewUri, legacyResolvedUri } = await this.getSidecarLocations(documentUri);
     const portableBytes = await readFileIfExists(reviewUri);
     this.observeRead(documentUri, reviewUri, portableBytes);
-    await this.settlePendingWrite(documentUri, portableBytes);
+    if (!readOnly) await this.settlePendingWrite(documentUri, portableBytes);
 
     if (portableBytes !== undefined) {
       try {
         const value = JSON.parse(decoder.decode(portableBytes));
         const pair = parsePortableReviewSidecar(documentUri.toString(), value);
         const state = this.state(documentUri);
-        if (state.checkpoint) {
-          const compared = compareReviewTaskCheckpoint(state.checkpoint, parseReviewTaskSidecar(value));
-          if (!compared.valid) throw new Error('A handed-off request, location, or ID changed or is missing. Inspect the review file or restore the pre-handoff backup.');
-        } else if (state.lastValidPath && state.lastHash !== hashText(decoder.decode(portableBytes)) && value.schemaVersion === 3) {
-          const previous = await readFileIfExists(vscode.Uri.file(state.lastValidPath));
-          if (previous) {
-            const old = JSON.parse(decoder.decode(previous));
-            if (old.schemaVersion === 3) {
-              const compared = compareReviewTaskCheckpoint(createReviewTaskCheckpoint(parseReviewTaskSidecar(old)), value);
-              if (compared.missingIds.length) throw new Error('Review items disappeared from the file. Deletion is not treated as completion. Inspect the review file or restore the backup.');
-            }
+        if ((state.knownCanonical || state.lastValidPath) && state.lastHash !== hashText(decoder.decode(portableBytes))) {
+          const previous = state.lastValidPath ? await readFileIfExists(vscode.Uri.file(state.lastValidPath)) : undefined;
+          if (!previous || !state.lastHash || hashText(decoder.decode(previous)) !== state.lastHash) {
+            throw new Error('The last accepted copy is missing or changed, so this external JSON cannot be verified.');
+          }
+          const old = JSON.parse(decoder.decode(previous));
+          if (old.schemaVersion === 3) {
+            if (value.schemaVersion !== 3) throw new Error('An external edit replaced the current comment format.');
+            const compared = compareReviewTaskCheckpoint(createReviewTaskCheckpoint(parseReviewTaskSidecar(old)), value);
+            if (!compared.valid) throw new Error('An external edit changed user-owned comments, targets, revisions, IDs, or guidance.');
           }
         }
-        await this.rememberValid(documentUri, portableBytes, true);
+        if (!readOnly) await this.rememberValid(documentUri, portableBytes, true);
         return pair;
       } catch (error) {
-        throw new Error(`Review sidecar is invalid: ${formatError(error)} Saved comments were left untouched. Inspect the review file or restore the backup.`);
+        throw new Error(`Review sidecar is invalid: ${formatError(error)} The last accepted comments are preserved. Inspect the JSON or run Restore Review Backup to recover them; the conflicting file will be backed up.`);
       }
     }
 
     const state = this.state(documentUri);
-    if (state.knownCanonical || this.getHandoffPhase(documentUri) === 'handedOff') {
-      const previous = state.lastValidPath ? await readFileIfExists(vscode.Uri.file(state.lastValidPath)) : undefined;
+    if (state.knownCanonical || (readOnly && state.checkpointPath)) {
+      const lastValidPath = state.lastValidPath ?? (readOnly ? state.checkpointPath : undefined);
+      const previous = lastValidPath ? await readFileIfExists(vscode.Uri.file(lastValidPath)) : undefined;
       if (previous) {
         try {
+          if (!state.lastHash || hashText(decoder.decode(previous)) !== state.lastHash) {
+            throw new Error('The last accepted copy is missing or changed. Run Restore Review Backup to check other accepted copies.');
+          }
           const value = JSON.parse(decoder.decode(previous));
           const pair = parsePortableReviewSidecar(documentUri.toString(), value);
-          await this.persistState(documentUri, { sidecarMissing: true });
+          if (!readOnly && !state.sidecarMissing) {
+            await this.persistState(documentUri, { sidecarMissing: true });
+            this.advanceEpoch(documentUri);
+          }
           return pair;
         } catch (error) {
           throw new Error(`The last valid review JSON could not be restored after deletion: ${formatError(error)}`);
         }
       }
-      throw new Error('The review JSON is missing and no valid local copy is available. Add a new comment to recreate it.');
+      throw new Error('The review JSON and its last accepted copy are missing. Run Restore Review Backup to check other copies, or Start New Review when no valid comments can be recovered.');
     }
 
     return {
@@ -807,7 +785,7 @@ export class ReviewStore {
     resolvedReviewDocument: ReviewDocument,
     baseline?: { reviewDocument: ReviewDocument; resolvedReviewDocument: ReviewDocument }
   ): Promise<void> {
-    this.assertWritable(documentUri);
+
     this.assertSidecarEditorClean(uri);
     const current = baseline ?? await this.readReviewDocuments(documentUri);
     this.normalizeTaskWrite(documentUri, current, reviewDocument, resolvedReviewDocument);
@@ -880,7 +858,7 @@ export class ReviewStore {
   }
 
   private async finishCommittedWrite(uri: vscode.Uri, committed: { hash: string; path: string }): Promise<void> {
-    const update = { lastHash: committed.hash, lastValidPath: committed.path, knownCanonical: true, pendingWrite: undefined, sidecarMissing: false };
+    const update = { lastHash: committed.hash, lastValidPath: committed.path, acceptedCopies: this.acceptedCopies(uri, committed), knownCanonical: true, pendingWrite: undefined, sidecarMissing: false };
     try { await this.persistState(uri, update); } catch {
       // Canonical bytes committed successfully. Do not trigger a source rollback: the durable
       // pending record lets a restarted store finish this bookkeeping from the actual bytes.
@@ -888,9 +866,23 @@ export class ReviewStore {
     }
   }
 
+  private acceptedCopies(uri: vscode.Uri, latest: { hash: string; path: string }): { hash: string; path: string }[] {
+    const state = this.state(uri);
+    const previous = state.lastValidPath && state.lastHash ? [{ path: state.lastValidPath, hash: state.lastHash }] : [];
+    return [latest, ...previous, ...(state.acceptedCopies ?? [])]
+      .filter((copy, index, all) => all.findIndex(candidate => candidate.path === copy.path) === index).slice(0, 2);
+  }
+
   private async settlePendingWrite(uri: vscode.Uri, bytes: Uint8Array | undefined): Promise<void> {
     const pending = this.state(uri).pendingWrite;
     if (!pending) return;
+    if (!bytes && this.state(uri).lastHash === pending.hash && this.state(uri).lastValidPath === pending.path) {
+      await this.finishCommittedWrite(uri, pending);
+      return;
+    }
+    if (!bytes) {
+      throw new Error('The review JSON disappeared before its last save could be confirmed. Run Restore Review Backup; the unconfirmed write will also be preserved for inspection.');
+    }
     if (bytes && hashText(decoder.decode(bytes)) === pending.hash) {
       await this.finishCommittedWrite(uri, pending);
     } else {
@@ -898,10 +890,29 @@ export class ReviewStore {
     }
   }
 
+  private async preserveUnconfirmedWrite(uri: vscode.Uri): Promise<void> {
+    const pending = this.state(uri).pendingWrite;
+    if (!pending) return;
+    const bytes = await readFileIfExists(vscode.Uri.file(pending.path));
+    if (bytes && hashText(decoder.decode(bytes)) === pending.hash) await this.backup(uri, 'before-restore', bytes);
+  }
+
   private state(uri: vscode.Uri): StoredReviewState {
     const key = uri.toString();
     if (!this.states.has(key)) this.states.set(key, this.context.workspaceState?.get<StoredReviewState>('reviewState.' + hashText(key)) ?? {});
     return this.states.get(key)!;
+  }
+
+  /** Old releases persisted a UI handoff lock. It has no role in current rounds. */
+  private async migrateStoredState(uri: vscode.Uri): Promise<void> {
+    const state = this.state(uri);
+    if (state.phase !== undefined || state.checkpoint !== undefined || state.checkpointPath !== undefined) {
+      await this.persistState(uri, {
+        lastValidPath: state.lastValidPath ?? state.checkpointPath,
+        knownCanonical: state.knownCanonical || Boolean(state.checkpointPath),
+        phase: undefined, checkpoint: undefined, checkpointPath: undefined
+      });
+    }
   }
 
   private async persistState(uri: vscode.Uri, update: Partial<StoredReviewState>): Promise<void> {
@@ -932,19 +943,17 @@ export class ReviewStore {
     if (expected !== undefined && expected !== (thread.taskRevision ?? 1)) throw new ReviewStorageConflictError();
   }
 
-  private reopenTask(thread: ReviewThread): ReviewThread {
-    return { ...thread, status: 'open', taskStatus: 'pending', taskRevision: (thread.taskRevision ?? 1) + 1,
-      taskResult: undefined, taskResultFor: undefined, closedAt: undefined, closedBy: undefined,
-      thread: [], updatedAt: new Date().toISOString() };
-  }
-
   private async backup(uri: vscode.Uri, kind: string, bytes: Uint8Array): Promise<string> {
-    const directory = vscode.Uri.joinPath(this.context.storageUri ?? this.context.globalStorageUri, 'review-recovery', hashText(uri.toString()));
+    if (kind !== 'valid' && bytes.byteLength > retainedNamedBytes) {
+      throw new Error('This recovery snapshot exceeds the 8 MiB retention limit. Save a separate copy of the review JSON before reducing its size and retrying.');
+    }
+    const directory = this.recoveryDirectory(uri);
     await vscode.workspace.fs.createDirectory(directory);
     const file = vscode.Uri.joinPath(directory, kind === 'valid' ? `valid-${this.state(uri).lastValidPath?.endsWith('valid-0.json') ? '1' : '0'}.json` : `${kind}-${hashText(decoder.decode(bytes))}.json`);
     const previous = await readFileIfExists(file);
     if (!bytesEqual(previous, bytes)) await this.atomicWrite(file, bytes);
     if (!bytesEqual(bytes, await readFileIfExists(file))) throw new Error('The review backup could not be verified after saving.');
+    await this.pruneRecovery(uri, file.fsPath);
     return file.fsPath;
   }
 
@@ -962,12 +971,25 @@ export class ReviewStore {
     const state = this.state(uri);
     const hash = hashText(decoder.decode(bytes));
     if (state.lastHash === hash) {
+      const acceptedUri = state.lastValidPath ? vscode.Uri.file(state.lastValidPath) : undefined;
+      const acceptedBytes = acceptedUri ? await readFileIfExists(acceptedUri) : undefined;
+      if (!acceptedUri || !acceptedBytes || hashText(decoder.decode(acceptedBytes)) !== hash) {
+        // The unchanged canonical bytes are themselves authenticated by lastHash.
+        // Repair the latest slot in place to preserve the previous accepted copy.
+        if (acceptedUri) {
+          await vscode.workspace.fs.createDirectory(this.recoveryDirectory(uri));
+          await this.atomicWrite(acceptedUri, bytes);
+        } else {
+          const lastValidPath = await this.backup(uri, 'valid', bytes);
+          await this.persistState(uri, { lastValidPath, acceptedCopies: this.acceptedCopies(uri, { path: lastValidPath, hash }), knownCanonical: true });
+        }
+      }
       if (state.sidecarMissing) await this.persistState(uri, { sidecarMissing: false });
       return;
     }
     if (externalRead && state.lastHash) this.advanceEpoch(uri);
     const lastValidPath = await this.backup(uri, 'valid', bytes);
-    await this.persistState(uri, { lastValidPath, lastHash: hash, knownCanonical: true });
+    await this.persistState(uri, { lastValidPath, lastHash: hash, acceptedCopies: this.acceptedCopies(uri, { path: lastValidPath, hash }), knownCanonical: true, sidecarMissing: false });
   }
 
   private async atomicWrite(uri: vscode.Uri, bytes: Uint8Array, check?: () => Promise<void>): Promise<void> {

@@ -108,7 +108,7 @@ export class ReviewUndoController {
       reviewDocument: await this.store.load(documentUri),
       resolvedReviewDocument: await this.store.loadResolved(documentUri)
     };
-    if (this.store.isHandoffActive(documentUri) || entry.epoch !== this.store.getDocumentEpoch(documentUri)) {
+    if (entry.epoch !== this.store.getDocumentEpoch(documentUri)) {
       this.reset(documentUri);
       return false;
     }

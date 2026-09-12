@@ -28,12 +28,20 @@ export function createReviewStorageHarness(root = '/workspace', legacy = false) 
   const vscode = {
     Uri: TestUri,
     FileSystemError: TestFileSystemError,
+    FileType: { File: 1, Directory: 2 },
     TextDocumentChangeReason: { Undo: 1, Redo: 2 },
     workspace: {
       textDocuments: [] as Array<{uri: TestUri; isDirty: boolean}>,
       getWorkspaceFolder: () => ({ uri: TestUri.file(root) }),
       asRelativePath: (uri: TestUri) => path.relative(root, uri.path),
       fs: {
+        readDirectory: async (uri: TestUri): Promise<[string, number][]> => [...files.keys()]
+          .filter(file => path.dirname(file) === uri.path).map(file => [path.basename(file), 1]),
+        stat: async (uri: TestUri) => {
+          const bytes = files.get(uri.path);
+          if (!bytes) throw new TestFileSystemError();
+          return { type: 1, ctime: 0, mtime: [...files.keys()].indexOf(uri.path), size: bytes.byteLength };
+        },
         createDirectory: async (_uri: TestUri): Promise<void> => {},
         readFile: async (uri: TestUri): Promise<Uint8Array> => {
           const bytes = files.get(uri.path);
