@@ -50,6 +50,18 @@ function legacyThread(id: string): ReviewThread {
 }
 
 describe('compact review task protocol', () => {
+  it('accepts safe pasted context and removes it from canonical disk exports', () => {
+    const payload = { ...sidecar(), context: { workspaceFolder: 'Project A', path: 'docs/spec.md' } };
+    assert.deepEqual(parseReviewTaskSidecar(payload).context, payload.context);
+    const pair = parsePortableReviewSidecar(uri, payload);
+    assert.equal(createPortableReviewSidecarPayload(uri, pair.reviewDocument, pair.resolvedReviewDocument, now).context, undefined);
+    for (const context of [
+      { workspaceFolder: '../workspace', path: 'docs/spec.md' }, { workspaceFolder: 'Project', path: '../spec.md' },
+      { workspaceFolder: 'Project', path: '/spec.md' }, { workspaceFolder: 'Project', path: 'docs//spec.md' },
+      { workspaceFolder: 'Project', path: 'docs/./spec.md' }, { workspaceFolder: 'Project', path: 'docs/other.md' },
+      { workspaceFolder: 'Project', path: 'C:\\spec.md' }, { workspaceFolder: 'Project', path: 'docs/spec.md', extra: true }
+    ]) assert.throws(() => parseReviewTaskSidecar({ ...sidecar(), context }));
+  });
   it('roundtrips mixed outcomes as one current comment list through engine adapters', () => {
     const payload = sidecar();
     payload.guidance = 'Preserve product constraints. 사용자 지침.';

@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.4.0 - 2026-09-12
+
+- Protects user comments from stale external JSON and safely migrates retired locks and built-in guidance.
+- Uses one comment-to-Markdown iteration contract, removes agent-result display, and adds compact copied JSON with workspace-relative context.
+- Fixes stale and repeated targets, sidebar persistence, missing-target navigation and keyboard focus. Source editing is an explicit mode.
+- Adds confirmed recovery/start-over/private-copy cleanup with bounded retention, deletion-aware Undo and restart safeguards.
+- Extracts typed browser code and styles, coalesces source refreshes and updates comment state without rebuilding the preview.
+- Patches rendering dependencies, inventories the actual Mermaid bundle, aligns watch/build, makes assets deterministic and adds installed-VSIX host validation.
+
 ## 0.3.2 - 2026-09-12
 
 - Removes the last retired `reattach` and status wording from the published

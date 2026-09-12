@@ -11,173 +11,13 @@ async function seed() {
   const sidecar = await h.store.getReviewFileUri(h.uri);
   const read = () => JSON.parse(new TextDecoder().decode(h.files.get(sidecar.path)));
   const write = (value: any) => h.files.set(sidecar.path, encoder.encode(JSON.stringify(value)));
-  const handoff = () => h.store.prepareHandoff(h.uri, async () => true, async () => {});
-  return { ...h, sidecar, read, write, handoff };
+  return { ...h, sidecar, read, write };
 }
 function finish(item: any, status = 'done') {
   Object.assign(item, { status, result: status === 'done' ? 'Updated the source.' : 'Need the desired limit.', resultFor: item.rev });
 }
 
-describe('v3 review task lifecycle and recovery', () => {
-  it('writes compact self-contained JSON for the first comment without dialogue fields', async () => {
-    const h = await seed(); const payload = h.read();
-    assert.equal(payload.schemaVersion, 3); assert.equal(payload.document, 'spec.md');
-    assert.match(payload.guidance, /resultFor/); assert.equal(payload.items.length, 2);
-    assert.equal('status' in payload.items[0], false); assert.equal(payload.items[0].rev, 1);
-    assert.equal('thread' in payload.items[0], false); assert.equal('documentUri' in payload, false);
-  });
-
-  it('exports without a handoff lock and keeps the last valid requests after the agent deletes JSON', async () => {
-    const h = await seed();
-    const exported = await h.store.exportReviewJson(h.uri, async () => true);
-    assert.equal(exported.sidecar.path, h.sidecar.path);
-    assert.match(exported.contents, /\"guidance\"/);
-    h.files.delete(h.sidecar.path);
-    const recovered = await h.store.load(h.uri);
-    assert.deepEqual(recovered.threads.map(thread => thread.id), ['rv_one', 'rv_two']);
-    assert.equal(h.store.getReviewFileState(h.uri), 'removed');
-    await h.store.addThread(h.uri, storageThread('rv_next'));
-    assert.equal(h.store.getReviewFileState(h.uri), 'active');
-    assert.deepEqual(h.read().items.map((item: any) => item.id), ['rv_one', 'rv_two', 'rv_next']);
-  });
-
-  it('freezes ingress synchronously while draining queued writes and saves before delivery', async () => {
-    const h = await seed(); let release!: () => void; let entered!: () => void;
-    const ready = new Promise<void>(resolve => { entered = resolve; });
-    const gate = new Promise<void>(resolve => { release = resolve; });
-    const mutation = h.store.withDocumentTransaction(h.uri, async () => {
-      entered(); await gate; await h.store.updateComment(h.uri, 'rv_one', 'Already queued edit', 1);
-    });
-    await ready; const order: string[] = [];
-    const sending = h.store.prepareHandoff(h.uri, async () => { order.push('save'); return true; }, async (_uri, text) => {
-      order.push('copy'); assert.match(text, /Already queued edit/);
-    });
-    assert.equal(h.store.getHandoffPhase(h.uri), 'preparing');
-    await assert.rejects(h.store.addThread(h.uri, storageThread('rv_late')), /paused/);
-    release(); await Promise.all([mutation, sending]);
-    assert.deepEqual(order, ['save', 'copy']); assert.equal(h.store.getHandoffPhase(h.uri), 'handedOff');
-  });
-
-  it('keeps the pause and immutable request checkpoint across extension reload', async () => {
-    const h = await seed(); await h.handoff();
-    const restarted = h.restartStore(); assert.equal(restarted.isHandoffActive(h.uri), true);
-    await assert.rejects(restarted.updateComment(h.uri, 'rv_one', 'Forbidden'), /paused/);
-    const payload = h.read(); payload.items[0].comment = 'Unexpected replacement'; h.write(payload);
-    await assert.rejects(restarted.resumeReview(h.uri), /request, location, or ID/);
-    assert.equal(restarted.isHandoffActive(h.uri), true);
-  });
-
-  it('keeps mixed agent outcomes on the current comments until the user edits or deletes them', async () => {
-    const h = await seed(); await h.handoff();
-    const payload = h.read(); finish(payload.items[0]); finish(payload.items[1], 'blocked'); h.write(payload);
-    await h.store.resumeReview(h.uri);
-    assert.equal((await h.store.loadResolved(h.uri)).threads.length, 0);
-    assert.deepEqual((await h.store.load(h.uri)).threads.map(t => t.id), ['rv_one', 'rv_two']);
-    assert.equal((await h.store.load(h.uri)).threads[0].taskStatus, 'done');
-    assert.equal((await h.store.load(h.uri)).threads[1].taskStatus, 'blocked');
-    await h.handoff();
-    assert.deepEqual(h.read().items.map((t: any) => t.id), ['rv_one', 'rv_two']);
-    assert.deepEqual((await h.store.loadArchived(h.uri)).map(t => t.id), []);
-  });
-
-  it('increments edited request revisions, resets handling reports, and rejects stale editor edits', async () => {
-    const h = await seed(); const payload = h.read(); finish(payload.items[0], 'blocked'); h.write(payload);
-    await h.store.load(h.uri); await h.store.updateComment(h.uri, 'rv_one', 'Limit is 20.', 1);
-    const edited = h.read().items[0]; assert.equal(edited.rev, 2); assert.equal('status' in edited, false); assert.equal(edited.resultFor, undefined);
-    await assert.rejects(h.store.updateComment(h.uri, 'rv_one', 'Stale request', 1), /changed/);
-  });
-
-  for (const damage of ['missing-file', 'missing-item', 'malformed', 'changed-target'] as const) {
-    it(`preserves the checkpoint and restores explicitly after ${damage}`, async () => {
-      const h = await seed(); await h.handoff(); const original = h.read();
-      if (damage === 'missing-file') h.files.delete(h.sidecar.path);
-      else if (damage === 'malformed') h.files.set(h.sidecar.path, encoder.encode('{broken'));
-      else { const next = h.read(); if (damage === 'missing-item') next.items.pop(); else next.items[0].target.quote = 'Wrong target'; h.write(next); }
-      if (damage === 'missing-file') {
-        await h.store.resumeReview(h.uri);
-        assert.equal(h.store.getReviewFileState(h.uri), 'removed');
-      } else {
-        await assert.rejects(h.store.resumeReview(h.uri)); assert.equal(h.store.isHandoffActive(h.uri), true);
-      }
-      await h.store.restoreReviewBackup(h.uri); assert.deepEqual(h.read(), original); assert.equal(h.store.isHandoffActive(h.uri), false);
-    });
-  }
-
-  it('does not resurrect legacy data after a known canonical file disappears', async () => {
-    const h = await seed(); const legacy = (await h.store.getReviewStateFileUris(h.uri)).find(uri => uri.path.includes('/documents/'))!;
-    h.files.set(legacy.path, encoder.encode(JSON.stringify({ documentUri: h.uri.toString(), updatedAt: '', threads: [storageThread('rv_legacy')] })));
-    h.files.delete(h.sidecar.path);
-    const restored = await h.restartStore().load(h.uri);
-    assert.deepEqual(restored.threads.map(thread => thread.id), ['rv_one', 'rv_two']);
-    assert.equal(h.restartStore().getReviewFileState(h.uri), 'removed');
-  });
-
-  it('rejects destructive direct-file edits even without a protected handoff', async () => {
-    const h = await seed(); const value = h.read(); value.items = []; h.write(value);
-    await assert.rejects(h.store.load(h.uri), /disappeared from the file/);
-    await h.store.restoreReviewBackup(h.uri); assert.equal(h.read().items.length, 2);
-  });
-
-  it('keeps stale result revisions open for reprocessing', async () => {
-    const h = await seed(); await h.store.updateComment(h.uri, 'rv_one', 'Revised', 1); await h.handoff();
-    const value = h.read(); finish(value.items[0]); value.items[0].resultFor = 1; h.write(value);
-    await h.store.resumeReview(h.uri); assert.equal((await h.store.loadResolved(h.uri)).threads.length, 0);
-    assert.equal((await h.store.load(h.uri)).threads[0].taskStatus, 'done');
-  });
-
-  it('unfreezes after cancelled source save or failed clipboard delivery', async () => {
-    const h = await seed();
-    await assert.rejects(h.store.prepareHandoff(h.uri, async () => false, async () => {}), /document save was cancelled/);
-    assert.equal(h.store.isHandoffActive(h.uri), false);
-    await assert.rejects(h.store.prepareHandoff(h.uri, async () => true, async () => { throw new Error('Clipboard failed'); }), /Clipboard/);
-    assert.equal(h.store.isHandoffActive(h.uri), false); assert.equal(h.read().items.length, 2);
-  });
-
-  it('refuses writes and handoff while the JSON editor has unsaved changes', async () => {
-    const h = await seed(); const original = h.read();
-    h.vscode.workspace.textDocuments.push({ uri: h.sidecar as any, isDirty: true });
-    await assert.rejects(h.store.updateComment(h.uri, 'rv_one', 'Conflict'), /unsaved changes/);
-    await assert.rejects(h.handoff(), /unsaved changes/); assert.deepEqual(h.read(), original);
-  });
-
-  it('preserves active data when recovery/archive storage cannot be written', async () => {
-    const h = await seed(); await h.handoff(); const value = h.read(); finish(value.items[0]); h.write(value);
-    await h.store.resumeReview(h.uri); h.failNextWrites();
-    await assert.rejects(h.handoff(), /Injected write failure/); assert.deepEqual(h.read(), value);
-    assert.equal(h.store.isHandoffActive(h.uri), false);
-  });
-
-  it('converts legacy requests only at handoff, retaining verbatim discussion and raw closed history', async () => {
-    const h = createReviewStorageHarness('/workspace', true);
-    await h.store.addThread(h.uri, storageThread('rv_legacy', { thread: [{ role: 'assistant', text: 'Keep exact wording: 雪 <tag>.', createdAt: '2026-09-09' }] }));
-    await h.store.addThread(h.uri, storageThread('rv_closed'));
-    await h.store.updateThread(h.uri, 'rv_closed', { status: 'rejected' });
-    const sidecar = await h.store.getReviewFileUri(h.uri); const before = h.files.get(sidecar.path)!;
-    assert.equal(JSON.parse(new TextDecoder().decode(before)).schemaVersion, 2);
-    await h.store.prepareHandoff(h.uri, async () => true, async () => {});
-    const payload = JSON.parse(new TextDecoder().decode(h.files.get(sidecar.path)));
-    assert.equal(payload.schemaVersion, 3); assert.equal(payload.items.length, 1);
-    assert.match(payload.items[0].comment, /Keep exact wording: 雪 <tag>\./);
-    assert.equal('status' in payload.items[0], false);
-    assert.ok(h.store.getLegacyBackupPaths(h.uri).some(file => assert.deepEqual(h.files.get(file), before) === undefined));
-  });
-
-  it('keeps passive reads byte-identical and bounds automatic valid snapshots', async () => {
-    const h = await seed(); const initial = h.files.get(h.sidecar.path);
-    await h.store.load(h.uri); await h.store.loadResolved(h.uri);
-    assert.deepEqual(h.files.get(h.sidecar.path), initial);
-    for (let i = 0; i < 8; i++) await h.store.updateComment(h.uri, 'rv_one', `Revision ${i}`);
-    assert.equal([...h.files.keys()].filter(key => /valid-[01]\.json$/.test(key)).length, 2);
-  });
-
-  it('prevents old Undo entries from writing over externally handled work', async () => {
-    const h = await seed(); const before = await h.undo.capture(h.uri);
-    await h.store.updateThread(h.uri, 'rv_one', { anchor: { text: 'New target' } }); const after = await h.undo.capture(h.uri);
-    h.undo.register(h.uri, 'old', 'new', before, after); await h.handoff();
-    const value = h.read(); finish(value.items[0]); h.write(value); await h.store.resumeReview(h.uri);
-    assert.equal(await h.undo.handleTextDocumentChange(h.change('old', 'undo')), false); assert.deepEqual(h.read(), value);
-  });
-
+describe('v3 review task transactions and legacy migration', () => {
   it('does not identify prepared but uncommitted bytes as the last valid canonical file', async () => {
     const h = await seed();
     const beforeState = structuredClone([...h.memento.values()][0]) as any;
@@ -335,7 +175,7 @@ describe('v3 review task lifecycle and recovery', () => {
     const h = createReviewStorageHarness('/workspace', true);
     await h.store.addThread(h.uri, storageThread('rv_legacy', { thread: [{ role: 'assistant', text: 'Retain this earlier requirement.', createdAt: '2026-09-09' }] }));
     await h.store.updateComment(h.uri, 'rv_legacy', 'Clarified request.');
-    await h.store.prepareHandoff(h.uri, async () => true, async () => {});
+    await h.store.exportReviewJson(h.uri, async () => true);
     const sidecar = await h.store.getReviewFileUri(h.uri);
     const payload = JSON.parse(new TextDecoder().decode(h.files.get(sidecar.path)));
     assert.match(payload.items[0].comment, /Clarified request/);
@@ -347,10 +187,9 @@ describe('v3 review task lifecycle and recovery', () => {
     const legacy = (await h.store.getReviewStateFileUris(h.uri)).find(uri => uri.path.includes('/resolved/'))!;
     const original = encoder.encode(JSON.stringify({ threads: [storageThread('rv_old_closed', { status: 'accepted' })] }));
     h.files.set(legacy.path, original);
-    await assert.rejects(h.store.prepareHandoff(h.uri, async () => true, async () => {}), /no pending comments/);
-    assert.equal(h.store.isHandoffActive(h.uri), false);
+    await assert.rejects(h.store.exportReviewJson(h.uri, async () => true), /no comments/);
     assert.deepEqual(h.files.get(legacy.path), original);
-    assert.ok(h.store.getLegacyBackupPaths(h.uri).some(file => Buffer.from(h.files.get(file)!).equals(Buffer.from(original))));
+    assert.ok([...h.files.keys()].filter(file => file.includes('/legacy-')).some(file => Buffer.from(h.files.get(file)!).equals(Buffer.from(original))));
   });
 
 });

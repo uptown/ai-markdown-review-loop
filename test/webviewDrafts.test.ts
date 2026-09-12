@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { createProviderHarness, runWebview } from './helpers/providerHarness';
+import { createProviderHarness, runWebviewInEditMode as runWebview } from './helpers/providerHarness';
 
 function change(dom: ReturnType<typeof runWebview>, id: string, value: string) {
   const input = dom.document.getElementById(id);
@@ -241,6 +241,25 @@ describe('draft persistence and save confirmation', () => {
     assert.equal(error.messages.some(value=>value.type==='refreshPreview'),true);
   });
 
+  it('accepts the actual host rawMarkdown response and ignores a malformed conversion payload', async () => {
+    const h = await createProviderHarness('First.');
+    await h.open();
+    const dom = runWebview(h.webview.html);
+    openBlock(dom); change(dom, 'block-editor-surface', 'Converted draft.');
+    dom.dispatch(dom.document.getElementById('block-editor-raw-toggle'), 'click');
+    const request = dom.messages.find(value => value.type === 'convertMarkdownBlockHtml');
+    dom.receive({ type: 'convertedMarkdownBlockHtml', requestId: request.requestId, markdown: 'Wrong field.' });
+    assert.equal(dom.document.getElementById('block-editor-raw').classList.contains('is-visible'), false);
+    assert.equal(dom.document.getElementById('block-editor-raw-toggle').disabled, true);
+    await h.message(request);
+    const response = h.postedMessages.find(value => value.type === 'convertedMarkdownBlockHtml');
+    assert.equal(response.rawMarkdown, 'Converted draft.');
+    dom.receive(response);
+    assert.equal(dom.document.getElementById('block-editor-raw').value, 'Converted draft.');
+    assert.equal(dom.document.getElementById('block-editor-raw').classList.contains('is-visible'), true);
+    assert.equal(dom.document.getElementById('block-editor-raw-toggle').disabled, false);
+  });
+
   it('does not replace newly typed rich text with an older Raw conversion result', async () => {
     const h = await createProviderHarness('First.');
     const dom = runWebview(h.render());
@@ -321,6 +340,7 @@ describe('provider save acknowledgements', () => {
     await h.open();
     const originalHtml = h.webview.html;
     const dom = runWebview(originalHtml);
+    await h.message(dom.messages.find(value => value.type === 'webviewReady'));
     openBlock(dom); change(dom,'block-editor-surface','My retained update.');
     dom.dispatch(dom.document.getElementById('block-editor'),'submit');
     h.store.saveBoth = async () => {h.store.load=async()=>{throw new Error('Sidecar read failed');};throw new Error('Storage failed');};

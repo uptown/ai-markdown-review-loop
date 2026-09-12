@@ -3,6 +3,22 @@ import assert from 'node:assert/strict';
 import { createReviewStorageHarness, storageThread } from './helpers/reviewStorageHarness';
 import type { ReviewReply } from '../src/types';
 
+// Legacy fixture setup: retired reply/restore commands are not production APIs.
+async function appendLegacyReply(store: ReturnType<typeof createReviewStorageHarness>['store'], uri: ReturnType<typeof createReviewStorageHarness>['uri'], id: string, text: string) {
+  const current = await store.load(uri);
+  current.threads.find(thread => thread.id === id)!.thread.push({ role: 'user', text, createdAt: '2026-09-09T00:03:00Z' });
+  await store.save(uri, current);
+}
+
+async function restoreLegacyFixture(store: ReturnType<typeof createReviewStorageHarness>['store'], uri: ReturnType<typeof createReviewStorageHarness>['uri'], id: string) {
+  const open = await store.load(uri), closed = await store.loadResolved(uri);
+  const thread = closed.threads.find(thread => thread.id === id)!;
+  Object.assign(thread, { status: 'open', closedAt: undefined, closedBy: undefined });
+  closed.threads = closed.threads.filter(thread => thread.id !== id);
+  open.threads.push(thread);
+  await store.saveBoth(uri, open, closed);
+}
+
 const editReply: ReviewReply = { role: 'assistant', text: 'Applied the Markdown edit.', createdAt: '2026-09-09T00:01:00Z' };
 
 async function editedDocument(close = false) {
@@ -21,12 +37,12 @@ async function editedDocument(close = false) {
   return harness;
 }
 
-describe('review undo persistence', () => {
+describe('legacy review undo compatibility and current revision persistence', () => {
   it('retains later comments and replies while undoing and redoing only the edit outcome', async () => {
     const { store, undo, uri, change } = await editedDocument();
     await store.addThread(uri, storageThread('rv_later_comment'));
-    await store.addReply(uri, 'rv_original', 'Later discussion on the edited thread.');
-    await store.addReply(uri, 'rv_followup', 'Independent later discussion.');
+    await appendLegacyReply(store, uri, 'rv_original', 'Later discussion on the edited thread.');
+    await appendLegacyReply(store, uri, 'rv_followup', 'Independent later discussion.');
 
     for (let cycle = 0; cycle < 2; cycle++) {
       assert.equal(await undo.handleTextDocumentChange(change('Requirement old', 'undo')), true);
@@ -57,7 +73,7 @@ describe('review undo persistence', () => {
 
   it('preserves a later explicit user decision and its closure metadata', async () => {
     const { store, undo, uri, change } = await editedDocument(true);
-    await store.restoreThread(uri, 'rv_original');
+    await restoreLegacyFixture(store, uri, 'rv_original');
     await store.updateThread(uri, 'rv_original', { status: 'rejected', closedBy: 'user', closedAt: '2026-09-09T00:02:00Z' });
     for (const [text, reason] of [['Requirement old', 'undo'], ['Requirement new', 'redo']] as const) {
       assert.equal(await undo.handleTextDocumentChange(change(text, reason)), true);
@@ -71,7 +87,7 @@ describe('review undo persistence', () => {
 
   it('keeps an explicit Restore decision open through repeated Undo/Redo cycles', async () => {
     const { store, undo, uri, change } = await editedDocument(true);
-    await store.restoreThread(uri, 'rv_original');
+    await restoreLegacyFixture(store, uri, 'rv_original');
     for (let cycle = 0; cycle < 2; cycle++) {
       for (const [text, reason] of [['Requirement old', 'undo'], ['Requirement new', 'redo']] as const) {
         assert.equal(await undo.handleTextDocumentChange(change(text, reason)), true);

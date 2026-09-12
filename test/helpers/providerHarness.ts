@@ -1,9 +1,10 @@
-import { build } from 'esbuild';
+import { build, buildSync } from 'esbuild';
 import Module from 'node:module';
 import path from 'node:path';
 import vm from 'node:vm';
 
 let bundledProvider: Promise<string>;
+const browserBundles = new Map<string, string>();
 
 // Runs the real provider with controlled asynchronous VS Code boundaries.
 // This is an integration seam test, not an Extension Host or browser test.
@@ -53,6 +54,7 @@ export async function createProviderHarness(initialText = 'First.\n\nSecond.\n')
   };
   const vscode: any = {
     Uri, FileSystemError,
+    FileType: { File: 1, Directory: 2 },
     TextDocumentChangeReason: { Undo: 1, Redo: 2 },
     commands: { executeCommand: async (...args: any[]) => { executedCommands.push(args); } },
     env: { clipboard: { writeText: async (value: string) => { copiedTexts.push(value); } } },
@@ -74,6 +76,16 @@ export async function createProviderHarness(initialText = 'First.\n\nSecond.\n')
         return true;
       },
       fs: {
+        readDirectory: async (uri: Uri): Promise<[string, number][]> => {
+          const prefix = uri.toString().replace(/\/$/, '') + '/';
+          return [...files.keys()].filter(key => key.startsWith(prefix) && !key.slice(prefix.length).includes('/'))
+            .map(key => [key.slice(prefix.length), 1]);
+        },
+        stat: async (uri: Uri) => {
+          const bytes = files.get(uri.toString());
+          if (!bytes) throw new FileSystemError();
+          return { type: 1, ctime: 0, mtime: [...files.keys()].indexOf(uri.toString()), size: bytes.byteLength };
+        },
         createDirectory: async () => {},
         readFile: async (uri: Uri) => { const bytes = files.get(uri.toString()); if (!bytes) throw new FileSystemError(); return bytes; },
         writeFile: async (uri: Uri, bytes: Uint8Array) => { files.set(uri.toString(), bytes); },
@@ -107,7 +119,7 @@ export async function createProviderHarness(initialText = 'First.\n\nSecond.\n')
     getReviewFileState: () => 'active',
     assertWritable: () => { if (handoffPhase) throw new Error('writes paused'); },
     withDocumentTransaction: async (_uri: Uri, operation: () => Promise<unknown>) => operation(),
-    load: async () => empty(), loadResolved: async () => empty(),
+    load: async () => empty(), loadReadonly: async () => empty(), loadResolved: async () => empty(),
     saveBoth: async () => { saveCount++; },
     getReviewStateFileUris: async () => [],
     getReviewFileUri: async () => Uri.file('/project/.spec.md.ai-review.json'),
@@ -190,7 +202,15 @@ export function runWebview(html: string, initialState?: any) {
   window.setTimeout = setTimeout;
   window.clearTimeout = clearTimeout;
   const context = vm.createContext(window);
-  const script = [...html.matchAll(/<script[^>]*>([\s\S]*?)<\/script>/g)].map(match => match[1]).join('\n');
+  const script = [...html.matchAll(/<script([^>]*)>([\s\S]*?)<\/script>/g)].map(match => {
+    const entry = match[1].includes('/errorWebview.js') ? 'errorClient' : match[1].includes('/webview.js') ? 'client' : undefined;
+    if (!entry) return match[2];
+    if (!browserBundles.has(entry)) browserBundles.set(entry, buildSync({
+      entryPoints: ['src/webview/' + entry + '.ts'], bundle: true, write: false,
+      platform: 'browser', format: 'esm', target: 'es2022', logLevel: 'silent'
+    }).outputFiles[0].text);
+    return browserBundles.get(entry)!;
+  }).join('\n');
   vm.runInContext(script, context);
   return {
     window, document: window.document, messages,
@@ -206,4 +226,12 @@ export function runWebview(html: string, initialState?: any) {
       element.dispatchEvent(event);
     }
   };
+}
+
+/** Exercise the actual mode toggle; production defaults to reviewing comments. */
+export function runWebviewInEditMode(html: string, initialState?: any) {
+  const dom = runWebview(html, initialState);
+  const toggle = dom.document.querySelector('[data-toggle-edit-document]');
+  if (toggle && toggle.getAttribute('aria-pressed') !== 'true') dom.dispatch(toggle, 'click');
+  return dom;
 }
