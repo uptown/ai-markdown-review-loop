@@ -17,7 +17,9 @@ exports.activate = async function activate(context) {
     assert.ok(root.startsWith(path.resolve(os.tmpdir()) + path.sep) || root.startsWith('/tmp/'));
     assert.equal(fs.readFileSync(path.join(root, '.isolated-smoke'), 'utf8').trim(), 'ai-markdown-review-loop');
     const workspace = path.join(root, 'workspace');
-    assert.equal(fs.realpathSync(vscode.workspace.workspaceFolders[0].uri.fsPath), fs.realpathSync(workspace));
+    // VS Code normalizes Windows drive letters; realpath alone preserves that
+    // casing difference. Keep native path semantics and reject other directories.
+    assert.equal(path.relative(fs.realpathSync(workspace), fs.realpathSync(vscode.workspace.workspaceFolders[0].uri.fsPath)), '', 'The driver must use its isolated workspace.');
     const sourceEvents = [];
     context.subscriptions.push(vscode.workspace.onDidChangeTextDocument(event => {
       if (event.document.uri.scheme !== 'file' || path.basename(event.document.uri.fsPath) !== 'spec.md') return;
